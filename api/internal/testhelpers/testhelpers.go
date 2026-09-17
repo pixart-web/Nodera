@@ -56,9 +56,9 @@ func truncateAll(ctx context.Context, t *testing.T, pool *pgxpool.Pool) {
 	t.Helper()
 	tables := []string{
 		"audit_log", "approvals", "agents",
-		"ai_usage_records",
+		"ai_usage_records", "ai_profiles",
 		"jobs",
-		"nodes",
+		"applications", "nodes",
 		"api_tokens", "service_accounts",
 		"organization_member_roles", "organization_members",
 		"sessions", "user_password_credentials", "users",
@@ -70,6 +70,25 @@ func truncateAll(ctx context.Context, t *testing.T, pool *pgxpool.Pool) {
 		}
 	}
 	reseedSystemRoles(ctx, t, pool)
+	reseedLocalEchoModel(ctx, t, pool)
+}
+
+// reseedLocalEchoModel restores the 'echo-1' test model seeded by migration
+// 0006_ai.sql. Truncating "nodes" with CASCADE also empties "ai_models" (its
+// node_id column has a FK to nodes) even though the seeded echo-1 row has a
+// NULL node_id — same CASCADE-truncates-the-whole-table behavior documented
+// on reseedSystemRoles. The 'local-echo' provider row itself is untouched
+// (nothing truncated references ai_providers), only its model.
+func reseedLocalEchoModel(ctx context.Context, t *testing.T, pool *pgxpool.Pool) {
+	t.Helper()
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO ai_models (provider_id, model_identifier, display_name, capabilities, context_window, status, tags)
+		SELECT id, 'echo-1', 'Echo 1 (deterministic test model)', ARRAY['chat'], 8192, 'available', ARRAY['test']
+		FROM ai_providers WHERE key = 'local-echo'
+		ON CONFLICT (provider_id, model_identifier) DO NOTHING
+	`); err != nil {
+		t.Fatalf("failed to reseed local-echo model: %v", err)
+	}
 }
 
 // reseedSystemRoles restores the system roles and their permission grants

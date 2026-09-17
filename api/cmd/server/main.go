@@ -12,9 +12,13 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/nodera/nodera/internal/ai"
+	"github.com/nodera/nodera/internal/ai/providers/localecho"
+	"github.com/nodera/nodera/internal/applications"
 	"github.com/nodera/nodera/internal/audit"
 	"github.com/nodera/nodera/internal/identity"
 	"github.com/nodera/nodera/internal/infrastructure"
+	"github.com/nodera/nodera/internal/jobs"
 	"github.com/nodera/nodera/internal/platform/config"
 	"github.com/nodera/nodera/internal/platform/db"
 	"github.com/nodera/nodera/internal/platform/logger"
@@ -63,6 +67,17 @@ func run() error {
 	identitySvc := identity.New(pool, rbacSvc, cfg.Auth.SessionTTL)
 	tenancySvc := tenancy.New(pool)
 	infraSvc := infrastructure.New(pool, auditSvc)
+	appsSvc := applications.New(pool, auditSvc)
+	jobsSvc := jobs.New(pool)
+	aiSvc := ai.New(pool, auditSvc, localecho.New())
+
+	worker := jobs.NewWorker(pool)
+	// No handlers are registered yet (docs/ROADMAP.md: "jobs worker" ships
+	// the dispatcher itself in this pass; concrete job types like
+	// backup.create arrive with the domains that need them). An enqueued
+	// job with no matching handler fails visibly rather than hanging.
+	go worker.Run(ctx)
+	log.Info("job worker started")
 
 	deps := apiDeps{
 		log:      log,
@@ -70,6 +85,9 @@ func run() error {
 		tenancy:  tenancySvc,
 		audit:    auditSvc,
 		infra:    infraSvc,
+		apps:     appsSvc,
+		jobs:     jobsSvc,
+		ai:       aiSvc,
 		pool:     pool,
 	}
 

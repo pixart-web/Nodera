@@ -31,13 +31,13 @@ schema/interfaces, no production backend yet) · **PLANNED** (not started).
 | RBAC | IMPLEMENTED | Seeded owner/admin/member roles, granular permission catalog |
 | Audit log | IMPLEMENTED | Append-only, tenant-scoped query |
 | Infrastructure (nodes) | IMPLEMENTED | Provider-agnostic node inventory (register/list/get) |
-| Applications/services | PLANNED | Schema and domain not started |
-| Jobs | FOUNDATION ONLY | Schema exists; no worker/dispatcher yet |
+| Applications/services | IMPLEMENTED | Registration/inventory only — no deployment execution yet |
+| API tokens | IMPLEMENTED | User-owned, scope-limited (cannot exceed creator's own permissions); service-account-issued tokens are PLANNED |
+| Jobs | IMPLEMENTED | Postgres-backed queue + `FOR UPDATE SKIP LOCKED` worker; no job types registered yet beyond what callers enqueue |
+| AI provider/model registry | FOUNDATION ONLY | Real schema + seeded `local-echo` test provider; no production provider adapter |
+| AI profiles/routing/usage | IMPLEMENTED | Deterministic router with enforced privacy-level policy, real usage tracking — backed only by the `local-echo` test provider so far |
 | Secrets | PLANNED | No secret storage abstraction implemented yet |
-| AI provider/model registry | FOUNDATION ONLY | Real schema + seeded `local-echo` test provider; no production provider adapters |
-| AI profiles/routing/usage | FOUNDATION ONLY | Schema only; router not implemented |
 | Agents/Tools/Approvals | FOUNDATION ONLY | Schema + tool catalog registered as `implemented=false`; no execution backend |
-| API tokens / service accounts | FOUNDATION ONLY | Schema exists; no issuance/validation endpoints yet |
 | Dashboard / frontend | PLANNED | `web/` not yet started |
 | Node Agent, AI Gateway, Agent Runtime as separate services | PLANNED | Currently packages inside the one Core API binary (ADR-002) |
 

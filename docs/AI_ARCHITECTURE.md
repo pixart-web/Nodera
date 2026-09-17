@@ -1,8 +1,12 @@
 # AI Architecture
 
-Status: **FOUNDATION ONLY**. Schema (`0006_ai.sql`) and the architectural
-shape below are real; there is no HTTP surface, router implementation, or
-production provider adapter yet. See [ADR-006](DECISIONS.md#adr-006-ai-gateway-agent-runtime-and-tool-gateway-ship-as-interfaces--deterministic-stubs-in-phase-1).
+Status: **IMPLEMENTED**, backed only by the `local-echo` test provider — no
+production provider adapter exists yet (that part stays **FOUNDATION
+ONLY**). The profile registry, deterministic router (including enforced
+privacy-level policy), gateway `/api/v1/ai/*` HTTP surface, and usage
+tracking are real, tested code — see `internal/ai/ai.go` and
+`internal/integration_test.go`'s `TestAIProfileCreateAndChatRoundTrip`. See
+[ADR-006](DECISIONS.md#adr-006-ai-gateway-agent-runtime-and-tool-gateway-ship-as-interfaces--deterministic-stubs-in-phase-1).
 
 ## Why applications never call a vendor SDK directly
 
@@ -42,11 +46,25 @@ caller → AI Profile → routing.Router → providers.Provider adapter → usag
   design (rule 15); if content-level logging is ever needed it will be a
   separate, explicitly-retention-policied table, not bolted onto this one.
 
+## Model references
+
+An `ai_profiles` row lists preferred/fallback models as human-readable
+strings, `"<provider_key>/<model_identifier>"` (e.g. `"local-echo/echo-1"`),
+rather than a model UUID — so a profile can be authored via the API without
+first looking one up. `Service.resolve` (`internal/ai/ai.go`) walks
+preferred then fallback refs, skipping any that don't exist yet, aren't
+`active`/`available`, fail the privacy check, or have no registered Go
+adapter — never fabricating a match (rule 36). If nothing resolves, `Chat`
+returns `UNAVAILABLE`.
+
 ## What's deliberately not built yet
 
-- Real provider adapters (OpenAI, Anthropic, Ollama, vLLM, ...)
-- The `/api/v1/ai/*` HTTP surface
-- The router's actual selection algorithm
+- Real provider adapters (OpenAI, Anthropic, Ollama, vLLM, ...) — the
+  registry, router, and gateway are provider-agnostic and ready for one
+- Cost/latency/quality-aware routing (section 13 explicitly asks for the
+  deterministic router first, which is what exists)
 - Embeddings/RAG (`docs/ARCHITECTURE.md` §7 sketches the shape; no code yet)
+- Prompt/response content logging (deliberately out of scope by default —
+  see the Usage tracking section above)
 
 These are prioritized in `docs/ROADMAP.md`.

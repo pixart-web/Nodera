@@ -2,11 +2,13 @@ package main
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strings"
 
 	"github.com/google/uuid"
 
+	"github.com/nodera/nodera/internal/identity"
 	"github.com/nodera/nodera/internal/platform/apierr"
 	"github.com/nodera/nodera/internal/platform/authctx"
 	"github.com/nodera/nodera/internal/platform/httpserver"
@@ -17,8 +19,12 @@ type ctxKeyUserID struct{}
 type ctxKeyAuthContext struct{}
 
 // requireSession resolves the Authorization: Bearer <token> header to a
-// user ID, without yet requiring an organization — used by routes like
-// "list my organizations" that a user can call before picking one.
+// caller identity. It accepts either a session token (from POST
+// /auth/login) or an API token (from POST /api-tokens) — see
+// docs/API.md. A session token resolves only a user ID here; the
+// organization and permissions are resolved later by requireOrganization
+// once X-Nodera-Org is known. An API token already carries its organization
+// and permission scopes, so it resolves a full AuthContext immediately.
 func (d apiDeps) requireSession(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		token := bearerToken(r)
@@ -27,23 +33,48 @@ func (d apiDeps) requireSession(next http.Handler) http.Handler {
 			return
 		}
 
-		userID, err := d.resolveSessionUserID(r.Context(), token)
+		if userID, err := d.identity.UserIDForSession(r.Context(), token); err == nil {
+			ctx := context.WithValue(r.Context(), ctxKeySessionToken{}, token)
+			ctx = context.WithValue(ctx, ctxKeyUserID{}, userID)
+			next.ServeHTTP(w, r.WithContext(ctx))
+			return
+		} else if !errors.Is(err, identity.ErrSessionInvalid) {
+			httpserver.WriteError(w, r, err)
+			return
+		}
+
+		ac, err := d.identity.AuthContextForAPIToken(r.Context(), token, httpserver.RequestID(r))
 		if err != nil {
 			httpserver.WriteError(w, r, err)
 			return
 		}
 
-		ctx := context.WithValue(r.Context(), ctxKeySessionToken{}, token)
-		ctx = context.WithValue(ctx, ctxKeyUserID{}, userID)
+		ctx := context.WithValue(r.Context(), ctxKeyAuthContext{}, ac)
+		ctx = context.WithValue(ctx, ctxKeyUserID{}, ac.ActorID)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
 
 // requireOrganization additionally resolves the X-Nodera-Org header into a
 // full authctx.AuthContext (with resolved permissions), verifying the caller
-// is actually a member. It must run after requireSession.
+// is actually a member. It must run after requireSession. If requireSession
+// already resolved a full AuthContext (the API token path, which embeds its
+// own organization), this only validates that an explicit X-Nodera-Org
+// header, if present, agrees with it — it does not re-resolve anything.
 func (d apiDeps) requireOrganization(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if ac, ok := r.Context().Value(ctxKeyAuthContext{}).(authctx.AuthContext); ok {
+			if orgHeader := r.Header.Get("X-Nodera-Org"); orgHeader != "" {
+				parsed, err := uuid.Parse(orgHeader)
+				if err != nil || parsed != ac.OrganizationID {
+					httpserver.WriteError(w, r, apierr.Forbidden("X-Nodera-Org does not match this API token's organization"))
+					return
+				}
+			}
+			next.ServeHTTP(w, r)
+			return
+		}
+
 		token, _ := r.Context().Value(ctxKeySessionToken{}).(string)
 		orgHeader := r.Header.Get("X-Nodera-Org")
 		orgID, err := uuid.Parse(orgHeader)
@@ -61,14 +92,6 @@ func (d apiDeps) requireOrganization(next http.Handler) http.Handler {
 		ctx := context.WithValue(r.Context(), ctxKeyAuthContext{}, ac)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
-}
-
-// resolveSessionUserID is a thin wrapper so requireSession doesn't need to
-// know about identity's internal session/token hashing — it goes through
-// AuthContextForSession's underlying lookup indirectly via a zero-org probe
-// is wrong for permissions, so instead identity exposes this directly.
-func (d apiDeps) resolveSessionUserID(ctx context.Context, token string) (uuid.UUID, error) {
-	return d.identity.UserIDForSession(ctx, token)
 }
 
 func bearerToken(r *http.Request) string {

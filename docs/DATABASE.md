@@ -27,6 +27,7 @@ applied automatically, in order, on every process start
 | `0005_jobs.sql` | `jobs` |
 | `0006_ai.sql` | `ai_providers`, `ai_models`, `ai_profiles`, `ai_usage_records` (+ seeded `local-echo` test provider/model) |
 | `0007_agents.sql` | `agents`, `tools`, `approvals` (+ seeded tool catalog, all `implemented=false`) |
+| `0008_applications.sql` | `applications` |
 
 ## Conventions
 
@@ -41,7 +42,10 @@ applied automatically, in order, on every process start
 ## Tests against a real database
 
 `internal/testhelpers.RequirePool(t)` connects to `NODERA_TEST_DATABASE_URL`,
-runs every migration, truncates all domain tables, and re-seeds the system
-roles/permissions that truncating `organizations` (CASCADE) wipes — see the
-comment in `internal/testhelpers/testhelpers.go` for why that reseed step
-exists. If the env var isn't set, integration tests skip rather than fail.
+runs every migration, truncates all domain tables, and re-seeds two things
+`TRUNCATE ... CASCADE` collaterally wipes even though they're seed data, not
+per-test data: the system roles/permissions (truncating `organizations`
+cascades into `roles`) and the `echo-1` test AI model (truncating `nodes`
+cascades into `ai_models`, since `ai_models.node_id` references it) — see
+the comments in `internal/testhelpers/testhelpers.go` for why. If the env
+var isn't set, integration tests skip rather than fail.

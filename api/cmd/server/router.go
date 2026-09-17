@@ -5,14 +5,19 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/nodera/nodera/internal/ai"
+	"github.com/nodera/nodera/internal/ai/providers"
+	"github.com/nodera/nodera/internal/applications"
 	"github.com/nodera/nodera/internal/audit"
 	"github.com/nodera/nodera/internal/identity"
 	"github.com/nodera/nodera/internal/infrastructure"
+	"github.com/nodera/nodera/internal/jobs"
 	"github.com/nodera/nodera/internal/platform/apierr"
 	"github.com/nodera/nodera/internal/platform/httpserver"
 	"github.com/nodera/nodera/internal/tenancy"
@@ -24,6 +29,9 @@ type apiDeps struct {
 	tenancy  *tenancy.Service
 	audit    *audit.Service
 	infra    *infrastructure.Service
+	apps     *applications.Service
+	jobs     *jobs.Service
+	ai       *ai.Service
 	pool     *pgxpool.Pool
 }
 
@@ -56,6 +64,23 @@ func newRouter(d apiDeps) http.Handler {
 				r.Get("/infrastructure/nodes", d.handleListNodes)
 				r.Post("/infrastructure/nodes", d.handleRegisterNode)
 				r.Get("/infrastructure/nodes/{id}", d.handleGetNode)
+
+				r.Get("/applications", d.handleListApplications)
+				r.Post("/applications", d.handleRegisterApplication)
+				r.Get("/applications/{id}", d.handleGetApplication)
+
+				r.Get("/api-tokens", d.handleListAPITokens)
+				r.Post("/api-tokens", d.handleCreateAPIToken)
+				r.Delete("/api-tokens/{id}", d.handleRevokeAPIToken)
+
+				r.Get("/jobs", d.handleListJobs)
+				r.Post("/jobs", d.handleEnqueueJob)
+				r.Get("/jobs/{id}", d.handleGetJob)
+				r.Post("/jobs/{id}/cancel", d.handleCancelJob)
+
+				r.Get("/ai/profiles", d.handleListAIProfiles)
+				r.Post("/ai/profiles", d.handleCreateAIProfile)
+				r.Post("/ai/chat", d.handleAIChat)
 
 				r.Get("/audit", d.handleListAudit)
 			})
@@ -208,6 +233,182 @@ func (d apiDeps) handleGetNode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpserver.WriteJSON(w, http.StatusOK, n)
+}
+
+// --- applications ---
+
+func (d apiDeps) handleListApplications(w http.ResponseWriter, r *http.Request) {
+	apps, err := d.apps.List(r.Context(), mustAuthContext(r))
+	if err != nil {
+		httpserver.WriteError(w, r, err)
+		return
+	}
+	httpserver.WriteJSON(w, http.StatusOK, apps)
+}
+
+func (d apiDeps) handleRegisterApplication(w http.ResponseWriter, r *http.Request) {
+	var body applications.RegisterInput
+	if !decodeJSON(w, r, &body) {
+		return
+	}
+	a, err := d.apps.Register(r.Context(), mustAuthContext(r), body)
+	if err != nil {
+		httpserver.WriteError(w, r, err)
+		return
+	}
+	httpserver.WriteJSON(w, http.StatusCreated, a)
+}
+
+func (d apiDeps) handleGetApplication(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		httpserver.WriteError(w, r, apierr.Validation("invalid application id"))
+		return
+	}
+	a, err := d.apps.Get(r.Context(), mustAuthContext(r), id)
+	if err != nil {
+		httpserver.WriteError(w, r, err)
+		return
+	}
+	httpserver.WriteJSON(w, http.StatusOK, a)
+}
+
+// --- API tokens ---
+
+func (d apiDeps) handleListAPITokens(w http.ResponseWriter, r *http.Request) {
+	tokens, err := d.identity.ListAPITokens(r.Context(), mustAuthContext(r))
+	if err != nil {
+		httpserver.WriteError(w, r, err)
+		return
+	}
+	httpserver.WriteJSON(w, http.StatusOK, tokens)
+}
+
+func (d apiDeps) handleCreateAPIToken(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Name      string     `json:"name"`
+		Scopes    []string   `json:"scopes"`
+		ExpiresAt *time.Time `json:"expires_at"`
+	}
+	if !decodeJSON(w, r, &body) {
+		return
+	}
+	raw, tok, err := d.identity.CreateAPIToken(r.Context(), mustAuthContext(r), body.Name, body.Scopes, body.ExpiresAt)
+	if err != nil {
+		httpserver.WriteError(w, r, err)
+		return
+	}
+	httpserver.WriteJSON(w, http.StatusCreated, map[string]any{
+		// The raw token is returned exactly once — it is never retrievable
+		// again (only its hash is stored). See internal/identity/apitoken.go.
+		"token": raw,
+		"info":  tok,
+	})
+}
+
+func (d apiDeps) handleRevokeAPIToken(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		httpserver.WriteError(w, r, apierr.Validation("invalid token id"))
+		return
+	}
+	if err := d.identity.RevokeAPIToken(r.Context(), mustAuthContext(r), id); err != nil {
+		httpserver.WriteError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// --- jobs ---
+
+func (d apiDeps) handleListJobs(w http.ResponseWriter, r *http.Request) {
+	status := jobs.Status(r.URL.Query().Get("status"))
+	list, err := d.jobs.List(r.Context(), mustAuthContext(r), status)
+	if err != nil {
+		httpserver.WriteError(w, r, err)
+		return
+	}
+	httpserver.WriteJSON(w, http.StatusOK, list)
+}
+
+func (d apiDeps) handleEnqueueJob(w http.ResponseWriter, r *http.Request) {
+	var body jobs.EnqueueInput
+	if !decodeJSON(w, r, &body) {
+		return
+	}
+	j, err := d.jobs.Enqueue(r.Context(), mustAuthContext(r), body)
+	if err != nil {
+		httpserver.WriteError(w, r, err)
+		return
+	}
+	httpserver.WriteJSON(w, http.StatusCreated, j)
+}
+
+func (d apiDeps) handleGetJob(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		httpserver.WriteError(w, r, apierr.Validation("invalid job id"))
+		return
+	}
+	j, err := d.jobs.Get(r.Context(), mustAuthContext(r), id)
+	if err != nil {
+		httpserver.WriteError(w, r, err)
+		return
+	}
+	httpserver.WriteJSON(w, http.StatusOK, j)
+}
+
+func (d apiDeps) handleCancelJob(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		httpserver.WriteError(w, r, apierr.Validation("invalid job id"))
+		return
+	}
+	if err := d.jobs.Cancel(r.Context(), mustAuthContext(r), id); err != nil {
+		httpserver.WriteError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// --- AI gateway ---
+
+func (d apiDeps) handleListAIProfiles(w http.ResponseWriter, r *http.Request) {
+	profiles, err := d.ai.ListProfiles(r.Context(), mustAuthContext(r))
+	if err != nil {
+		httpserver.WriteError(w, r, err)
+		return
+	}
+	httpserver.WriteJSON(w, http.StatusOK, profiles)
+}
+
+func (d apiDeps) handleCreateAIProfile(w http.ResponseWriter, r *http.Request) {
+	var body ai.CreateProfileInput
+	if !decodeJSON(w, r, &body) {
+		return
+	}
+	p, err := d.ai.CreateProfile(r.Context(), mustAuthContext(r), body)
+	if err != nil {
+		httpserver.WriteError(w, r, err)
+		return
+	}
+	httpserver.WriteJSON(w, http.StatusCreated, p)
+}
+
+func (d apiDeps) handleAIChat(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		ProfileKey string              `json:"profile_key"`
+		Messages   []providers.Message `json:"messages"`
+	}
+	if !decodeJSON(w, r, &body) {
+		return
+	}
+	result, err := d.ai.Chat(r.Context(), mustAuthContext(r), body.ProfileKey, body.Messages)
+	if err != nil {
+		httpserver.WriteError(w, r, err)
+		return
+	}
+	httpserver.WriteJSON(w, http.StatusOK, result)
 }
 
 // --- audit ---
