@@ -36,8 +36,11 @@ schema/interfaces, no production backend yet) · **PLANNED** (not started).
 | Jobs | IMPLEMENTED | Postgres-backed queue + `FOR UPDATE SKIP LOCKED` worker; no job types registered yet beyond what callers enqueue |
 | AI provider/model registry | FOUNDATION ONLY | Real schema + seeded `local-echo` test provider; no production provider adapter |
 | AI profiles/routing/usage | IMPLEMENTED | Deterministic router with enforced privacy-level policy, real usage tracking — backed only by the `local-echo` test provider so far |
-| Secrets | PLANNED | No secret storage abstraction implemented yet |
+| Secrets | IMPLEMENTED | AES-256-GCM encrypted at rest; values never exposed over HTTP, only `Reveal`-able in-process; optional at config level |
 | Agents/Tools/Approvals | FOUNDATION ONLY | Schema + tool catalog registered as `implemented=false`; no execution backend |
+| Rate limiting | IMPLEMENTED | In-process, `/auth/login` only (5/5min per IP); other endpoints and a multi-instance-safe (Redis) limiter are PLANNED |
+| Secure headers | IMPLEMENTED | `nosniff`, `DENY`, `no-referrer`, `no-store` on every response |
+| CI | IMPLEMENTED | `gofmt`/`vet`/`build`/`test -race` on every push, via GitHub Actions |
 | Dashboard / frontend | PLANNED | `web/` not yet started |
 | Node Agent, AI Gateway, Agent Runtime as separate services | PLANNED | Currently packages inside the one Core API binary (ADR-002) |
 

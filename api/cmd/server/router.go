@@ -20,25 +20,30 @@ import (
 	"github.com/nodera/nodera/internal/jobs"
 	"github.com/nodera/nodera/internal/platform/apierr"
 	"github.com/nodera/nodera/internal/platform/httpserver"
+	"github.com/nodera/nodera/internal/platform/ratelimit"
+	"github.com/nodera/nodera/internal/secrets"
 	"github.com/nodera/nodera/internal/tenancy"
 )
 
 type apiDeps struct {
-	log      *slog.Logger
-	identity *identity.Service
-	tenancy  *tenancy.Service
-	audit    *audit.Service
-	infra    *infrastructure.Service
-	apps     *applications.Service
-	jobs     *jobs.Service
-	ai       *ai.Service
-	pool     *pgxpool.Pool
+	log       *slog.Logger
+	identity  *identity.Service
+	tenancy   *tenancy.Service
+	audit     *audit.Service
+	infra     *infrastructure.Service
+	apps      *applications.Service
+	jobs      *jobs.Service
+	ai        *ai.Service
+	secrets   *secrets.Service // nil if NODERA_SECRETS_ENCRYPTION_KEY is not configured — see main.go
+	pool      *pgxpool.Pool
+	loginRate *ratelimit.Limiter
 }
 
 func newRouter(d apiDeps) http.Handler {
 	r := chi.NewRouter()
 	r.Use(httpserver.WithRequestID(d.log))
 	r.Use(httpserver.Recover)
+	r.Use(httpserver.SecurityHeaders)
 	r.Use(httpserver.Logging)
 
 	// Unauthenticated platform endpoints (rule 27).
@@ -81,6 +86,10 @@ func newRouter(d apiDeps) http.Handler {
 				r.Get("/ai/profiles", d.handleListAIProfiles)
 				r.Post("/ai/profiles", d.handleCreateAIProfile)
 				r.Post("/ai/chat", d.handleAIChat)
+
+				r.Get("/secrets", d.handleListSecrets)
+				r.Put("/secrets/{key}", d.handleSetSecret)
+				r.Delete("/secrets/{key}", d.handleDeleteSecret)
 
 				r.Get("/audit", d.handleListAudit)
 			})
@@ -133,6 +142,16 @@ func (d apiDeps) handleLogin(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &body) {
 		return
 	}
+
+	// Rate limit by client IP — bounds brute-force attempts against any
+	// single account without needing to know the account up front (an
+	// email-only key would let an attacker exhaust a victim's budget as a
+	// denial-of-service; see docs/SECURITY.md).
+	if d.loginRate != nil && !d.loginRate.Allow(clientIP(r)) {
+		httpserver.WriteError(w, r, apierr.New(apierr.CodeRateLimited, "too many login attempts, try again shortly"))
+		return
+	}
+
 	token, u, err := d.identity.Login(r.Context(), body.Email, body.Password, clientIP(r), r.UserAgent())
 	if err != nil {
 		httpserver.WriteError(w, r, err)
@@ -409,6 +428,68 @@ func (d apiDeps) handleAIChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpserver.WriteJSON(w, http.StatusOK, result)
+}
+
+// --- secrets ---
+//
+// There is deliberately no GET endpoint that returns a secret's plaintext
+// value (rule: never expose full secret values through the frontend) — see
+// internal/secrets/secrets.go's Reveal, which only internal Go code can call.
+
+func (d apiDeps) handleListSecrets(w http.ResponseWriter, r *http.Request) {
+	if !d.secretsConfigured(w, r) {
+		return
+	}
+	list, err := d.secrets.List(r.Context(), mustAuthContext(r))
+	if err != nil {
+		httpserver.WriteError(w, r, err)
+		return
+	}
+	httpserver.WriteJSON(w, http.StatusOK, list)
+}
+
+func (d apiDeps) handleSetSecret(w http.ResponseWriter, r *http.Request) {
+	if !d.secretsConfigured(w, r) {
+		return
+	}
+	var body struct {
+		Value       string `json:"value"`
+		Description string `json:"description"`
+	}
+	if !decodeJSON(w, r, &body) {
+		return
+	}
+	key := chi.URLParam(r, "key")
+	m, err := d.secrets.Set(r.Context(), mustAuthContext(r), key, body.Value, body.Description)
+	if err != nil {
+		httpserver.WriteError(w, r, err)
+		return
+	}
+	httpserver.WriteJSON(w, http.StatusOK, m)
+}
+
+func (d apiDeps) handleDeleteSecret(w http.ResponseWriter, r *http.Request) {
+	if !d.secretsConfigured(w, r) {
+		return
+	}
+	key := chi.URLParam(r, "key")
+	if err := d.secrets.Delete(r.Context(), mustAuthContext(r), key); err != nil {
+		httpserver.WriteError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// secretsConfigured writes a normalized UNAVAILABLE response and returns
+// false when NODERA_SECRETS_ENCRYPTION_KEY was not set at startup — never
+// panics, never silently no-ops (rule 36: report "not configured", don't
+// fabricate success).
+func (d apiDeps) secretsConfigured(w http.ResponseWriter, r *http.Request) bool {
+	if d.secrets != nil {
+		return true
+	}
+	httpserver.WriteError(w, r, apierr.New(apierr.CodeUnavailable, "the secrets module is not configured on this server (NODERA_SECRETS_ENCRYPTION_KEY unset)"))
+	return false
 }
 
 // --- audit ---

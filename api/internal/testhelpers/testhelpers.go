@@ -58,6 +58,7 @@ func truncateAll(ctx context.Context, t *testing.T, pool *pgxpool.Pool) {
 		"audit_log", "approvals", "agents",
 		"ai_usage_records", "ai_profiles",
 		"jobs",
+		"secrets",
 		"applications", "nodes",
 		"api_tokens", "service_accounts",
 		"organization_member_roles", "organization_members",

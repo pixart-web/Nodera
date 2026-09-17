@@ -63,6 +63,21 @@ func Recover(next http.Handler) http.Handler {
 	})
 }
 
+// SecurityHeaders sets response headers appropriate for a JSON API (rule
+// 28). There is no HTML response from this server, so no CSP/XSS-specific
+// header is needed — these guard against MIME-sniffing, clickjacking of any
+// embedded response, and caching of what may be sensitive JSON.
+func SecurityHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h := w.Header()
+		h.Set("X-Content-Type-Options", "nosniff")
+		h.Set("X-Frame-Options", "DENY")
+		h.Set("Referrer-Policy", "no-referrer")
+		h.Set("Cache-Control", "no-store")
+		next.ServeHTTP(w, r)
+	})
+}
+
 // Logging is middleware that logs one structured line per request.
 func Logging(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

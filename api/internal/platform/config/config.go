@@ -11,11 +11,12 @@ import (
 )
 
 type Config struct {
-	Env   string // "development" | "test" | "production"
-	HTTP  HTTPConfig
-	DB    DBConfig
-	Redis RedisConfig
-	Auth  AuthConfig
+	Env     string // "development" | "test" | "production"
+	HTTP    HTTPConfig
+	DB      DBConfig
+	Redis   RedisConfig
+	Auth    AuthConfig
+	Secrets SecretsConfig
 }
 
 type HTTPConfig struct {
@@ -37,6 +38,13 @@ type AuthConfig struct {
 	// session tokens (see ADR-005). 32 bytes = 256 bits.
 	SessionTokenBytes int
 	SessionTTL        time.Duration
+}
+
+type SecretsConfig struct {
+	// EncryptionKeyBase64 is the base64-encoded AES-256 key used by
+	// internal/secrets. Empty means the secrets module is disabled — see
+	// docs/SECURITY.md and cmd/server/main.go.
+	EncryptionKeyBase64 string
 }
 
 // Load reads configuration from the environment. It returns an error rather
@@ -71,6 +79,9 @@ func Load() (Config, error) {
 		Auth: AuthConfig{
 			SessionTokenBytes: 32,
 			SessionTTL:        30 * 24 * time.Hour,
+		},
+		Secrets: SecretsConfig{
+			EncryptionKeyBase64: os.Getenv("NODERA_SECRETS_ENCRYPTION_KEY"),
 		},
 	}
 

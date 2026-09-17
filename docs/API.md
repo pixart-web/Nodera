@@ -66,6 +66,9 @@ Two bearer token types are accepted on `Authorization: Bearer <token>`, and
 | GET | `/api/v1/ai/profiles` | session or token + org | List AI profiles (`ai.use`) |
 | POST | `/api/v1/ai/profiles` | session or token + org | Create an AI profile (`ai.manage`) |
 | POST | `/api/v1/ai/chat` | session or token + org | Call the AI gateway with a profile key + messages (`ai.use`) |
+| GET | `/api/v1/secrets` | session or token + org | List secret metadata only — never values (`secrets.read`) |
+| PUT | `/api/v1/secrets/{key}` | session or token + org | Create or rotate a secret (`secrets.manage`) — `503 UNAVAILABLE` if the server has no `NODERA_SECRETS_ENCRYPTION_KEY` configured |
+| DELETE | `/api/v1/secrets/{key}` | session or token + org | Delete a secret (`secrets.manage`) |
 | GET | `/api/v1/audit` | session or token + org | Query the audit log (`audit.read`) |
 
 `applications.deploy` is used for registering an application record because
@@ -74,9 +77,15 @@ see `internal/applications/applications.go`. Likewise API token creation
 uses `organization.manage` rather than a dedicated `tokens.manage` key — see
 `internal/identity/apitoken.go`.
 
+There is deliberately no endpoint that returns a secret's plaintext value —
+see `docs/SECURITY.md` Secrets.
+
+`POST /auth/login` is rate limited (5 attempts / 5 minutes per client IP);
+exceeding it returns `429` with code `RATE_LIMITED`.
+
 Everything else described in `docs/ARCHITECTURE.md` (agents, approvals,
-secrets, real AI provider adapters) is schema/interfaces only — no HTTP
-surface exists for them yet (PLANNED, tracked in `docs/ROADMAP.md`).
+real AI provider adapters) is schema/interfaces only — no HTTP surface
+exists for them yet (PLANNED, tracked in `docs/ROADMAP.md`).
 
 ## Not yet implemented
 
@@ -84,5 +93,5 @@ surface exists for them yet (PLANNED, tracked in `docs/ROADMAP.md`).
 - Pagination on list endpoints (today `GET /infrastructure/nodes` and
   `GET /audit` return unpaginated/simple-limit results — fine at current
   scale, will need `limit`/`cursor` params before this matters in production)
-- Rate limiting
+- Rate limiting on endpoints other than `POST /auth/login`
 - Service-account-issued API tokens (user-owned tokens work today; see `docs/API.md` Authenticating)

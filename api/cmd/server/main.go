@@ -22,7 +22,9 @@ import (
 	"github.com/nodera/nodera/internal/platform/config"
 	"github.com/nodera/nodera/internal/platform/db"
 	"github.com/nodera/nodera/internal/platform/logger"
+	"github.com/nodera/nodera/internal/platform/ratelimit"
 	"github.com/nodera/nodera/internal/rbac"
+	"github.com/nodera/nodera/internal/secrets"
 	"github.com/nodera/nodera/internal/tenancy"
 	"github.com/nodera/nodera/migrations"
 )
@@ -71,6 +73,19 @@ func run() error {
 	jobsSvc := jobs.New(pool)
 	aiSvc := ai.New(pool, auditSvc, localecho.New())
 
+	// The secrets module is optional at the config level (rule 36: report
+	// "not configured" rather than fabricate or crash) — a fresh local
+	// clone can run the whole rest of the API with no encryption key set.
+	var secretsSvc *secrets.Service
+	if cfg.Secrets.EncryptionKeyBase64 == "" {
+		log.Warn("secrets module disabled: NODERA_SECRETS_ENCRYPTION_KEY is not set")
+	} else {
+		secretsSvc, err = secrets.New(pool, auditSvc, cfg.Secrets.EncryptionKeyBase64)
+		if err != nil {
+			return err
+		}
+	}
+
 	worker := jobs.NewWorker(pool)
 	// No handlers are registered yet (docs/ROADMAP.md: "jobs worker" ships
 	// the dispatcher itself in this pass; concrete job types like
@@ -80,15 +95,17 @@ func run() error {
 	log.Info("job worker started")
 
 	deps := apiDeps{
-		log:      log,
-		identity: identitySvc,
-		tenancy:  tenancySvc,
-		audit:    auditSvc,
-		infra:    infraSvc,
-		apps:     appsSvc,
-		jobs:     jobsSvc,
-		ai:       aiSvc,
-		pool:     pool,
+		log:       log,
+		identity:  identitySvc,
+		tenancy:   tenancySvc,
+		audit:     auditSvc,
+		infra:     infraSvc,
+		apps:      appsSvc,
+		jobs:      jobsSvc,
+		ai:        aiSvc,
+		secrets:   secretsSvc,
+		pool:      pool,
+		loginRate: ratelimit.New(5, 5*time.Minute),
 	}
 
 	handler := newRouter(deps)

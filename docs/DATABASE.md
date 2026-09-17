@@ -28,6 +28,7 @@ applied automatically, in order, on every process start
 | `0006_ai.sql` | `ai_providers`, `ai_models`, `ai_profiles`, `ai_usage_records` (+ seeded `local-echo` test provider/model) |
 | `0007_agents.sql` | `agents`, `tools`, `approvals` (+ seeded tool catalog, all `implemented=false`) |
 | `0008_applications.sql` | `applications` |
+| `0009_secrets.sql` | `secrets` |
 
 ## Conventions
 
