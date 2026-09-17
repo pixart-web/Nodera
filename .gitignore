@@ -1,0 +1,26 @@
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# Go
+api/nodera-server
+api/*.test
+api/coverage.out
+
+# Node / frontend
+web/node_modules/
+web/.next/
+web/out/
+web/*.tsbuildinfo
+npm-debug.log*
+
+# OS
+.DS_Store
+
+# Editors
+.vscode/
+.idea/
+
+# Logs
+*.log

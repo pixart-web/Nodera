@@ -1,0 +1,32 @@
+# Local development infrastructure only. Production deployment configuration
+# is intentionally separate — see docs/DEPLOYMENT.md (rule 29: dev compose
+# != production compose).
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: nodera
+      POSTGRES_PASSWORD: nodera_dev_password
+      POSTGRES_DB: nodera
+    ports:
+      - "5432:5432"
+    volumes:
+      - nodera_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nodera"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  nodera_postgres_data:
