@@ -32,7 +32,8 @@ schema/interfaces, no production backend yet) · **PLANNED** (not started).
 | Audit log | IMPLEMENTED | Append-only, tenant-scoped query |
 | Infrastructure (nodes) | IMPLEMENTED | Provider-agnostic node inventory (register/list/get) |
 | Applications/services | IMPLEMENTED | Registration/inventory only — no deployment execution yet |
-| API tokens | IMPLEMENTED | User-owned, scope-limited (cannot exceed creator's own permissions); service-account-issued tokens are PLANNED |
+| API tokens | IMPLEMENTED | User-owned or service-account-owned, scope-limited (cannot exceed creator's own permissions); org-admin can list/revoke any token in the org |
+| Service accounts | IMPLEMENTED | Create/list/disable, gated by `organization.manage`; hold their own scoped API tokens |
 | Jobs | IMPLEMENTED | Postgres-backed queue + `FOR UPDATE SKIP LOCKED` worker; no job types registered yet beyond what callers enqueue |
 | AI provider/model registry | IMPLEMENTED | Platform-wide (not org-scoped by design), managed via API (`ai.manage`); seeded `local-echo` test provider + auto-registered `ollama` when configured |
 | AI profiles/routing/usage | IMPLEMENTED | Deterministic router with enforced privacy-level policy, real usage tracking; a registry row with no registered Go adapter correctly fails closed rather than fabricating a response |

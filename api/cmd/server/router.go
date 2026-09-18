@@ -82,6 +82,13 @@ func newRouter(d apiDeps) http.Handler {
 				r.Get("/api-tokens", d.handleListAPITokens)
 				r.Post("/api-tokens", d.handleCreateAPIToken)
 				r.Delete("/api-tokens/{id}", d.handleRevokeAPIToken)
+				r.Get("/organization/api-tokens", d.handleAdminListAPITokens)
+				r.Delete("/organization/api-tokens/{id}", d.handleAdminRevokeAPIToken)
+
+				r.Get("/service-accounts", d.handleListServiceAccounts)
+				r.Post("/service-accounts", d.handleCreateServiceAccount)
+				r.Delete("/service-accounts/{id}", d.handleDisableServiceAccount)
+				r.Post("/service-accounts/{id}/api-tokens", d.handleCreateServiceAccountAPIToken)
 
 				r.Get("/jobs", d.handleListJobs)
 				r.Post("/jobs", d.handleEnqueueJob)
@@ -358,6 +365,97 @@ func (d apiDeps) handleRevokeAPIToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleAdminListAPITokens and handleAdminRevokeAPIToken are the
+// organization.manage-scoped counterparts to the two handlers above — they
+// operate on every token in the org, not just the caller's own.
+
+func (d apiDeps) handleAdminListAPITokens(w http.ResponseWriter, r *http.Request) {
+	tokens, err := d.identity.AdminListAPITokens(r.Context(), mustAuthContext(r))
+	if err != nil {
+		httpserver.WriteError(w, r, err)
+		return
+	}
+	httpserver.WriteJSON(w, http.StatusOK, tokens)
+}
+
+func (d apiDeps) handleAdminRevokeAPIToken(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		httpserver.WriteError(w, r, apierr.Validation("invalid token id"))
+		return
+	}
+	if err := d.identity.AdminRevokeAPIToken(r.Context(), mustAuthContext(r), id); err != nil {
+		httpserver.WriteError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// --- service accounts ---
+
+func (d apiDeps) handleListServiceAccounts(w http.ResponseWriter, r *http.Request) {
+	list, err := d.identity.ListServiceAccounts(r.Context(), mustAuthContext(r))
+	if err != nil {
+		httpserver.WriteError(w, r, err)
+		return
+	}
+	httpserver.WriteJSON(w, http.StatusOK, list)
+}
+
+func (d apiDeps) handleCreateServiceAccount(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Name        string `json:"name"`
+		Description string `json:"description"`
+	}
+	if !decodeJSON(w, r, &body) {
+		return
+	}
+	sa, err := d.identity.CreateServiceAccount(r.Context(), mustAuthContext(r), body.Name, body.Description)
+	if err != nil {
+		httpserver.WriteError(w, r, err)
+		return
+	}
+	httpserver.WriteJSON(w, http.StatusCreated, sa)
+}
+
+func (d apiDeps) handleDisableServiceAccount(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		httpserver.WriteError(w, r, apierr.Validation("invalid service account id"))
+		return
+	}
+	if err := d.identity.DisableServiceAccount(r.Context(), mustAuthContext(r), id); err != nil {
+		httpserver.WriteError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (d apiDeps) handleCreateServiceAccountAPIToken(w http.ResponseWriter, r *http.Request) {
+	serviceAccountID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		httpserver.WriteError(w, r, apierr.Validation("invalid service account id"))
+		return
+	}
+	var body struct {
+		Name      string     `json:"name"`
+		Scopes    []string   `json:"scopes"`
+		ExpiresAt *time.Time `json:"expires_at"`
+	}
+	if !decodeJSON(w, r, &body) {
+		return
+	}
+	raw, tok, err := d.identity.CreateAPITokenForServiceAccount(r.Context(), mustAuthContext(r), serviceAccountID, body.Name, body.Scopes, body.ExpiresAt)
+	if err != nil {
+		httpserver.WriteError(w, r, err)
+		return
+	}
+	httpserver.WriteJSON(w, http.StatusCreated, map[string]any{
+		"token": raw,
+		"info":  tok,
+	})
 }
 
 // --- jobs ---

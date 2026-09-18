@@ -63,8 +63,14 @@ Two bearer token types are accepted on `Authorization: Bearer <token>`, and
 | POST | `/api/v1/applications` | session or token + org | Register an application (`applications.deploy` — see docs/API.md note below) |
 | GET | `/api/v1/applications/{id}` | session or token + org | Get an application |
 | GET | `/api/v1/api-tokens` | session or token + org | List the caller's own API tokens |
-| POST | `/api/v1/api-tokens` | session or token + org | Create an API token (`organization.manage`); returns the raw token once |
+| POST | `/api/v1/api-tokens` | session or token + org | Create an API token owned by the caller (`organization.manage`); returns the raw token once |
 | DELETE | `/api/v1/api-tokens/{id}` | session or token + org | Revoke one of the caller's own tokens |
+| GET | `/api/v1/organization/api-tokens` | session or token + org | List every non-revoked token in the org, any owner (`organization.manage`) |
+| DELETE | `/api/v1/organization/api-tokens/{id}` | session or token + org | Revoke any token in the org, regardless of owner (`organization.manage`) |
+| GET | `/api/v1/service-accounts` | session or token + org | List service accounts (`organization.manage`) |
+| POST | `/api/v1/service-accounts` | session or token + org | Create a service account (`organization.manage`) |
+| DELETE | `/api/v1/service-accounts/{id}` | session or token + org | Disable a service account (`organization.manage`) — does not delete it or its history |
+| POST | `/api/v1/service-accounts/{id}/api-tokens` | session or token + org | Mint a token owned by the service account (`organization.manage`); returns the raw token once |
 | GET | `/api/v1/jobs` | session or token + org | List jobs, optional `?status=` filter (`jobs.read`) |
 | POST | `/api/v1/jobs` | session or token + org | Enqueue a job (`jobs.manage`) |
 | GET | `/api/v1/jobs/{id}` | session or token + org | Get a job |
@@ -116,4 +122,3 @@ surface exists for them yet (PLANNED, tracked in `docs/ROADMAP.md`).
   `GET /audit` return unpaginated/simple-limit results — fine at current
   scale, will need `limit`/`cursor` params before this matters in production)
 - Rate limiting on endpoints other than `POST /auth/login` and `POST /auth/signup`
-- Service-account-issued API tokens (user-owned tokens work today; see `docs/API.md` Authenticating)
