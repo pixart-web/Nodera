@@ -119,6 +119,13 @@ tracked in `docs/ROADMAP.md` if that stops being true.
 | GET | `/api/v1/approvals` | session or token + org | List approvals, optional `?status=` filter (`approvals.decide`) |
 | POST | `/api/v1/approvals/{id}/decide` | session or token + org | Approve or reject a pending approval (`approvals.decide`) — approving attempts execution immediately |
 | GET | `/api/v1/audit` | session or token + org | Query the audit log, paginated, optional `?resource_type=`/`?action=` filters (`audit.read`) |
+| GET | `/api/v1/agents` | session or token + org | List agent definitions (`agents.execute`) |
+| POST | `/api/v1/agents` | session or token + org | Create an agent definition (`agents.manage`) — `permission_scope` must be a subset of the caller's own permissions |
+| GET | `/api/v1/agents/{id}` | session or token + org | Get an agent definition (`agents.execute`) |
+| POST | `/api/v1/agents/{id}/enable` | session or token + org | Enable an agent (`agents.manage`) |
+| POST | `/api/v1/agents/{id}/disable` | session or token + org | Disable an agent (`agents.manage`) |
+| POST | `/api/v1/agents/{id}/run` | session or token + org | Send a message through the agent's scoped AI chat (`agents.execute`, and the agent's own `permission_scope` must include `ai.use`) |
+| POST | `/api/v1/agents/{id}/tools/{key}/execute` | session or token + org | Execute a tool under the agent's scope (`agents.execute`); `key` must be in the agent's `allowed_tool_keys`, then follows the same `200`/`202` Tool Gateway semantics as `POST /api/v1/tools/{key}/execute` |
 
 `applications.deploy` is used for registering an application record because
 the current permission catalog has no separate `applications.manage` key —

@@ -15,6 +15,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/nodera/nodera/internal/agents"
 	"github.com/nodera/nodera/internal/ai"
 	"github.com/nodera/nodera/internal/ai/providers"
 	"github.com/nodera/nodera/internal/ai/providers/anthropic"
@@ -124,6 +125,8 @@ func run() error {
 	toolsSvc.RegisterHandler("check_ssl", handlers.CheckSSL)
 	go runApprovalExpirySweep(ctx, log, toolsSvc)
 
+	agentsSvc := agents.New(pool, auditSvc, aiSvc, toolsSvc)
+
 	worker := jobs.NewWorker(pool)
 	// No handlers are registered yet (docs/ROADMAP.md: "jobs worker" ships
 	// the dispatcher itself in this pass; concrete job types like
@@ -143,6 +146,7 @@ func run() error {
 		ai:          aiSvc,
 		secrets:     secretsSvc,
 		tools:       toolsSvc,
+		agents:      agentsSvc,
 		pool:        pool,
 		loginRate:   ratelimit.New(5, 5*time.Minute),
 		signupRate:  ratelimit.New(3, time.Hour),

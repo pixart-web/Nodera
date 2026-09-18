@@ -22,6 +22,7 @@
     { "name": "secrets", "description": "Encrypted-at-rest secret storage (metadata only over HTTP)" },
     { "name": "tools", "description": "Tool Gateway: permission-gated tool execution" },
     { "name": "approvals", "description": "Human approval workflow for privileged/critical tools" },
+    { "name": "agents", "description": "Agent identity, scoped chat, and scoped tool execution (not an autonomous tool-calling loop — a caller directs which tool an agent uses)" },
     { "name": "audit", "description": "Append-only audit log" }
   ],
   "paths": {
@@ -414,6 +415,80 @@
         }
       }
     },
+    "/api/v1/agents": {
+      "get": {
+        "tags": ["agents"], "summary": "List agents (agents.execute)",
+        "parameters": [{ "$ref": "#/components/parameters/OrgHeader" }],
+        "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "type": "array", "items": { "$ref": "#/components/schemas/Agent" } } } } } }
+      },
+      "post": {
+        "tags": ["agents"], "summary": "Create an agent, starting disabled (agents.manage)",
+        "parameters": [{ "$ref": "#/components/parameters/OrgHeader" }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CreateAgentInput" } } } },
+        "responses": {
+          "201": { "description": "Created", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Agent" } } } },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "409": { "$ref": "#/components/responses/Conflict" }
+        }
+      }
+    },
+    "/api/v1/agents/{id}": {
+      "get": {
+        "tags": ["agents"], "summary": "Get an agent",
+        "parameters": [{ "$ref": "#/components/parameters/OrgHeader" }, { "$ref": "#/components/parameters/PathId" }],
+        "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Agent" } } } } }
+      }
+    },
+    "/api/v1/agents/{id}/enable": {
+      "post": {
+        "tags": ["agents"], "summary": "Enable an agent so it can Run or execute tools (agents.manage)",
+        "parameters": [{ "$ref": "#/components/parameters/OrgHeader" }, { "$ref": "#/components/parameters/PathId" }],
+        "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Agent" } } } } }
+      }
+    },
+    "/api/v1/agents/{id}/disable": {
+      "post": {
+        "tags": ["agents"], "summary": "Disable an agent (agents.manage)",
+        "parameters": [{ "$ref": "#/components/parameters/OrgHeader" }, { "$ref": "#/components/parameters/PathId" }],
+        "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Agent" } } } } }
+      }
+    },
+    "/api/v1/agents/{id}/run": {
+      "post": {
+        "tags": ["agents"], "summary": "Chat with the agent via its configured AI profile and system_instructions (agents.execute)",
+        "parameters": [{ "$ref": "#/components/parameters/OrgHeader" }, { "$ref": "#/components/parameters/PathId" }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": {
+          "type": "object", "required": ["message"], "properties": { "message": { "type": "string" } }
+        } } } },
+        "responses": {
+          "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ChatResult" } } } },
+          "403": { "description": "Agent's own permission_scope lacks ai.use" },
+          "409": { "description": "Agent is disabled" }
+        }
+      }
+    },
+    "/api/v1/agents/{id}/tools/{key}/execute": {
+      "post": {
+        "tags": ["agents"], "summary": "Execute a tool on the agent's behalf, under its own scoped identity (agents.execute) — the caller chooses the tool, not the agent",
+        "parameters": [
+          { "$ref": "#/components/parameters/OrgHeader" }, { "$ref": "#/components/parameters/PathId" },
+          { "name": "key", "in": "path", "required": true, "schema": { "type": "string" }, "example": "check_ssl" }
+        ],
+        "requestBody": { "content": { "application/json": { "schema": {
+          "type": "object",
+          "properties": {
+            "resource_type": { "type": "string" }, "resource_id": { "type": "string" },
+            "parameters": { "type": "object" }
+          }
+        } } } },
+        "responses": {
+          "200": { "description": "Executed immediately (read/safe tool)", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ExecuteResult" } } } },
+          "202": { "description": "Approval required (privileged/critical tool)", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ExecuteResult" } } } },
+          "403": { "description": "Tool not in the agent's allowed_tool_keys, or outside its permission_scope" },
+          "409": { "description": "Agent is disabled" }
+        }
+      }
+    },
     "/api/v1/audit": {
       "get": {
         "tags": ["audit"], "summary": "Query the audit log (audit.read)",
@@ -658,6 +733,28 @@
           "expires_at": { "type": "string", "format": "date-time", "nullable": true },
           "decided_at": { "type": "string", "format": "date-time", "nullable": true },
           "decision_reason": { "type": "string" }, "execution_result": {}
+        }
+      },
+      "Agent": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "format": "uuid" }, "name": { "type": "string" }, "description": { "type": "string" },
+          "system_instructions": { "type": "string" }, "ai_profile_key": { "type": "string" },
+          "allowed_tool_keys": { "type": "array", "items": { "type": "string" } },
+          "permission_scope": { "type": "array", "items": { "type": "string" }, "description": "Permission keys this agent acts with — never broader than its creator's own permissions at creation time" },
+          "status": { "type": "string", "enum": ["active", "disabled"], "description": "Starts 'disabled'; see POST .../enable" },
+          "timeout_seconds": { "type": "integer" },
+          "created_at": { "type": "string", "format": "date-time" }, "updated_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "CreateAgentInput": {
+        "type": "object", "required": ["name", "ai_profile_key"],
+        "properties": {
+          "name": { "type": "string" }, "description": { "type": "string" },
+          "system_instructions": { "type": "string" }, "ai_profile_key": { "type": "string" },
+          "allowed_tool_keys": { "type": "array", "items": { "type": "string" }, "description": "Each key must already exist in the tool registry" },
+          "permission_scope": { "type": "array", "items": { "type": "string" }, "description": "Must be a subset of the caller's own permissions" },
+          "timeout_seconds": { "type": "integer" }
         }
       },
       "AuditRecord": {

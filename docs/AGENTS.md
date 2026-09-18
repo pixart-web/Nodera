@@ -1,9 +1,14 @@
 # Agents, Tools, Approvals
 
 Status: **Tool Gateway execution + approval workflow: IMPLEMENTED.**
-**Agent execution loop: FOUNDATION ONLY** (schema only, no code reads
-`system_instructions` and drives the AI gateway yet). See
-`internal/tools/tools.go` and `internal/tools_integration_test.go`.
+**Agent identity + scoped execution: IMPLEMENTED** — an agent has its own
+`permission_scope` and `allowed_tool_keys`, can run a scoped AI chat, and
+can execute a specific tool under its own scope. **Autonomous tool
+selection: NOT IMPLEMENTED and not planned as unrestricted autonomy**
+(rule 38) — a human or service caller always decides which tool an agent
+invokes; the agent never picks its own tool. See `internal/tools/tools.go`,
+`internal/agents/agents.go`, `internal/tools_integration_test.go`, and
+`internal/agents_integration_test.go`.
 
 ## Shape
 
@@ -86,15 +91,56 @@ invented ad hoc as each execution backend is eventually written.
 | `privileged` | Meaningful blast radius (e.g. restarting a container, deploying) | Yes |
 | `critical` | High blast radius or hard to reverse (e.g. querying a production database) | Yes |
 
-## `agents` table
+## `agents` table and `internal/agents`
 
-An agent definition ties together an AI profile, an allowed-tool list, and a
-permission scope — but there is no agent execution loop yet (no code reads
-`system_instructions` and calls the AI gateway in a loop, nor checks an
-agent's `allowed_tool_keys` before letting it call `tools.Execute`). Kiko
-and other concrete agents are explicitly out of scope for Nodera's core
-(rule 17, rule 38) — Nodera provides the runtime substrate, not
-agent-specific behavior.
+An agent definition (`internal/agents/agents.go`) ties together an AI
+profile, an allowed-tool list, and a permission scope. `agents.manage`
+(create/enable/disable) is a distinct, more sensitive permission than
+`agents.execute` (run/use an already-defined agent) — reusing the same
+permission for both would let anyone who can run an agent also redefine
+what it's allowed to do, which is exactly the privilege-escalation shape
+the rest of the codebase avoids (migration `0012`).
+
+Two capabilities exist today, both requiring the caller to hold
+`agents.execute` and the agent to be `active`:
+
+- **`Run(ctx, ac, id, userMessage)`** — builds the agent's own scoped
+  `AuthContext` (`agentAuthContext`: `ActorType: agent`, permissions built
+  from the agent's `permission_scope`, not the caller's), prepends
+  `system_instructions` as a system message if set, and calls
+  `ai.Service.Chat` under that scoped context. The agent's own scope — not
+  the caller's `agents.execute` — must include `ai.use`, or the call is
+  refused (`TestAgents_RunRequiresAIUseInAgentScope`).
+- **`ExecuteTool(ctx, ac, id, toolKey, input)`** — checks `toolKey` is in
+  the agent's `allowed_tool_keys` (refused before it ever reaches the Tool
+  Gateway if not — `TestAgents_ExecuteToolRespectsAllowlistAndScope`), then
+  calls the existing `tools.Registry.Execute` under the agent's scoped
+  `AuthContext`, so permission/risk-tier/approval logic all apply exactly
+  as they would for a human caller, just evaluated against the agent's own
+  `permission_scope`.
+
+Both are audited under the **calling** `AuthContext` (so the audit trail
+shows which human/service caller directed the agent), while the underlying
+tool-execution or AI-usage audit entries the called service writes are
+attributed to the **agent's own** actor label — verified live by checking
+`GET /api/v1/audit` after a real `ExecuteTool` call.
+
+`CreateAgent` enforces no-privilege-escalation: `PermissionScope` must be a
+subset of the creating caller's own held permissions
+(`TestAgents_CannotExceedCreatorPermissions`), and every `AllowedToolKeys`
+entry must reference a real row in `tools` (`TestAgents_RejectsUnknownToolKey`).
+A freshly created agent starts `disabled`; `SetStatus` is the only way to
+`active`/`disabled` it, and both `Run` and `ExecuteTool` refuse a disabled
+agent (`TestAgents_CreateEnableRun`, `TestAgents_DisabledAgentCannotExecuteTool`).
+
+**What this is not:** the agent never decides on its own which tool to
+call, or calls `Run` and `ExecuteTool` in a loop by itself. A caller (human
+via the HTTP API, or another service) directs each `ExecuteTool` call
+individually. There is no scheduler and no LLM-driven tool-selection loop
+— that would be exactly the "unrestricted autonomous infrastructure
+agent" rule 38 prohibits. Kiko and other concrete agents remain explicitly
+out of scope for Nodera's core (rule 17) — Nodera provides this bounded
+identity + execution substrate, not agent-specific behavior.
 
 ## Not yet implemented
 
@@ -104,9 +150,8 @@ agent-specific behavior.
 - The policy engine beyond RBAC permission checks (a richer per-agent
   policy — usage limits, time windows, etc. — `internal/agents/policies`
   doesn't exist as a package yet)
-- Agent execution loop / scheduling, and enforcing an agent's
-  `allowed_tool_keys` (only human callers hit `tools.Execute` today, via
-  the HTTP API, not an autonomous agent)
+- Any autonomous/LLM-directed tool selection or scheduling loop (by design,
+  see above — rule 38)
 - A per-tool/per-org-configurable approval TTL (today's `defaultApprovalTTL`
   is a single global 24h constant)
 - Handlers for tools besides `get_server_metrics` and `check_ssl`

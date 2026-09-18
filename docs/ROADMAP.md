@@ -166,6 +166,66 @@ scanning in CI (`govulncheck`, `npm audit`).
       credential was available (rule 36)
 - [x] Docs (`AI_ARCHITECTURE.md`, `README.md`, `.env.example`) updated
 
+**Phase 13** — this pass:
+- [x] `internal/agents`: agent identity + scoped execution, resolving the
+      roadmap's "Agent execution loop" item against rule 38's prohibition
+      on unrestricted autonomous agents — the LLM never picks its own
+      tool; a caller always directs a specific `ExecuteTool` call. The
+      agent's role is a bounded, pre-configured identity (its own
+      `permission_scope` and `allowed_tool_keys`) that the call runs under
+- [x] Migration `0012`: new `agents.manage` permission (seeded to
+      owner/admin), distinct from the existing `agents.execute` —
+      reusing `agents.execute` for both would let anyone who can run an
+      agent also redefine what it's allowed to do
+- [x] `authctx.ActorAgent`: a third actor type alongside user/service
+      account, so an agent's own audit entries and permission checks are
+      attributable to the agent, not the invoking caller
+- [x] `CreateAgent` enforces no-privilege-escalation (`permission_scope`
+      must be a subset of the caller's own held permissions, same rule as
+      API token scopes) and validates every `allowed_tool_keys` entry
+      against the real `tools` table
+- [x] `Run(ctx, ac, id, message)`: builds the agent's own scoped
+      `AuthContext` (`agentAuthContext`), prepends `system_instructions`
+      as a system message, and calls the existing AI gateway under that
+      scope — the agent's own scope, not the caller's `agents.execute`,
+      must include `ai.use`
+- [x] `ExecuteTool(ctx, ac, id, toolKey, input)`: checks `allowed_tool_keys`
+      first, then reuses the existing Tool Gateway pipeline unchanged
+      (`tools.Registry.Execute`) under the agent's scope, so permission/
+      risk-tier/approval logic all apply correctly
+- [x] 6 new integration tests, all passing under `-race`: creator-permission
+      ceiling, unknown-tool-key rejection, full create→enable→run lifecycle
+      (disabled agent can't run, enabled one gets a real `local-echo`
+      response), agent-scope-missing-`ai.use` rejection, allowlist
+      enforcement (a disallowed tool never reaches the Tool Gateway; an
+      allowed-but-unimplemented tool correctly reports `NOT_IMPLEMENTED`,
+      proving the call *did* reach the real pipeline), disabled-agent
+      tool-execution rejection
+- [x] Fixed a test-premise bug found during this work: the allowlist test
+      originally used `check_ssl` as the "allowed but unimplemented" case,
+      but `check_ssl.implemented=true` in the seed data (since Phase 7) —
+      the registry correctly returned a more specific `INTERNAL_ERROR`
+      ("marked implemented but has no registered handler in this
+      process") instead of `NOT_IMPLEMENTED`. Switched the test to
+      `get_container_logs`, which is genuinely `implemented=false`
+- [x] 6 new HTTP routes wired in `cmd/server/router.go`
+      (`GET/POST /agents`, `GET /agents/{id}`, `POST /agents/{id}/enable`,
+      `POST /agents/{id}/disable`, `POST /agents/{id}/run`,
+      `POST /agents/{id}/tools/{key}/execute`) and verified live: created
+      an agent, ran it for a real (local-echo) chat response, executed a
+      tool through it, and confirmed via `GET /api/v1/audit` that the
+      management actions are attributed to the human caller while the
+      tool-execution audit entry is attributed to the agent's own actor
+      label — proving the dual-identity design works end to end, not just
+      in unit tests
+- [x] OpenAPI spec: `agents` tag, 6 new paths, `Agent`/`CreateAgentInput`
+      schemas — validated with `@redocly/cli lint` (structurally valid;
+      warning count rose proportionally to the new operations, same
+      non-blocking style class as before) — and `web/lib/api-types.generated.ts`
+      regenerated from it (not yet swapped in for the hand-written
+      `lib/types.ts`, still tracked below)
+- [x] Docs (`AGENTS.md`, `API.md`, `README.md`) updated to match
+
 ## Next up
 
 1. **Concrete job types**: the worker dispatcher is real but nothing
@@ -182,14 +242,11 @@ scanning in CI (`govulncheck`, `npm audit`).
 5. **A "platform secrets" mechanism** for cloud provider credentials
    (`docs/AI_ARCHITECTURE.md` Credential handling), or a further cloud
    adapter (OpenAI) if that mismatch is deferred again.
-6. **Agent execution loop**: read `agents.system_instructions`, drive the
-   AI gateway, enforce `allowed_tool_keys` when an agent (not a human) is
-   the caller of `tools.Execute`.
-7. **Per-tool/per-org-configurable approval TTL** (today's
+6. **Per-tool/per-org-configurable approval TTL** (today's
    `defaultApprovalTTL` is a single global 24h constant).
-8. **Remaining frontend follow-ups**: AI profile/chat UI, provider/model
-   registry UI, RBAC/settings management UI, real-time updates (polling or
-   websockets) instead of load-once pages.
+7. **Remaining frontend follow-ups**: AI profile/chat UI, provider/model
+   registry UI, RBAC/settings management UI, an agents management UI,
+   real-time updates (polling or websockets) instead of load-once pages.
 
 ## Explicitly not started (rule 38 — deferred by design)
 

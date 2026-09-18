@@ -17,6 +17,7 @@ type ActorType string
 const (
 	ActorUser           ActorType = "user"
 	ActorServiceAccount ActorType = "service_account"
+	ActorAgent          ActorType = "agent"  // an agent acting via its own permission_scope, not the invoking caller's
 	ActorSystem         ActorType = "system" // internal jobs/migrations, never a client request
 )
 

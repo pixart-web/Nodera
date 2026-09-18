@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/nodera/nodera/internal/agents"
 	"github.com/nodera/nodera/internal/ai"
 	"github.com/nodera/nodera/internal/ai/providers"
 	"github.com/nodera/nodera/internal/applications"
@@ -37,6 +38,7 @@ type apiDeps struct {
 	ai          *ai.Service
 	secrets     *secrets.Service // nil if NODERA_SECRETS_ENCRYPTION_KEY is not configured — see main.go
 	tools       *tools.Registry
+	agents      *agents.Service
 	pool        *pgxpool.Pool
 	loginRate   *ratelimit.Limiter
 	signupRate  *ratelimit.Limiter
@@ -114,6 +116,14 @@ func newRouter(d apiDeps) http.Handler {
 				r.Post("/tools/{key}/execute", d.handleExecuteTool)
 				r.Get("/approvals", d.handleListApprovals)
 				r.Post("/approvals/{id}/decide", d.handleDecideApproval)
+
+				r.Get("/agents", d.handleListAgents)
+				r.Post("/agents", d.handleCreateAgent)
+				r.Get("/agents/{id}", d.handleGetAgent)
+				r.Post("/agents/{id}/enable", d.handleEnableAgent)
+				r.Post("/agents/{id}/disable", d.handleDisableAgent)
+				r.Post("/agents/{id}/run", d.handleRunAgent)
+				r.Post("/agents/{id}/tools/{key}/execute", d.handleAgentExecuteTool)
 
 				r.Get("/audit", d.handleListAudit)
 			})
@@ -738,6 +748,119 @@ func (d apiDeps) handleDecideApproval(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpserver.WriteJSON(w, http.StatusOK, a)
+}
+
+// --- agents ---
+//
+// See docs/AGENTS.md: this is agent identity + scoped execution, not an
+// autonomous tool-calling loop (rule 38). A caller directs which tool an
+// agent uses (handleAgentExecuteTool); the agent never decides that itself.
+
+func (d apiDeps) handleListAgents(w http.ResponseWriter, r *http.Request) {
+	list, err := d.agents.List(r.Context(), mustAuthContext(r))
+	if err != nil {
+		httpserver.WriteError(w, r, err)
+		return
+	}
+	httpserver.WriteJSON(w, http.StatusOK, list)
+}
+
+func (d apiDeps) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
+	var body agents.CreateAgentInput
+	if !decodeJSON(w, r, &body) {
+		return
+	}
+	a, err := d.agents.CreateAgent(r.Context(), mustAuthContext(r), body)
+	if err != nil {
+		httpserver.WriteError(w, r, err)
+		return
+	}
+	httpserver.WriteJSON(w, http.StatusCreated, a)
+}
+
+func (d apiDeps) handleGetAgent(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		httpserver.WriteError(w, r, apierr.Validation("invalid agent id"))
+		return
+	}
+	a, err := d.agents.Get(r.Context(), mustAuthContext(r), id)
+	if err != nil {
+		httpserver.WriteError(w, r, err)
+		return
+	}
+	httpserver.WriteJSON(w, http.StatusOK, a)
+}
+
+func (d apiDeps) handleEnableAgent(w http.ResponseWriter, r *http.Request) {
+	d.setAgentStatus(w, r, true)
+}
+
+func (d apiDeps) handleDisableAgent(w http.ResponseWriter, r *http.Request) {
+	d.setAgentStatus(w, r, false)
+}
+
+func (d apiDeps) setAgentStatus(w http.ResponseWriter, r *http.Request, active bool) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		httpserver.WriteError(w, r, apierr.Validation("invalid agent id"))
+		return
+	}
+	a, err := d.agents.SetStatus(r.Context(), mustAuthContext(r), id, active)
+	if err != nil {
+		httpserver.WriteError(w, r, err)
+		return
+	}
+	httpserver.WriteJSON(w, http.StatusOK, a)
+}
+
+func (d apiDeps) handleRunAgent(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		httpserver.WriteError(w, r, apierr.Validation("invalid agent id"))
+		return
+	}
+	var body struct {
+		Message string `json:"message"`
+	}
+	if !decodeJSON(w, r, &body) {
+		return
+	}
+	result, err := d.agents.Run(r.Context(), mustAuthContext(r), id, body.Message)
+	if err != nil {
+		httpserver.WriteError(w, r, err)
+		return
+	}
+	httpserver.WriteJSON(w, http.StatusOK, result)
+}
+
+func (d apiDeps) handleAgentExecuteTool(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		httpserver.WriteError(w, r, apierr.Validation("invalid agent id"))
+		return
+	}
+	toolKey := chi.URLParam(r, "key")
+	var body struct {
+		ResourceType string         `json:"resource_type"`
+		ResourceID   string         `json:"resource_id"`
+		Parameters   map[string]any `json:"parameters"`
+	}
+	if !decodeJSON(w, r, &body) {
+		return
+	}
+	result, err := d.agents.ExecuteTool(r.Context(), mustAuthContext(r), id, toolKey, tools.ExecuteInput{
+		ResourceType: body.ResourceType, ResourceID: body.ResourceID, Parameters: body.Parameters,
+	})
+	if err != nil {
+		httpserver.WriteError(w, r, err)
+		return
+	}
+	status := http.StatusOK
+	if result.Status == "approval_required" {
+		status = http.StatusAccepted
+	}
+	httpserver.WriteJSON(w, status, result)
 }
 
 // --- audit ---
