@@ -39,7 +39,8 @@ web/
   lib/
     api.ts                 fetch wrapper: bearer token + X-Nodera-Org headers, normalized ApiError
     session.ts               localStorage-backed session/org/user state (client-only)
-    useApi.ts                 shared data-fetching hook: explicit loading/error, never a guessed value
+    useApi.ts                 shared data-fetching hook: explicit loading/error, never a guessed
+                                  value; optional `{ pollMs }` for background auto-refresh
     types.ts                   hand-written TS types mirroring the Go API's JSON shapes
   components/               PageHeader, StatusBadge, ErrorBanner
 ```
@@ -207,10 +208,37 @@ before. Verified live: renamed a custom role and changed its description
 through the form, confirmed the table updated and the permission set
 (`audit.read`) was unaffected by a details-only edit.
 
+## Real-time updates (polling)
+
+`lib/useApi.ts` takes an optional third argument, `{ pollMs }`: when set,
+it re-fetches in the background on that interval, updating `data` on
+success and — deliberately — doing nothing on a failed poll tick rather
+than surfacing an error or clearing already-displayed data. A transient
+network hiccup should degrade to briefly-stale data, not a flashing
+loading spinner or a blanked page; `reload()` (still called by every
+mutating action, e.g. after enqueuing a job or deciding an approval)
+keeps its original behavior of showing the loading state and surfacing
+real errors — only the background poll tick is silent.
+
+Applied to the two pages whose data changes independently of anything the
+viewer does on that page: `jobs/page.tsx` (5s — job status changes as the
+worker processes it) and the Approvals section of `tools/page.tsx` (7s —
+a pending approval can be created by another user, expire, or be decided
+by someone else entirely). Each page says so in its own copy ("Refreshes
+automatically every Ns") rather than silently refreshing with no
+indication anything is happening.
+
+Verified live: enqueued a job via a direct API call (not through the
+page) and watched it appear with a real `failed` status once the worker
+picked it up, with no reload or navigation; separately, triggered a
+`restart_container` approval via a direct API call and watched it appear
+in the pending list, again with no reload. Checked the browser console
+on a fresh tab afterward — zero errors.
+
 ## What's deliberately not built yet
 
-- Real-time updates (polling/websockets) — every page loads once and offers
-  no live refresh beyond a manual reload after a mutating action
+- Real-time updates via websockets/SSE (polling now covers the two
+  pages where it matters most; every other page still loads once)
 - Editing a system role's fixed permission set at all (only custom roles
   can be renamed or have their permissions replaced)
 

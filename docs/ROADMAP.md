@@ -589,6 +589,35 @@ scanning in CI (`govulncheck`, `npm audit`).
 - [x] Docs (`API.md`, `FRONTEND.md`) updated; removed the now-fulfilled
       bullet from Next up
 
+**Phase 25** — this pass:
+- [x] Real-time updates via polling, for the two pages whose data changes
+      independently of anything the viewer does on that page.
+      `lib/useApi.ts` takes an optional `{ pollMs }`: on that interval it
+      re-fetches in the background, updating `data` on success and doing
+      nothing on a failed tick (a transient hiccup degrades to
+      briefly-stale data, not a flashing spinner or a blanked page) —
+      `reload()`, still called by every mutating action, keeps its
+      original behavior of showing the loading state and surfacing real
+      errors; only the background tick is silent
+- [x] Applied to `jobs/page.tsx` (5s — job status changes as the worker
+      processes it) and the Approvals section of `tools/page.tsx` (7s — a
+      pending approval can be created, expire, or be decided by someone
+      else entirely). Each page's own copy says "Refreshes automatically
+      every Ns" rather than silently refreshing with no indication
+      anything is happening
+- [x] Verified live: enqueued a job via a direct API call (not through
+      the page) and watched it appear with a real `failed` status
+      (`no handler registered for job type` — the genuine worker outcome,
+      not fabricated) once the worker picked it up, with no reload or
+      navigation; separately, triggered a `restart_container` approval
+      via a direct API call and watched it appear in the pending list,
+      again with no reload. Checked the browser console on a fresh tab
+      afterward — zero errors
+- [x] Full frontend typecheck + production build clean; backend
+      unaffected (no Go changes this pass, sanity-checked anyway)
+- [x] Docs (`FRONTEND.md`, `README.md`) updated; removed the now-fulfilled
+      "real-time updates" bullet from Next up
+
 ## Next up
 
 1. **Concrete job types**: the worker dispatcher is real but nothing
@@ -611,8 +640,12 @@ scanning in CI (`govulncheck`, `npm audit`).
    a concrete abuse case surfaces (most mutations remain unlimited but are
    `organization.manage`-gated, which is a meaningfully different risk
    profile than the four already covered).
-7. **Remaining frontend follow-ups**: real-time updates (polling or
-   websockets) instead of load-once pages.
+7. **Real-time updates via websockets/SSE**, if polling's ~5-7s latency
+   ever proves insufficient — polling now covers the two pages where it
+   mattered most; every other page still loads once.
+8. **Polling for more pages** if a concrete need surfaces (e.g. the
+   Agents page while a `Run`/`ExecuteTool` call an agent makes is
+   in flight) — not added speculatively.
 
 ## Explicitly not started (rule 38 — deferred by design)
 

@@ -201,6 +201,7 @@ export default function ToolsPage() {
   const approvals = useApi(
     () => api.get<Approval[]>(`/api/v1/approvals${statusFilter ? `?status=${statusFilter}` : ""}`),
     [statusFilter],
+    { pollMs: 7000 },
   );
   const [decideError, setDecideError] = useState<string | null>(null);
   const [reasons, setReasons] = useState<Record<string, string>>({});
@@ -287,7 +288,10 @@ export default function ToolsPage() {
       </div>
 
       <div className="mb-3 flex items-center justify-between">
-        <h2 className="text-sm font-medium text-base-100">Approvals</h2>
+        <div>
+          <h2 className="text-sm font-medium text-base-100">Approvals</h2>
+          <p className="text-xs text-base-500">Refreshes automatically every 7s.</p>
+        </div>
         <select className="input w-40" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
           <option value="pending">pending</option>
           <option value="approved">approved</option>

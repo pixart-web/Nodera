@@ -28,6 +28,7 @@ function JobsPageInner() {
         `/api/v1/jobs?limit=${visibleLimit}${statusFilter ? `&status=${statusFilter}` : ""}`,
       ),
     [statusFilter, visibleLimit],
+    { pollMs: 5000 },
   );
 
   const [showForm, setShowForm] = useState(false);
@@ -76,7 +77,7 @@ function JobsPageInner() {
       <div className="mb-6 flex items-center justify-between">
         <PageHeader
           title="Jobs"
-          description="Postgres-backed job queue. No job type has a handler registered yet beyond what callers enqueue — see docs/ROADMAP.md."
+          description="Postgres-backed job queue. No job type has a handler registered yet beyond what callers enqueue — see docs/ROADMAP.md. Refreshes automatically every 5s."
         />
         <button className="btn-primary" onClick={() => setShowForm((v) => !v)}>
           {showForm ? "Cancel" : "Enqueue job"}
