@@ -109,7 +109,7 @@ and `docs/SECURITY.md`. Every tenant-scoped repository method takes an
 `AuthContext` and filters by `organization_id` server-side; there is no
 "trust the caller's filter" path.
 
-## 6. AI subsystem shape (FOUNDATION ONLY beyond the local-echo test provider)
+## 6. AI subsystem shape (IMPLEMENTED, one real provider — Ollama; cloud adapters PLANNED)
 
 ```
 caller (internal domain or external product via /api/v1/ai)
@@ -126,19 +126,27 @@ enforced in `routing`, not left to the caller: a `RESTRICTED` profile can
 never resolve to a cloud provider, regardless of what the caller requests.
 See `docs/AI_ARCHITECTURE.md`.
 
-## 7. Agents & tools shape (FOUNDATION ONLY — no execution backend yet)
+## 7. Tools & approvals shape (IMPLEMENTED — one real handler; agent execution loop PLANNED)
 
 ```
-Agent definition (profile, allowed tools, permission scope)
+Tool call (human caller via /api/v1/tools/{key}/execute, today — not yet an
+autonomous agent; see docs/AGENTS.md)
   → tools.Registry: lookup tool + its risk level (READ/SAFE/PRIVILEGED/CRITICAL)
-  → policies.Engine: is this tool call allowed for this agent/actor right now?
-  → approvals: PRIVILEGED/CRITICAL calls create an Approval record and block
-    until a human decision is recorded
-  → execution (not implemented in phase 1 — no sandboxed executor exists yet;
-    calling an unimplemented tool returns AGENT_TOOL_NOT_IMPLEMENTED, never a
-    fabricated result)
+  → rbac.Require: tool's own required_permission, then the risk tier's
+    permission (tools.safe/privileged/critical)
+  → PRIVILEGED/CRITICAL → create an Approval record, return — never executes
+    synchronously, regardless of whether a handler exists
+  → READ/SAFE → run the registered handler now, or NOT_IMPLEMENTED if none
+    is registered (rule 36: never a fabricated result)
   → audit
 ```
+
+A human decision (`POST /api/v1/approvals/{id}/decide`) on a
+PRIVILEGED/CRITICAL request then attempts execution and records the real
+outcome — including an honest NOT_IMPLEMENTED if still no handler exists.
+See `docs/AGENTS.md` for exactly which tool has a real handler today
+(`get_server_metrics`, wrapping the infrastructure domain) versus which
+don't yet.
 
 ## 8. What phase 1 actually implements
 

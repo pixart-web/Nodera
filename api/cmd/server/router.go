@@ -23,6 +23,7 @@ import (
 	"github.com/nodera/nodera/internal/platform/ratelimit"
 	"github.com/nodera/nodera/internal/secrets"
 	"github.com/nodera/nodera/internal/tenancy"
+	"github.com/nodera/nodera/internal/tools"
 )
 
 type apiDeps struct {
@@ -35,6 +36,7 @@ type apiDeps struct {
 	jobs        *jobs.Service
 	ai          *ai.Service
 	secrets     *secrets.Service // nil if NODERA_SECRETS_ENCRYPTION_KEY is not configured — see main.go
+	tools       *tools.Registry
 	pool        *pgxpool.Pool
 	loginRate   *ratelimit.Limiter
 	corsOrigins []string
@@ -96,6 +98,11 @@ func newRouter(d apiDeps) http.Handler {
 				r.Get("/secrets", d.handleListSecrets)
 				r.Put("/secrets/{key}", d.handleSetSecret)
 				r.Delete("/secrets/{key}", d.handleDeleteSecret)
+
+				r.Get("/tools", d.handleListTools)
+				r.Post("/tools/{key}/execute", d.handleExecuteTool)
+				r.Get("/approvals", d.handleListApprovals)
+				r.Post("/approvals/{id}/decide", d.handleDecideApproval)
 
 				r.Get("/audit", d.handleListAudit)
 			})
@@ -540,6 +547,71 @@ func (d apiDeps) secretsConfigured(w http.ResponseWriter, r *http.Request) bool 
 	}
 	httpserver.WriteError(w, r, apierr.New(apierr.CodeUnavailable, "the secrets module is not configured on this server (NODERA_SECRETS_ENCRYPTION_KEY unset)"))
 	return false
+}
+
+// --- tools / approvals ---
+
+func (d apiDeps) handleListTools(w http.ResponseWriter, r *http.Request) {
+	list, err := d.tools.List(r.Context(), mustAuthContext(r))
+	if err != nil {
+		httpserver.WriteError(w, r, err)
+		return
+	}
+	httpserver.WriteJSON(w, http.StatusOK, list)
+}
+
+func (d apiDeps) handleExecuteTool(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		ResourceType string         `json:"resource_type"`
+		ResourceID   string         `json:"resource_id"`
+		Parameters   map[string]any `json:"parameters"`
+	}
+	if !decodeJSON(w, r, &body) {
+		return
+	}
+	key := chi.URLParam(r, "key")
+	result, err := d.tools.Execute(r.Context(), mustAuthContext(r), key, tools.ExecuteInput{
+		ResourceType: body.ResourceType, ResourceID: body.ResourceID, Parameters: body.Parameters,
+	})
+	if err != nil {
+		httpserver.WriteError(w, r, err)
+		return
+	}
+	status := http.StatusOK
+	if result.Status == "approval_required" {
+		status = http.StatusAccepted
+	}
+	httpserver.WriteJSON(w, status, result)
+}
+
+func (d apiDeps) handleListApprovals(w http.ResponseWriter, r *http.Request) {
+	list, err := d.tools.ListApprovals(r.Context(), mustAuthContext(r), r.URL.Query().Get("status"))
+	if err != nil {
+		httpserver.WriteError(w, r, err)
+		return
+	}
+	httpserver.WriteJSON(w, http.StatusOK, list)
+}
+
+func (d apiDeps) handleDecideApproval(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		httpserver.WriteError(w, r, apierr.Validation("invalid approval id"))
+		return
+	}
+	var body struct {
+		Approve bool   `json:"approve"`
+		Reason  string `json:"reason"`
+	}
+	if !decodeJSON(w, r, &body) {
+		return
+	}
+	a, err := d.tools.DecideApproval(r.Context(), mustAuthContext(r), id, body.Approve, body.Reason)
+	if err != nil {
+		httpserver.WriteError(w, r, err)
+		return
+	}
+	httpserver.WriteJSON(w, http.StatusOK, a)
 }
 
 // --- audit ---

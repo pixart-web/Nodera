@@ -38,7 +38,8 @@ schema/interfaces, no production backend yet) · **PLANNED** (not started).
 | AI profiles/routing/usage | IMPLEMENTED | Deterministic router with enforced privacy-level policy, real usage tracking; a registry row with no registered Go adapter correctly fails closed rather than fabricating a response |
 | AI provider adapters | IMPLEMENTED (Ollama) | `local-echo` (test) + a real Ollama adapter (`NODERA_OLLAMA_BASE_URL`); cloud adapters (OpenAI, Anthropic, ...) are PLANNED |
 | Secrets | IMPLEMENTED | AES-256-GCM encrypted at rest; values never exposed over HTTP, only `Reveal`-able in-process; optional at config level |
-| Agents/Tools/Approvals | FOUNDATION ONLY | Schema + tool catalog registered as `implemented=false`; no execution backend |
+| Tool Gateway + approvals | IMPLEMENTED | Permission → risk-tier → approval → execution → audit pipeline is real; `get_server_metrics` has a real handler, every other seeded tool honestly reports `NOT_IMPLEMENTED` |
+| Agent execution loop | PLANNED | `agents` table exists; nothing drives `system_instructions` through the AI gateway or enforces `allowed_tool_keys` yet |
 | Rate limiting | IMPLEMENTED | In-process, `/auth/login` only (5/5min per IP); other endpoints and a multi-instance-safe (Redis) limiter are PLANNED |
 | Secure headers | IMPLEMENTED | `nosniff`, `DENY`, `no-referrer`, `no-store` on every response |
 | CI | IMPLEMENTED | `gofmt`/`vet`/`build`/`test -race` on every push, via GitHub Actions |

@@ -5,6 +5,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -31,6 +32,7 @@ import (
 	"github.com/nodera/nodera/internal/rbac"
 	"github.com/nodera/nodera/internal/secrets"
 	"github.com/nodera/nodera/internal/tenancy"
+	"github.com/nodera/nodera/internal/tools"
 	"github.com/nodera/nodera/migrations"
 )
 
@@ -111,6 +113,9 @@ func run() error {
 		}
 	}
 
+	toolsSvc := tools.New(pool, auditSvc)
+	toolsSvc.RegisterHandler("get_server_metrics", newGetServerMetricsHandler(infraSvc))
+
 	worker := jobs.NewWorker(pool)
 	// No handlers are registered yet (docs/ROADMAP.md: "jobs worker" ships
 	// the dispatcher itself in this pass; concrete job types like
@@ -129,6 +134,7 @@ func run() error {
 		jobs:        jobsSvc,
 		ai:          aiSvc,
 		secrets:     secretsSvc,
+		tools:       toolsSvc,
 		pool:        pool,
 		loginRate:   ratelimit.New(5, 5*time.Minute),
 		corsOrigins: cfg.HTTP.CORSOrigins,
@@ -160,4 +166,34 @@ func run() error {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	return srv.Shutdown(shutdownCtx)
+}
+
+// newGetServerMetricsHandler wraps infrastructure.Service.Get rather than
+// querying the nodes table directly (ADR-002: compose existing domain
+// services from cmd/server, don't duplicate their logic). It returns the
+// node's last-known inventory record — cpu_cores/memory_mb/storage_gb,
+// status, last_seen_at — not live-sampled metrics: no Node Agent exists yet
+// to report those (docs/INFRASTRUCTURE.md), and reporting fabricated live
+// numbers here would violate rule 36. The field names make that plain to
+// any caller.
+func newGetServerMetricsHandler(infraSvc *infrastructure.Service) tools.Handler {
+	return func(ctx context.Context, ac authctx.AuthContext, resourceType, resourceID string, params map[string]any) (any, error) {
+		nodeID, err := uuid.Parse(resourceID)
+		if err != nil {
+			return nil, fmt.Errorf("get_server_metrics: resource_id must be a node UUID: %w", err)
+		}
+		node, err := infraSvc.Get(ctx, ac, nodeID)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{
+			"source":       "inventory", // not live telemetry — see doc comment above
+			"hostname":     node.Hostname,
+			"status":       node.Status,
+			"cpu_cores":    node.CPUCores,
+			"memory_mb":    node.MemoryMB,
+			"storage_gb":   node.StorageGB,
+			"last_seen_at": node.LastSeenAt,
+		}, nil
+	}
 }

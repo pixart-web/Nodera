@@ -79,6 +79,10 @@ Two bearer token types are accepted on `Authorization: Bearer <token>`, and
 | GET | `/api/v1/secrets` | session or token + org | List secret metadata only — never values (`secrets.read`) |
 | PUT | `/api/v1/secrets/{key}` | session or token + org | Create or rotate a secret (`secrets.manage`) — `503 UNAVAILABLE` if the server has no `NODERA_SECRETS_ENCRYPTION_KEY` configured |
 | DELETE | `/api/v1/secrets/{key}` | session or token + org | Delete a secret (`secrets.manage`) |
+| GET | `/api/v1/tools` | session or token + org | List the tool registry (`tools.read`) |
+| POST | `/api/v1/tools/{key}/execute` | session or token + org | Execute a tool. `read`/`safe` run immediately (`200`); `privileged`/`critical` return `202` with an `approval_id` instead of running |
+| GET | `/api/v1/approvals` | session or token + org | List approvals, optional `?status=` filter (`approvals.decide`) |
+| POST | `/api/v1/approvals/{id}/decide` | session or token + org | Approve or reject a pending approval (`approvals.decide`) — approving attempts execution immediately |
 | GET | `/api/v1/audit` | session or token + org | Query the audit log (`audit.read`) |
 
 `applications.deploy` is used for registering an application record because
@@ -100,9 +104,9 @@ oversight — see `internal/ai/registry.go`.
 `POST /auth/login` is rate limited (5 attempts / 5 minutes per client IP);
 exceeding it returns `429` with code `RATE_LIMITED`.
 
-Everything else described in `docs/ARCHITECTURE.md` (agents, approvals,
-real AI provider adapters) is schema/interfaces only — no HTTP surface
-exists for them yet (PLANNED, tracked in `docs/ROADMAP.md`).
+Everything else described in `docs/ARCHITECTURE.md` (the agent execution
+loop, cloud AI provider adapters) is schema/interfaces only — no HTTP
+surface exists for them yet (PLANNED, tracked in `docs/ROADMAP.md`).
 
 ## Not yet implemented
 

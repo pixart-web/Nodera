@@ -29,6 +29,7 @@ applied automatically, in order, on every process start
 | `0007_agents.sql` | `agents`, `tools`, `approvals` (+ seeded tool catalog, all `implemented=false`) |
 | `0008_applications.sql` | `applications` |
 | `0009_secrets.sql` | `secrets` |
+| `0010_tools_get_server_metrics.sql` | data-only: flips `tools.implemented` to `true` for `get_server_metrics` now that it has a real handler |
 
 ## Conventions
 
