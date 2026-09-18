@@ -22,6 +22,7 @@ import (
 	"github.com/nodera/nodera/internal/ai/providers/anthropic"
 	"github.com/nodera/nodera/internal/ai/providers/localecho"
 	"github.com/nodera/nodera/internal/ai/providers/ollama"
+	"github.com/nodera/nodera/internal/ai/providers/openai"
 	"github.com/nodera/nodera/internal/applications"
 	"github.com/nodera/nodera/internal/audit"
 	"github.com/nodera/nodera/internal/identity"
@@ -90,6 +91,9 @@ func run() error {
 	if cfg.Anthropic.APIKey != "" {
 		registeredProviders = append(registeredProviders, anthropic.New("anthropic", cfg.Anthropic.APIKey))
 	}
+	if cfg.OpenAI.APIKey != "" {
+		registeredProviders = append(registeredProviders, openai.New("openai", cfg.OpenAI.APIKey))
+	}
 	aiSvc := ai.New(pool, auditSvc, registeredProviders...)
 
 	// Auto-register each configured provider's row so it shows up in the
@@ -105,6 +109,11 @@ func run() error {
 	if cfg.Anthropic.APIKey != "" {
 		autoRegisterProvider(ctx, log, aiSvc, ai.UpsertProviderInput{
 			Key: "anthropic", Kind: "cloud", DisplayName: "Anthropic", Status: "active",
+		})
+	}
+	if cfg.OpenAI.APIKey != "" {
+		autoRegisterProvider(ctx, log, aiSvc, ai.UpsertProviderInput{
+			Key: "openai", Kind: "cloud", DisplayName: "OpenAI", Status: "active",
 		})
 	}
 

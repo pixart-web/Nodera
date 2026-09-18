@@ -503,6 +503,35 @@ scanning in CI (`govulncheck`, `npm audit`).
 - [x] Docs (`API.md`, `FRONTEND.md`, `README.md`) updated; removed the
       now-fulfilled "custom role creation/editing" bullet from Next up
 
+**Phase 22** — this pass:
+- [x] `internal/ai/providers/openai`: a second cloud provider adapter, for
+      the OpenAI Chat Completions API — proving the Anthropic-established
+      pattern (registry row vs. Go adapter are separate; `kind: cloud`
+      correctly refused by `restricted`-privacy profiles) generalizes to
+      more than one cloud provider, not just Anthropic specifically
+- [x] Structurally simpler than the Anthropic adapter: OpenAI accepts a
+      `"system"`-role message directly inside the `messages` array, so
+      `Chat` passes every message through unchanged — no extraction/join
+      step like Anthropic's separate top-level `system` field needs
+- [x] `NODERA_OPENAI_API_KEY` (optional; unset → adapter not registered,
+      `UNAVAILABLE` rather than a crash — same pattern as
+      `NODERA_ANTHROPIC_API_KEY`/`NODERA_OLLAMA_BASE_URL`)
+- [x] Tests: 5 new unit tests for the adapter (success, server error,
+      malformed response, an empty-`choices` response correctly treated
+      as an error rather than a fabricated empty reply, context
+      cancellation) plus 2 new integration tests (full pipeline through a
+      mock server; a `RESTRICTED` profile refusing to route to the
+      now-registered `openai` adapter) — all passing under `-race`
+- [x] Verified live that both the optional-config fail-closed path and
+      the registration path work: booted with `NODERA_OPENAI_API_KEY`
+      unset (no registration log line, `/health`/`/ready` unaffected),
+      then booted with a fake (non-live) key set and confirmed the
+      `openai` row appeared in `GET /api/v1/ai/providers` with
+      `kind: cloud` — did not fabricate a live chat response, since no
+      real credential was available (rule 36, same as the Anthropic pass)
+- [x] `govulncheck` clean
+- [x] Docs (`AI_ARCHITECTURE.md`, `README.md`, `.env.example`) updated
+
 ## Next up
 
 1. **Concrete job types**: the worker dispatcher is real but nothing
@@ -518,8 +547,9 @@ scanning in CI (`govulncheck`, `npm audit`).
    and swap `web/`'s hand-written `lib/types.ts` over to the generated
    `lib/api-types.generated.ts`.
 5. **A "platform secrets" mechanism** for cloud provider credentials
-   (`docs/AI_ARCHITECTURE.md` Credential handling), or a further cloud
-   adapter (OpenAI) if that mismatch is deferred again.
+   (`docs/AI_ARCHITECTURE.md` Credential handling) — the
+   org-scoped-secrets-vs-platform-wide-provider mismatch is unaffected by
+   having two cloud adapters now instead of one.
 6. **Actual invite-by-email** (as opposed to Phase 20's "add an existing
    account") — needs outbound email delivery, which doesn't exist in this
    phase at all.

@@ -1,12 +1,13 @@
 # AI Architecture
 
-Status: **IMPLEMENTED**, including two real production-capable provider
-adapters — one local (Ollama), one cloud (Anthropic). The profile registry,
-provider/model registry, the deterministic router (including enforced
-privacy-level policy), gateway `/api/v1/ai/*` HTTP surface, and usage
-tracking are real, tested code — see `internal/ai/ai.go`,
+Status: **IMPLEMENTED**, including three real production-capable provider
+adapters — one local (Ollama), two cloud (Anthropic, OpenAI). The profile
+registry, provider/model registry, the deterministic router (including
+enforced privacy-level policy), gateway `/api/v1/ai/*` HTTP surface, and
+usage tracking are real, tested code — see `internal/ai/ai.go`,
 `internal/ai/registry.go`, and `internal/integration_test.go` /
-`internal/ollama_integration_test.go` / `internal/anthropic_integration_test.go`.
+`internal/ollama_integration_test.go` / `internal/anthropic_integration_test.go`
+/ `internal/openai_integration_test.go`.
 See [ADR-006](DECISIONS.md#adr-006-ai-gateway-agent-runtime-and-tool-gateway-ship-as-interfaces--deterministic-stubs-in-phase-1).
 
 ## Why applications never call a vendor SDK directly
@@ -97,32 +98,45 @@ never a fabricated call (rule 36; see
   Anthropic reject the call. Tested against a mock HTTP server, not a real
   Anthropic account (rule 39) — no test anywhere in the codebase depends
   on `NODERA_ANTHROPIC_API_KEY` being set.
+- **`openai`** (`internal/ai/providers/openai`): a real adapter for the
+  OpenAI Chat Completions API (`kind: cloud`, so `restricted`-privacy
+  profiles correctly refuse to route to it — verified by
+  `TestAIRestrictedProfileNeverRoutesToOpenAI`). Registered only when
+  `NODERA_OPENAI_API_KEY` is set. Structurally simpler than the Anthropic
+  adapter: OpenAI accepts a `"system"`-role message directly inside the
+  `messages` array, so `Chat` passes every message through unchanged —
+  nothing to extract or join. Tested against a mock HTTP server, not a
+  real OpenAI account (rule 39) — no test anywhere in the codebase depends
+  on `NODERA_OPENAI_API_KEY` being set.
 
 ## Credential handling for cloud providers
 
-`NODERA_ANTHROPIC_API_KEY` is sourced from an environment variable, not
-`internal/secrets`, even though the secrets module already exists and is
-exactly the kind of thing it's for. The reason is a real, not-yet-resolved
-architectural mismatch: `ai_providers`/`ai_models` are platform-wide (no
-`organization_id` — see `internal/ai/registry.go`), while `internal/secrets`
-is org-scoped by design (every secret belongs to one organization,
-`docs/SECURITY.md`). There's no organization to scope a platform-wide
-provider's credential to. Resolving this — likely a small "platform
-secrets" concept distinct from org secrets — is tracked in
-`docs/ROADMAP.md` rather than worked around silently.
+`NODERA_ANTHROPIC_API_KEY`/`NODERA_OPENAI_API_KEY` are sourced from
+environment variables, not `internal/secrets`, even though the secrets
+module already exists and is exactly the kind of thing it's for. The
+reason is a real, not-yet-resolved architectural mismatch:
+`ai_providers`/`ai_models` are platform-wide (no `organization_id` — see
+`internal/ai/registry.go`), while `internal/secrets` is org-scoped by
+design (every secret belongs to one organization, `docs/SECURITY.md`).
+There's no organization to scope a platform-wide provider's credential
+to. Resolving this — likely a small "platform secrets" concept distinct
+from org secrets — is tracked in `docs/ROADMAP.md` rather than worked
+around silently.
 
 ## What's deliberately not built yet
 
-- Further cloud provider adapters (OpenAI, etc.) — the registry, router,
-  and gateway are provider-agnostic and ready for one; the Ollama → Anthropic
-  order was deliberate (no-credential-needed adapter proven first)
+- Further cloud provider adapters beyond Anthropic and OpenAI — the
+  registry, router, and gateway are provider-agnostic and ready for one;
+  the Ollama → Anthropic → OpenAI order was deliberate (no-credential-
+  needed adapter proven first, then one cloud adapter, then a second to
+  prove the pattern generalizes)
 - Cost/latency/quality-aware routing (section 13 explicitly asks for the
   deterministic router first, which is what exists)
 - Embeddings/RAG (`docs/ARCHITECTURE.md` §7 sketches the shape; no code yet)
 - Prompt/response content logging (deliberately out of scope by default —
   see the Usage tracking section above)
 - Auto-discovery of models an Ollama instance actually has pulled, or
-  models an Anthropic API key has access to
+  models an Anthropic/OpenAI API key has access to
 - A "platform secrets" mechanism for cloud provider credentials, resolving
   the org-scoped-secrets-vs-platform-wide-provider mismatch noted above
 

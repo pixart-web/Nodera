@@ -20,6 +20,7 @@ type Config struct {
 	Secrets   SecretsConfig
 	Ollama    OllamaConfig
 	Anthropic AnthropicConfig
+	OpenAI    OpenAIConfig
 }
 
 type HTTPConfig struct {
@@ -75,6 +76,12 @@ type AnthropicConfig struct {
 	APIKey string
 }
 
+type OpenAIConfig struct {
+	// APIKey is a real secret, same handling as AnthropicConfig.APIKey.
+	// Empty means the OpenAI provider adapter is not registered.
+	APIKey string
+}
+
 // Load reads configuration from the environment. It returns an error rather
 // than panicking so callers (including tests) can handle misconfiguration
 // explicitly.
@@ -117,6 +124,9 @@ func Load() (Config, error) {
 		},
 		Anthropic: AnthropicConfig{
 			APIKey: os.Getenv("NODERA_ANTHROPIC_API_KEY"),
+		},
+		OpenAI: OpenAIConfig{
+			APIKey: os.Getenv("NODERA_OPENAI_API_KEY"),
 		},
 	}
 
