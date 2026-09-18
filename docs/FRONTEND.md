@@ -29,6 +29,7 @@ web/
       tools/page.tsx             tool registry + inline execute form + approvals queue
       agents/page.tsx             agent definitions: create/enable/disable, scoped
                                   chat (Run), scoped tool execution (ExecuteTool)
+      ai/page.tsx                 AI Gateway: chat, profiles, providers, models
       secrets/page.tsx          secret metadata list, set, delete — never values
       access/page.tsx            own API tokens, service accounts + their tokens,
                                   org-wide token listing (organization.manage only)
@@ -111,12 +112,36 @@ second agent whose scope also included `infrastructure.read` and confirmed
 it. Also verified `Run` against the `local-echo` provider returns real
 `echo: <message>` content.
 
+## AI Gateway page
+
+`ai/page.tsx` covers the whole AI Gateway surface: a Chat panel (pick a
+profile, send a message, see the real `ChatResult` including provider key,
+model, and token counts), a Profiles section (list + create, with
+`privacy_level` as a `<select>` and `preferred_model_ids`/
+`fallback_model_ids`/`required_capabilities` as comma-separated inputs
+matching the Tools/Agents pages' convention), and Providers/Models
+sections (list + register, `ai.manage`-gated server-side — the page always
+shows the forms and lets a `FORBIDDEN` response surface as an error banner
+rather than trying to pre-compute the caller's permissions client-side,
+same pattern as the Tools page's execute forms). The page explicitly notes
+that a provider/model row is only *discoverable*, not necessarily
+*callable* — that still depends on a matching Go adapter being registered
+at server boot (`docs/AI_ARCHITECTURE.md`).
+
+Caught a real bug during live verification (not a mock issue): the first
+draft of the Profiles create form posted `preferred_model_refs`, but the
+API's actual field is `preferred_model_ids` — found by testing the form
+against the running API, not by assuming the guessed name was right, and
+fixed in `lib/types.ts` and the form before commit. Verified live
+end-to-end: created a profile, sent a chat message through `local-echo`
+and got a real `echo: <message>` response with real token counts,
+registered a new model (`ollama/llama3.1`) and saw it appear in the table
+immediately.
+
 ## What's deliberately not built yet
 
 - Real-time updates (polling/websockets) — every page loads once and offers
   no live refresh beyond a manual reload after a mutating action
-- AI profile / chat UI (the API supports it — `docs/AI_ARCHITECTURE.md` —
-  but no page calls it yet)
 - A tool-approval-TTL settings UI (`docs/AGENTS.md` — the API supports
   per-org per-tool overrides, but no page manages them yet)
 - Any settings/RBAC management UI (roles are seeded, not yet editable from

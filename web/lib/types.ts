@@ -193,6 +193,36 @@ export interface AIProfile {
   created_at: string;
 }
 
+// Platform-wide, not org-scoped (docs/AI_ARCHITECTURE.md) — the registry
+// row makes a provider/model discoverable; whether it's actually callable
+// depends on a matching Go adapter being registered at server boot.
+export interface AIProvider {
+  id: string;
+  key: string;
+  kind: "cloud" | "local";
+  display_name: string;
+  status: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AIModel {
+  id: string;
+  provider_key: string;
+  model_identifier: string;
+  display_name: string;
+  capabilities: string[];
+  context_window: number;
+  status: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ChatMessage {
+  role: "system" | "user" | "assistant";
+  content: string;
+}
+
 export interface ApiErrorBody {
   error: {
     code: string;

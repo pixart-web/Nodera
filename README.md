@@ -46,7 +46,7 @@ schema/interfaces, no production backend yet) · **PLANNED** (not started).
 | CI | IMPLEMENTED | `gofmt`/`vet`/`build`/`test -race`/`govulncheck` (API) + `typecheck`/`build`/`npm audit` (web) on every push |
 | OpenAPI spec + Swagger UI | IMPLEMENTED | `GET /openapi.json` (validated against the OpenAPI 3.0 schema in CI) + `GET /docs`; hand-maintained, not yet generated from code |
 | Pagination | IMPLEMENTED (4 endpoints) | `infrastructure/nodes`, `applications`, `jobs`, `audit` — `limit`/`offset` + a `has_more` envelope; other list endpoints stay unpaginated (small at phase-1 scale) |
-| Dashboard / frontend | IMPLEMENTED | Next.js + TypeScript control plane UI (`web/`) — login, org picker, infrastructure, applications, jobs, tools/approvals, agents, secrets, access (API tokens + service accounts), audit; every page reads/writes real API data, no fabricated placeholders |
+| Dashboard / frontend | IMPLEMENTED | Next.js + TypeScript control plane UI (`web/`) — login, org picker, infrastructure, applications, jobs, tools/approvals, agents, AI Gateway (chat/profiles/providers/models), secrets, access (API tokens + service accounts), audit; every page reads/writes real API data, no fabricated placeholders |
 | Node Agent, AI Gateway, Agent Runtime as separate services | PLANNED | Currently packages inside the one Core API binary (ADR-002) |
 
 ## Repository layout

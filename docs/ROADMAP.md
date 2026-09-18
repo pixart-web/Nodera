@@ -328,6 +328,30 @@ scanning in CI (`govulncheck`, `npm audit`).
       unaffected (no Go changes this pass, sanity-checked anyway)
 - [x] Docs (`FRONTEND.md`, `README.md`) updated to match
 
+**Phase 17** — this pass:
+- [x] `web/app/(org)/ai/page.tsx`: an AI Gateway UI covering the whole
+      surface — a Chat panel (pick a profile, send a message, see the real
+      `ChatResult` including provider key, model, and token counts), a
+      Profiles section (list + create), and Providers/Models sections
+      (list + register, `ai.manage`-gated server-side). Added to the
+      sidebar nav
+- [x] `lib/types.ts`: `AIProvider`, `AIModel`, `ChatMessage` types matching
+      `internal/ai`'s real JSON tags (`AIProfile` already existed and was
+      already correct)
+- [x] Caught a real bug during live verification, same class as Phase 16's:
+      the first draft of the Profiles create form posted
+      `preferred_model_refs`, but the API's actual field is
+      `preferred_model_ids` — found by testing against the running API,
+      fixed before commit
+- [x] Verified live end to end: created a profile, sent a chat message
+      through `local-echo` and got a real `echo: <message>` response with
+      real token counts, registered a new model (`ollama/llama3.1`) and
+      saw it appear in the table immediately. Checked the browser console
+      on a fresh tab afterward — zero errors
+- [x] Full frontend typecheck + production build clean; backend
+      unaffected (no Go changes this pass, sanity-checked anyway)
+- [x] Docs (`FRONTEND.md`, `README.md`) updated to match
+
 ## Next up
 
 1. **Concrete job types**: the worker dispatcher is real but nothing
@@ -345,10 +369,9 @@ scanning in CI (`govulncheck`, `npm audit`).
 5. **A "platform secrets" mechanism** for cloud provider credentials
    (`docs/AI_ARCHITECTURE.md` Credential handling), or a further cloud
    adapter (OpenAI) if that mismatch is deferred again.
-6. **Remaining frontend follow-ups**: AI profile/chat UI, provider/model
-   registry UI, RBAC/settings management UI, a tool-approval-TTL settings
-   UI, real-time updates (polling or websockets) instead of load-once
-   pages.
+6. **Remaining frontend follow-ups**: RBAC/settings management UI, a
+   tool-approval-TTL settings UI, real-time updates (polling or
+   websockets) instead of load-once pages.
 
 ## Explicitly not started (rule 38 — deferred by design)
 
