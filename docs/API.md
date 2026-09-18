@@ -156,12 +156,10 @@ oversight — see `internal/ai/registry.go`.
 
 `POST /auth/login` (5 attempts / 5 minutes) and `POST /auth/signup`
 (3 attempts / hour) are rate limited per client IP; `POST /api/v1/ai/chat`
-is rate limited per organization (60 requests / minute). Exceeding any of
-them returns `429` with code `RATE_LIMITED` — see `docs/SECURITY.md`.
-
-Everything else described in `docs/ARCHITECTURE.md` (the agent execution
-loop, cloud AI provider adapters) is schema/interfaces only — no HTTP
-surface exists for them yet (PLANNED, tracked in `docs/ROADMAP.md`).
+is rate limited per organization (60 requests / minute); `POST
+/api/v1/organizations` is rate limited per user (10 organizations / hour).
+Exceeding any of them returns `429` with code `RATE_LIMITED` — see
+`docs/SECURITY.md`.
 
 ## Not yet implemented
 

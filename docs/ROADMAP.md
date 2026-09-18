@@ -532,6 +532,34 @@ scanning in CI (`govulncheck`, `npm audit`).
 - [x] `govulncheck` clean
 - [x] Docs (`AI_ARCHITECTURE.md`, `README.md`, `.env.example`) updated
 
+**Phase 23** — this pass:
+- [x] Rate limiting extended to `POST /api/v1/organizations` (10/hour per
+      user) — the only remaining mutation reachable by any freshly-signed-up
+      user with no permission gate at all (every other unlimited endpoint
+      is already `organization.manage`-gated, which meaningfully narrows
+      who can even attempt abuse — see `docs/SECURITY.md`)
+- [x] Keyed by the calling user's ID, not IP — unlike login/signup, this
+      endpoint is only reachable once authenticated, so the actor is
+      already known and stable; an IP key would be both weaker (shared
+      IPs behind NAT) and unnecessary (no pre-auth anonymity to account
+      for, unlike signup)
+- [x] `newRateLimiters` extended to a 4th limiter, following the exact
+      same in-process/Redis-backed selection as the other three; no new
+      pattern introduced
+- [x] Verified live end to end against a real Redis-backed limiter: signed
+      up a fresh user, created 10 organizations successfully, confirmed
+      the 11th returned a real `429 RATE_LIMITED`, and confirmed the
+      counter key (`ratelimit:create_org:<user_id>`) existed in Redis
+- [x] Full backend verification clean (no router-level Go test added,
+      matching the existing pattern — login/signup rate limiting also has
+      no router-level test, only the underlying `Limiter`/`RedisLimiter`
+      behavior is unit-tested; this endpoint's limiting was verified live
+      instead, same as those)
+- [x] Docs (`SECURITY.md`, `API.md`, `README.md`) updated; also fixed a
+      stale claim in `API.md` left over from an early phase (it said the
+      agent execution loop and cloud AI provider adapters had "no HTTP
+      surface yet" — both have had one for many phases)
+
 ## Next up
 
 1. **Concrete job types**: the worker dispatcher is real but nothing
@@ -540,21 +568,22 @@ scanning in CI (`govulncheck`, `npm audit`).
 2. **More tool handlers**: `get_container_logs` needs a container domain
    that doesn't exist yet; `create_backup`/`verify_backup` need the jobs
    system wired to an actual backup mechanism.
-3. **Rate limiting on endpoints beyond `/auth/login`, `/auth/signup`, and
-   `/ai/chat`** — every other endpoint remains unlimited (the Redis-backed
-   multi-instance limiter itself is now done, see Phase 14).
-4. **Generate the OpenAPI spec from code** instead of hand-maintaining it,
+3. **Generate the OpenAPI spec from code** instead of hand-maintaining it,
    and swap `web/`'s hand-written `lib/types.ts` over to the generated
    `lib/api-types.generated.ts`.
-5. **A "platform secrets" mechanism** for cloud provider credentials
+4. **A "platform secrets" mechanism** for cloud provider credentials
    (`docs/AI_ARCHITECTURE.md` Credential handling) — the
    org-scoped-secrets-vs-platform-wide-provider mismatch is unaffected by
    having two cloud adapters now instead of one.
-6. **Actual invite-by-email** (as opposed to Phase 20's "add an existing
+5. **Actual invite-by-email** (as opposed to Phase 20's "add an existing
    account") — needs outbound email delivery, which doesn't exist in this
    phase at all.
-7. **Renaming/editing a custom role's name or description** after
+6. **Renaming/editing a custom role's name or description** after
    creation — only its permission set can be replaced today.
+7. **Rate limiting on further endpoints** beyond the four covered now, if
+   a concrete abuse case surfaces (most mutations remain unlimited but are
+   `organization.manage`-gated, which is a meaningfully different risk
+   profile than the four already covered).
 8. **Remaining frontend follow-ups**: real-time updates (polling or
    websockets) instead of load-once pages.
 

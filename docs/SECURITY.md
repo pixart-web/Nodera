@@ -106,13 +106,14 @@ self-contained implementation.
 - Sensitive operations (e.g. node registration) call `audit.Record` with
   actor, action, resource, and resulting state.
 
-## Rate limiting — IMPLEMENTED (login, signup, AI chat)
+## Rate limiting — IMPLEMENTED (login, signup, AI chat, org creation)
 
 `internal/platform/ratelimit` applies fixed-window limits
 (`cmd/server/router.go`) to:
 - `POST /auth/login` — 5 attempts / 5 minutes per client IP
 - `POST /auth/signup` — 3 attempts / hour per client IP
 - `POST /api/v1/ai/chat` — 60 requests / minute **per organization**
+- `POST /api/v1/organizations` — 10 organizations / hour **per user**
 
 Login/signup are keyed by IP rather than the submitted email, so an
 attacker can't use either endpoint to lock out a victim account/address by
@@ -121,7 +122,10 @@ design would enable). AI chat is keyed by organization instead — the real
 risk there isn't login lockout, it's one tenant (a careless or compromised
 integration) running up real provider cost or crowding out other tenants
 on a shared local model; an IP-keyed limiter wouldn't even bound that
-(many legitimate calls can share an IP behind NAT).
+(many legitimate calls can share an IP behind NAT). Organization creation
+is keyed by the calling user's ID rather than IP — unlike login/signup,
+it's only reachable once authenticated, so the actor is already known and
+stable; bounds spam-organization creation by any single account.
 
 Two interchangeable implementations exist behind the same `Allower`
 interface, chosen at startup (`cmd/server/main.go: newRateLimiters`):
@@ -184,8 +188,10 @@ not taken during this foundation-building pass; tracked in
 - CSRF protection (not yet relevant — no cookie-based auth flow exists; the
   session token is a bearer token, not a cookie, so CSRF is out of scope
   until a cookie-based web session flow is added)
-- Rate limiting on endpoints beyond `/auth/login`, `/auth/signup`, and
-  `/ai/chat` — every other endpoint remains unlimited
+- Rate limiting on endpoints beyond `/auth/login`, `/auth/signup`,
+  `/ai/chat`, and `/organizations` — every other endpoint remains unlimited
+  (most mutations beyond these are already `organization.manage`-gated,
+  which meaningfully narrows who can even attempt abuse)
 - Upload validation (no upload endpoints exist yet)
 - External KMS/vault integration for secrets (current implementation is a
   self-contained AES-256-GCM scheme — see Secrets above)

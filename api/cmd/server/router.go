@@ -29,23 +29,24 @@ import (
 )
 
 type apiDeps struct {
-	log         *slog.Logger
-	identity    *identity.Service
-	tenancy     *tenancy.Service
-	audit       *audit.Service
-	infra       *infrastructure.Service
-	apps        *applications.Service
-	jobs        *jobs.Service
-	ai          *ai.Service
-	secrets     *secrets.Service // nil if NODERA_SECRETS_ENCRYPTION_KEY is not configured — see main.go
-	tools       *tools.Registry
-	agents      *agents.Service
-	rbac        *rbac.Service
-	pool        *pgxpool.Pool
-	loginRate   ratelimit.Allower
-	signupRate  ratelimit.Allower
-	aiChatRate  ratelimit.Allower
-	corsOrigins []string
+	log           *slog.Logger
+	identity      *identity.Service
+	tenancy       *tenancy.Service
+	audit         *audit.Service
+	infra         *infrastructure.Service
+	apps          *applications.Service
+	jobs          *jobs.Service
+	ai            *ai.Service
+	secrets       *secrets.Service // nil if NODERA_SECRETS_ENCRYPTION_KEY is not configured — see main.go
+	tools         *tools.Registry
+	agents        *agents.Service
+	rbac          *rbac.Service
+	pool          *pgxpool.Pool
+	loginRate     ratelimit.Allower
+	signupRate    ratelimit.Allower
+	aiChatRate    ratelimit.Allower
+	createOrgRate ratelimit.Allower
+	corsOrigins   []string
 }
 
 func newRouter(d apiDeps) http.Handler {
@@ -247,6 +248,17 @@ func (d apiDeps) handleListOrganizations(w http.ResponseWriter, r *http.Request)
 }
 
 func (d apiDeps) handleCreateOrganization(w http.ResponseWriter, r *http.Request) {
+	userID := userIDFromRequest(r)
+
+	// Rate limit by user rather than IP — organization creation is only
+	// reachable once authenticated, so the actor performing it is already
+	// known and stable, unlike the pre-auth signup/login endpoints (which
+	// key by IP because there's no user identity yet to key by).
+	if d.createOrgRate != nil && !d.createOrgRate.Allow(userID.String()) {
+		httpserver.WriteError(w, r, apierr.New(apierr.CodeRateLimited, "too many organizations created, try again shortly"))
+		return
+	}
+
 	var body struct {
 		Name string `json:"name"`
 		Slug string `json:"slug"`
@@ -254,7 +266,7 @@ func (d apiDeps) handleCreateOrganization(w http.ResponseWriter, r *http.Request
 	if !decodeJSON(w, r, &body) {
 		return
 	}
-	org, err := d.tenancy.CreateOrganization(r.Context(), userIDFromRequest(r), body.Name, body.Slug)
+	org, err := d.tenancy.CreateOrganization(r.Context(), userID, body.Name, body.Slug)
 	if err != nil {
 		httpserver.WriteError(w, r, err)
 		return
