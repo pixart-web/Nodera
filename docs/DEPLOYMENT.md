@@ -18,10 +18,14 @@ filled in yet (rule 30).
 3. **A production DB role with `UPDATE`/`DELETE` revoked on `audit_log`**
    (see `docs/SECURITY.md`) — depends on how the production role/schema
    layout is finalized.
-4. **Redis** — still optional. The jobs worker (`internal/jobs`) polls
-   Postgres directly (`FOR UPDATE SKIP LOCKED`); Redis becomes relevant only
-   if/when a shared, multi-instance-safe queue or rate limiter is added
-   (today's rate limiter is in-process only — `docs/SECURITY.md`).
+4. **Redis** — optional but recommended for a multi-instance deployment.
+   The jobs worker (`internal/jobs`) still polls Postgres directly
+   (`FOR UPDATE SKIP LOCKED`) regardless. Rate limiting
+   (`docs/SECURITY.md`), though, falls back to an in-process limiter when
+   `NODERA_REDIS_URL` is unset — correct for one instance, but each
+   instance then enforces its own separate budget rather than one shared
+   across the deployment. Set `NODERA_REDIS_URL` in production to get a
+   single shared limit across instances.
 5. **TLS termination** — not decided (reverse proxy vs. Go's own TLS); no
    assumption made yet.
 6. **`NODERA_SECRETS_ENCRYPTION_KEY`** — a real, securely-generated

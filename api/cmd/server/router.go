@@ -40,9 +40,9 @@ type apiDeps struct {
 	tools       *tools.Registry
 	agents      *agents.Service
 	pool        *pgxpool.Pool
-	loginRate   *ratelimit.Limiter
-	signupRate  *ratelimit.Limiter
-	aiChatRate  *ratelimit.Limiter
+	loginRate   ratelimit.Allower
+	signupRate  ratelimit.Allower
+	aiChatRate  ratelimit.Allower
 	corsOrigins []string
 }
 

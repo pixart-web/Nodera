@@ -226,6 +226,44 @@ scanning in CI (`govulncheck`, `npm audit`).
       `lib/types.ts`, still tracked below)
 - [x] Docs (`AGENTS.md`, `API.md`, `README.md`) updated to match
 
+**Phase 14** — this pass:
+- [x] `internal/platform/ratelimit.RedisLimiter`: a Redis-backed fixed-
+      window limiter implementing the same `Allower` interface as the
+      existing in-process `Limiter`, so `cmd/server` picks one at startup
+      without the rest of the codebase (router, handlers) caring which —
+      resolves the "multi-instance-safe limiter" half of this roadmap item
+- [x] `cmd/server/main.go: newRateLimiters` — connects to Redis and
+      verifies it with a startup `PING` when `NODERA_REDIS_URL` is set (a
+      misconfigured URL fails startup loudly rather than silently falling
+      back to per-instance limits); falls back to the in-process `Limiter`
+      when unset, same behavior as before this change
+- [x] Deliberate fail-open policy on a Redis error mid-request (logged,
+      not silent) — a brief Redis outage degrades rate limiting rather
+      than taking down login/signup/AI chat for every legitimate user;
+      documented in `docs/SECURITY.md` and in code
+- [x] 4 new integration tests against a real local Redis (`-race` clean):
+      limit enforcement, key independence, window expiry, and — the actual
+      point of this type over the in-process one — two independent Redis
+      clients (standing in for two API process instances) sharing one
+      counter, proving the "shared across instances" property directly
+      rather than only asserting it in a comment
+- [x] Verified live: booted the server with `NODERA_REDIS_URL` unset
+      (in-process fallback, confirmed by the startup log line) and again
+      with it set (confirmed the Redis-backed log line), tripped the real
+      `/auth/signup` limiter over HTTP and confirmed the counter key
+      (`ratelimit:signup:<ip>`) existed in Redis with the request that
+      tripped it returning `429 RATE_LIMITED`
+- [x] CI: added a `redis:7-alpine` service container and
+      `NODERA_TEST_REDIS_URL` so the new tests run in the same pipeline as
+      everything else, not just locally
+- [x] `govulncheck` clean on the new `github.com/redis/go-redis/v9`
+      dependency
+- [x] Docs (`SECURITY.md`, `DEPLOYMENT.md`, `README.md`, `.env.example`)
+      updated; also corrected two already-stale bullets in `SECURITY.md`'s
+      "not yet implemented" list left over from earlier phases (signup
+      rate limiting and CI vulnerability scanning were both already done,
+      just not removed from that list at the time)
+
 ## Next up
 
 1. **Concrete job types**: the worker dispatcher is real but nothing
@@ -234,8 +272,9 @@ scanning in CI (`govulncheck`, `npm audit`).
 2. **More tool handlers**: `get_container_logs` needs a container domain
    that doesn't exist yet; `create_backup`/`verify_backup` need the jobs
    system wired to an actual backup mechanism.
-3. **Rate limiting beyond `/auth/login`, `/auth/signup`, and `/ai/chat`**,
-   and a Redis-backed limiter for multi-instance deployments.
+3. **Rate limiting on endpoints beyond `/auth/login`, `/auth/signup`, and
+   `/ai/chat`** — every other endpoint remains unlimited (the Redis-backed
+   multi-instance limiter itself is now done, see Phase 14).
 4. **Generate the OpenAPI spec from code** instead of hand-maintaining it,
    and swap `web/`'s hand-written `lib/types.ts` over to the generated
    `lib/api-types.generated.ts`.

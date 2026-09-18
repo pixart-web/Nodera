@@ -1,14 +1,21 @@
-// Package ratelimit implements a simple in-process fixed-window rate
-// limiter. It is intentionally not Redis-backed (Redis is optional
-// infrastructure — see ADR-003) — good enough to blunt naive brute-force
-// login attempts against a single process; a multi-instance deployment
-// will need a shared (Redis) limiter, tracked in docs/ROADMAP.md.
+// Package ratelimit provides fixed-window rate limiting in two flavors:
+// Limiter (in-process, no dependencies) and RedisLimiter (shared state
+// across multiple API process instances — see redis.go). Both implement
+// Allower, so callers (cmd/server) pick whichever is appropriate for the
+// deployment without the rest of the codebase caring which one it got.
 package ratelimit
 
 import (
 	"sync"
 	"time"
 )
+
+// Allower is satisfied by both Limiter and RedisLimiter.
+type Allower interface {
+	// Allow reports whether a call under key is permitted right now,
+	// recording the call if so.
+	Allow(key string) bool
+}
 
 type window struct {
 	count     int

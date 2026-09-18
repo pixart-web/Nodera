@@ -108,8 +108,8 @@ self-contained implementation.
 
 ## Rate limiting — IMPLEMENTED (login, signup, AI chat)
 
-`internal/platform/ratelimit` is a simple in-process fixed-window limiter
-(`cmd/server/router.go`), applied to:
+`internal/platform/ratelimit` applies fixed-window limits
+(`cmd/server/router.go`) to:
 - `POST /auth/login` — 5 attempts / 5 minutes per client IP
 - `POST /auth/signup` — 3 attempts / hour per client IP
 - `POST /api/v1/ai/chat` — 60 requests / minute **per organization**
@@ -123,9 +123,19 @@ integration) running up real provider cost or crowding out other tenants
 on a shared local model; an IP-keyed limiter wouldn't even bound that
 (many legitimate calls can share an IP behind NAT).
 
-It is deliberately in-process, not Redis-backed, for all three — adequate
-for a single API instance; a multi-instance deployment will need a shared
-limiter (tracked in `docs/ROADMAP.md`).
+Two interchangeable implementations exist behind the same `Allower`
+interface, chosen at startup (`cmd/server/main.go: newRateLimiters`):
+- **`Limiter`** (in-process, no dependencies) — the default when
+  `NODERA_REDIS_URL` is unset. Correct for a single API instance; counters
+  don't survive a restart and aren't shared with any other instance.
+- **`RedisLimiter`** — used automatically when `NODERA_REDIS_URL` is set,
+  verified reachable with a startup `PING` (a misconfigured URL fails
+  startup rather than silently falling back to the in-process limiter).
+  Counters are shared across every API process instance pointed at the
+  same Redis, so the limit is enforced deployment-wide, not per-process.
+  On a Redis error mid-request it **fails open** (allows the call, logs
+  the error) rather than turning a Redis blip into a full login/signup/AI
+  outage for every legitimate user — see `internal/platform/ratelimit/redis.go`.
 
 ## Secure headers — IMPLEMENTED
 
@@ -174,9 +184,9 @@ not taken during this foundation-building pass; tracked in
 - CSRF protection (not yet relevant — no cookie-based auth flow exists; the
   session token is a bearer token, not a cookie, so CSRF is out of scope
   until a cookie-based web session flow is added)
-- Rate limiting on endpoints other than `/auth/login` (e.g. `/auth/signup`)
+- Rate limiting on endpoints beyond `/auth/login`, `/auth/signup`, and
+  `/ai/chat` — every other endpoint remains unlimited
 - Upload validation (no upload endpoints exist yet)
-- Dependency vulnerability scanning in CI
 - External KMS/vault integration for secrets (current implementation is a
   self-contained AES-256-GCM scheme — see Secrets above)
 
