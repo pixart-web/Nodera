@@ -33,6 +33,7 @@ import (
 	"github.com/nodera/nodera/internal/secrets"
 	"github.com/nodera/nodera/internal/tenancy"
 	"github.com/nodera/nodera/internal/tools"
+	"github.com/nodera/nodera/internal/tools/handlers"
 	"github.com/nodera/nodera/migrations"
 )
 
@@ -115,6 +116,7 @@ func run() error {
 
 	toolsSvc := tools.New(pool, auditSvc)
 	toolsSvc.RegisterHandler("get_server_metrics", newGetServerMetricsHandler(infraSvc))
+	toolsSvc.RegisterHandler("check_ssl", handlers.CheckSSL)
 
 	worker := jobs.NewWorker(pool)
 	// No handlers are registered yet (docs/ROADMAP.md: "jobs worker" ships
@@ -137,6 +139,7 @@ func run() error {
 		tools:       toolsSvc,
 		pool:        pool,
 		loginRate:   ratelimit.New(5, 5*time.Minute),
+		signupRate:  ratelimit.New(3, time.Hour),
 		corsOrigins: cfg.HTTP.CORSOrigins,
 	}
 

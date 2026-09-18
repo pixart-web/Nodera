@@ -196,6 +196,11 @@ func (r *Registry) runHandler(ctx context.Context, ac authctx.AuthContext, tool 
 
 // --- Approvals ---
 
+// defaultApprovalTTL is how long a pending approval stays actionable
+// before it's treated as expired. Not yet configurable per-tool or
+// per-organization — a deliberate phase-1 simplification (docs/AGENTS.md).
+const defaultApprovalTTL = 24 * time.Hour
+
 type Approval struct {
 	ID              uuid.UUID       `json:"id"`
 	RequestedAction string          `json:"requested_action"`
@@ -205,6 +210,7 @@ type Approval struct {
 	Parameters      json.RawMessage `json:"parameters"`
 	Status          string          `json:"status"`
 	CreatedAt       time.Time       `json:"created_at"`
+	ExpiresAt       *time.Time      `json:"expires_at,omitempty"`
 	DecidedAt       *time.Time      `json:"decided_at,omitempty"`
 	DecisionReason  string          `json:"decision_reason,omitempty"`
 	ExecutionResult json.RawMessage `json:"execution_result,omitempty"`
@@ -222,15 +228,17 @@ func (r *Registry) createApproval(ctx context.Context, ac authctx.AuthContext, t
 		userID = &id
 	}
 
+	expiresAt := time.Now().Add(defaultApprovalTTL)
+
 	var a Approval
 	err = r.pool.QueryRow(ctx, `
 		INSERT INTO approvals (organization_id, requested_action, requesting_user_id, risk_level,
-		                        resource_type, resource_id, parameters)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		                        resource_type, resource_id, parameters, expires_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 		RETURNING id, requested_action, risk_level, COALESCE(resource_type, ''), COALESCE(resource_id, ''),
-		          parameters, status, created_at
-	`, ac.OrganizationID, tool.Key, userID, tool.RiskLevel, in.ResourceType, in.ResourceID, paramsJSON).Scan(
-		&a.ID, &a.RequestedAction, &a.RiskLevel, &a.ResourceType, &a.ResourceID, &a.Parameters, &a.Status, &a.CreatedAt,
+		          parameters, status, created_at, expires_at
+	`, ac.OrganizationID, tool.Key, userID, tool.RiskLevel, in.ResourceType, in.ResourceID, paramsJSON, expiresAt).Scan(
+		&a.ID, &a.RequestedAction, &a.RiskLevel, &a.ResourceType, &a.ResourceID, &a.Parameters, &a.Status, &a.CreatedAt, &a.ExpiresAt,
 	)
 	if err != nil {
 		return Approval{}, apierr.Wrap(apierr.CodeInternal, "failed to create approval request", err)
@@ -246,13 +254,34 @@ func (r *Registry) createApproval(ctx context.Context, ac authctx.AuthContext, t
 	return a, nil
 }
 
+// expirePending marks any pending approval past its expires_at as
+// 'expired'. There is no background sweep (no worker/cron) — it runs
+// lazily at the start of ListApprovals and DecideApproval, the two places
+// that actually need an up-to-date status, which is sufficient for a
+// human-facing approval queue at phase-1 scale and needs no new
+// infrastructure (a scheduled jobs.Enqueue-driven sweep is the natural
+// upgrade if this ever needs to run without anyone calling those methods).
+func (r *Registry) expirePending(ctx context.Context, orgID uuid.UUID) error {
+	_, err := r.pool.Exec(ctx, `
+		UPDATE approvals SET status = 'expired'
+		WHERE organization_id = $1 AND status = 'pending' AND expires_at IS NOT NULL AND expires_at < now()
+	`, orgID)
+	if err != nil {
+		return apierr.Wrap(apierr.CodeInternal, "failed to expire stale approvals", err)
+	}
+	return nil
+}
+
 func (r *Registry) ListApprovals(ctx context.Context, ac authctx.AuthContext, status string) ([]Approval, error) {
 	if err := rbac.Require(ac, "approvals.decide"); err != nil {
 		return nil, err
 	}
+	if err := r.expirePending(ctx, ac.OrganizationID); err != nil {
+		return nil, err
+	}
 	rows, err := r.pool.Query(ctx, `
 		SELECT id, requested_action, risk_level, COALESCE(resource_type, ''), COALESCE(resource_id, ''),
-		       parameters, status, created_at, decided_at, COALESCE(decision_reason, ''),
+		       parameters, status, created_at, expires_at, decided_at, COALESCE(decision_reason, ''),
 		       COALESCE(execution_result, 'null')
 		FROM approvals
 		WHERE organization_id = $1 AND ($2 = '' OR status = $2)
@@ -267,7 +296,7 @@ func (r *Registry) ListApprovals(ctx context.Context, ac authctx.AuthContext, st
 	for rows.Next() {
 		var a Approval
 		if err := rows.Scan(&a.ID, &a.RequestedAction, &a.RiskLevel, &a.ResourceType, &a.ResourceID,
-			&a.Parameters, &a.Status, &a.CreatedAt, &a.DecidedAt, &a.DecisionReason, &a.ExecutionResult); err != nil {
+			&a.Parameters, &a.Status, &a.CreatedAt, &a.ExpiresAt, &a.DecidedAt, &a.DecisionReason, &a.ExecutionResult); err != nil {
 			return nil, apierr.Wrap(apierr.CodeInternal, "failed to scan approval", err)
 		}
 		out = append(out, a)
@@ -284,6 +313,9 @@ func (r *Registry) ListApprovals(ctx context.Context, ac authctx.AuthContext, st
 // it authorized may still not exist).
 func (r *Registry) DecideApproval(ctx context.Context, ac authctx.AuthContext, id uuid.UUID, approve bool, reason string) (Approval, error) {
 	if err := rbac.Require(ac, "approvals.decide"); err != nil {
+		return Approval{}, err
+	}
+	if err := r.expirePending(ctx, ac.OrganizationID); err != nil {
 		return Approval{}, err
 	}
 
@@ -345,11 +377,11 @@ func (r *Registry) DecideApproval(ctx context.Context, ac authctx.AuthContext, i
 		                      decision_reason = $4, execution_result = $5
 		WHERE id = $1
 		RETURNING id, requested_action, risk_level, COALESCE(resource_type, ''), COALESCE(resource_id, ''),
-		          parameters, status, created_at, decided_at, COALESCE(decision_reason, ''),
+		          parameters, status, created_at, expires_at, decided_at, COALESCE(decision_reason, ''),
 		          COALESCE(execution_result, 'null')
 	`, id, newStatus, decidedByUserID, reason, executionResult).Scan(
 		&a.ID, &a.RequestedAction, &a.RiskLevel, &a.ResourceType, &a.ResourceID,
-		&a.Parameters, &a.Status, &a.CreatedAt, &a.DecidedAt, &a.DecisionReason, &a.ExecutionResult,
+		&a.Parameters, &a.Status, &a.CreatedAt, &a.ExpiresAt, &a.DecidedAt, &a.DecisionReason, &a.ExecutionResult,
 	)
 	if err != nil {
 		return Approval{}, apierr.Wrap(apierr.CodeInternal, "failed to record approval decision", err)

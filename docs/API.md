@@ -101,8 +101,9 @@ affecting every organization on this deployment. This is a deliberate
 phase-1 simplification for a single-administrating-org deployment, not an
 oversight — see `internal/ai/registry.go`.
 
-`POST /auth/login` is rate limited (5 attempts / 5 minutes per client IP);
-exceeding it returns `429` with code `RATE_LIMITED`.
+`POST /auth/login` (5 attempts / 5 minutes) and `POST /auth/signup`
+(3 attempts / hour) are rate limited per client IP; exceeding either
+returns `429` with code `RATE_LIMITED`.
 
 Everything else described in `docs/ARCHITECTURE.md` (the agent execution
 loop, cloud AI provider adapters) is schema/interfaces only — no HTTP
@@ -114,5 +115,5 @@ surface exists for them yet (PLANNED, tracked in `docs/ROADMAP.md`).
 - Pagination on list endpoints (today `GET /infrastructure/nodes` and
   `GET /audit` return unpaginated/simple-limit results — fine at current
   scale, will need `limit`/`cursor` params before this matters in production)
-- Rate limiting on endpoints other than `POST /auth/login`
+- Rate limiting on endpoints other than `POST /auth/login` and `POST /auth/signup`
 - Service-account-issued API tokens (user-owned tokens work today; see `docs/API.md` Authenticating)

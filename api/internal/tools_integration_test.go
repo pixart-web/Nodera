@@ -269,3 +269,37 @@ func TestTools_RejectingApprovalNeverExecutes(t *testing.T) {
 		t.Fatal("a rejected approval must never execute the tool's handler")
 	}
 }
+
+// A pending approval past its expires_at is lazily marked 'expired' the
+// next time it's touched (ListApprovals or DecideApproval), and can no
+// longer be decided (docs/AGENTS.md — no background sweep exists yet).
+func TestTools_ExpiredApprovalCannotBeDecided(t *testing.T) {
+	pool := testhelpers.RequirePool(t)
+	ctx := context.Background()
+	h := newHarness(pool)
+	ac, _ := h.newOwnerContext(t, ctx, "expiry-owner@nodera.dev")
+
+	toolsSvc := tools.New(pool, h.audit)
+	result, err := toolsSvc.Execute(ctx, ac, "restart_container", tools.ExecuteInput{ResourceType: "container", ResourceID: "x"})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	// Force it into the past — simulating time passing without needing to
+	// wait out the real 24h default TTL.
+	if _, err := pool.Exec(ctx, `UPDATE approvals SET expires_at = now() - interval '1 minute' WHERE id = $1`, *result.ApprovalID); err != nil {
+		t.Fatalf("failed to backdate approval expiry: %v", err)
+	}
+
+	approvals, err := toolsSvc.ListApprovals(ctx, ac, "expired")
+	if err != nil {
+		t.Fatalf("ListApprovals: %v", err)
+	}
+	if len(approvals) != 1 || approvals[0].ID != *result.ApprovalID {
+		t.Fatalf("expected the backdated approval to show as expired, got %+v", approvals)
+	}
+
+	if _, err := toolsSvc.DecideApproval(ctx, ac, *result.ApprovalID, true, "too late"); err == nil {
+		t.Fatal("expected deciding an expired approval to fail")
+	}
+}

@@ -39,6 +39,7 @@ type apiDeps struct {
 	tools       *tools.Registry
 	pool        *pgxpool.Pool
 	loginRate   *ratelimit.Limiter
+	signupRate  *ratelimit.Limiter
 	corsOrigins []string
 }
 
@@ -129,6 +130,14 @@ func (d apiDeps) handleReady(w http.ResponseWriter, r *http.Request) {
 // --- auth ---
 
 func (d apiDeps) handleSignUp(w http.ResponseWriter, r *http.Request) {
+	// Rate limit by client IP — bounds automated account-creation abuse
+	// (spam accounts, credential-stuffing setup). See handleLogin for why
+	// this is IP-keyed rather than email-keyed.
+	if d.signupRate != nil && !d.signupRate.Allow(clientIP(r)) {
+		httpserver.WriteError(w, r, apierr.New(apierr.CodeRateLimited, "too many signup attempts, try again shortly"))
+		return
+	}
+
 	var body struct {
 		Email       string `json:"email"`
 		Password    string `json:"password"`

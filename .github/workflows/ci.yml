@@ -53,8 +53,12 @@ jobs:
         working-directory: api
         run: go test ./... -race
 
+      - name: govulncheck
+        working-directory: api
+        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+
   web:
-    name: Web (typecheck, build)
+    name: Web (typecheck, build, audit)
     runs-on: ubuntu-latest
 
     steps:
@@ -77,3 +81,7 @@ jobs:
       - name: build
         working-directory: web
         run: npm run build
+
+      - name: npm audit (fails only on critical — see docs/SECURITY.md for the known, accepted high-severity PostCSS finding)
+        working-directory: web
+        run: npm audit --audit-level=critical

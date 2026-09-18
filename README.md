@@ -38,11 +38,11 @@ schema/interfaces, no production backend yet) · **PLANNED** (not started).
 | AI profiles/routing/usage | IMPLEMENTED | Deterministic router with enforced privacy-level policy, real usage tracking; a registry row with no registered Go adapter correctly fails closed rather than fabricating a response |
 | AI provider adapters | IMPLEMENTED (Ollama) | `local-echo` (test) + a real Ollama adapter (`NODERA_OLLAMA_BASE_URL`); cloud adapters (OpenAI, Anthropic, ...) are PLANNED |
 | Secrets | IMPLEMENTED | AES-256-GCM encrypted at rest; values never exposed over HTTP, only `Reveal`-able in-process; optional at config level |
-| Tool Gateway + approvals | IMPLEMENTED | Permission → risk-tier → approval → execution → audit pipeline is real; `get_server_metrics` has a real handler, every other seeded tool honestly reports `NOT_IMPLEMENTED` |
+| Tool Gateway + approvals | IMPLEMENTED | Permission → risk-tier → approval → execution → audit pipeline is real, with expiration; `get_server_metrics` and `check_ssl` (a genuine live TLS check) have real handlers, every other seeded tool honestly reports `NOT_IMPLEMENTED` |
 | Agent execution loop | PLANNED | `agents` table exists; nothing drives `system_instructions` through the AI gateway or enforces `allowed_tool_keys` yet |
-| Rate limiting | IMPLEMENTED | In-process, `/auth/login` only (5/5min per IP); other endpoints and a multi-instance-safe (Redis) limiter are PLANNED |
+| Rate limiting | IMPLEMENTED | In-process, per client IP: `/auth/login` (5/5min), `/auth/signup` (3/hour); other endpoints and a multi-instance-safe (Redis) limiter are PLANNED |
 | Secure headers | IMPLEMENTED | `nosniff`, `DENY`, `no-referrer`, `no-store` on every response |
-| CI | IMPLEMENTED | `gofmt`/`vet`/`build`/`test -race` on every push, via GitHub Actions |
+| CI | IMPLEMENTED | `gofmt`/`vet`/`build`/`test -race`/`govulncheck` (API) + `typecheck`/`build`/`npm audit` (web) on every push |
 | Dashboard / frontend | IMPLEMENTED | Next.js + TypeScript control plane UI (`web/`) — login, org picker, infrastructure, applications, jobs, secrets, audit; every page reads/writes real API data, no fabricated placeholders |
 | Node Agent, AI Gateway, Agent Runtime as separate services | PLANNED | Currently packages inside the one Core API binary (ADR-002) |
 

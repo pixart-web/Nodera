@@ -30,25 +30,40 @@ yet — those are different facts, both recorded truthfully, rule 36).
 Rejecting never executes anything, proven by
 `TestTools_RejectingApprovalNeverExecutes`.
 
+A pending approval also expires (`defaultApprovalTTL`, 24h, not yet
+configurable). There is no background sweep — expiry is checked lazily at
+the top of `ListApprovals` and `DecideApproval`, which is sufficient for a
+human-facing queue and needs no new worker infrastructure; a scheduled
+`jobs.Enqueue`-driven sweep is the natural upgrade if this ever needs to
+run without anyone calling those methods. Verified by
+`TestTools_ExpiredApprovalCannotBeDecided`.
+
 ## What's actually implemented vs. not, per tool
 
-Only `get_server_metrics` has a registered handler
-(`cmd/server/main.go: newGetServerMetricsHandler`, wrapping
-`infrastructure.Service.Get`) and `implemented=true` in the registry
-(migration `0010_tools_get_server_metrics.sql`). It returns the node's
-last-known **inventory** record (cpu_cores, memory_mb, storage_gb, status,
-last_seen_at) — explicitly labeled `"source": "inventory"` in its result,
-not live-sampled telemetry, since no Node Agent exists yet to report that
-(`docs/INFRASTRUCTURE.md`).
+Two tools have registered handlers and `implemented=true`:
+
+- **`get_server_metrics`** (`cmd/server/main.go: newGetServerMetricsHandler`,
+  wrapping `infrastructure.Service.Get`, migration `0010`). Returns the
+  node's last-known **inventory** record (cpu_cores, memory_mb, storage_gb,
+  status, last_seen_at) — explicitly labeled `"source": "inventory"`, not
+  live-sampled telemetry, since no Node Agent exists yet to report that
+  (`docs/INFRASTRUCTURE.md`).
+- **`check_ssl`** (`internal/tools/handlers/checkssl.go`, migration `0011`).
+  Performs a genuine TLS handshake against the given host and reports the
+  real leaf certificate's validity window, days remaining, and whether it
+  verifies against the system trust store — verified live against
+  `github.com` and by unit tests against a real local TLS listener
+  (`httptest.NewTLSServer`), not a fabricated response.
 
 Every other seeded tool (`get_container_logs`, `restart_container`,
 `create_backup`, `verify_backup`, `deploy_application`,
-`rollback_application`, `check_ssl`, `scan_wordpress`, `query_database`)
-remains `implemented=false` — calling one returns `NOT_IMPLEMENTED`, and
-approving a privileged/critical one records that same honest outcome
-(verified live and by `TestTools_ApprovingUnimplementedToolReportsNotImplemented`).
-This is the deliberately minimal proof that the whole pipeline (permission
-→ risk tier → approval → execution → audit) works end to end — not a claim
+`rollback_application`, `scan_wordpress`, `query_database`) remains
+`implemented=false` — calling one returns `NOT_IMPLEMENTED`, and approving
+a privileged/critical one records that same honest outcome (verified live
+and by `TestTools_ApprovingUnimplementedToolReportsNotImplemented`). This
+is a deliberately minimal proof that the whole pipeline (permission → risk
+tier → approval → execution → audit) works end to end for more than one
+tool shape (immediate-read and immediate-external-check) — not a claim
 that the rest of the catalog is built.
 
 ## Why the tool catalog is seeded ahead of most handlers
@@ -89,6 +104,6 @@ agent-specific behavior.
 - Agent execution loop / scheduling, and enforcing an agent's
   `allowed_tool_keys` (only human callers hit `tools.Execute` today, via
   the HTTP API, not an autonomous agent)
-- Approval expiration (`approvals.expires_at` exists in the schema; nothing
-  reads or enforces it yet)
-- Handlers for every tool besides `get_server_metrics`
+- A background approval-expiry sweep independent of `ListApprovals`/
+  `DecideApproval` being called, and a per-tool/per-org-configurable TTL
+- Handlers for tools besides `get_server_metrics` and `check_ssl`

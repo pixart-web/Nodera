@@ -106,16 +106,17 @@ self-contained implementation.
 - Sensitive operations (e.g. node registration) call `audit.Record` with
   actor, action, resource, and resulting state.
 
-## Rate limiting — IMPLEMENTED (login only)
+## Rate limiting — IMPLEMENTED (login and signup only)
 
-`internal/platform/ratelimit` is a simple in-process fixed-window limiter
-(5 attempts per 5 minutes per client IP), applied to `POST /auth/login`
-(`cmd/server/router.go`). It is deliberately in-process, not Redis-backed —
-adequate for a single API instance; a multi-instance deployment will need a
-shared limiter (tracked in `docs/ROADMAP.md`). Keyed by IP rather than the
-submitted email, so an attacker can't use the endpoint to lock out a victim
-account by exhausting *their* budget (a form of denial-of-service the naive
-per-email design would enable).
+`internal/platform/ratelimit` is a simple in-process fixed-window limiter,
+applied to `POST /auth/login` (5 attempts / 5 minutes per client IP) and
+`POST /auth/signup` (3 attempts / hour per client IP) — `cmd/server/router.go`.
+It is deliberately in-process, not Redis-backed — adequate for a single API
+instance; a multi-instance deployment will need a shared limiter (tracked
+in `docs/ROADMAP.md`). Keyed by IP rather than the submitted email, so an
+attacker can't use either endpoint to lock out a victim account/address by
+exhausting *their* budget (a form of denial-of-service the naive per-email
+design would enable).
 
 ## Secure headers — IMPLEMENTED
 
@@ -127,11 +128,16 @@ to restrict yet; one will be added if/when the API ever serves any HTML.
 
 ## CI — IMPLEMENTED
 
-`.github/workflows/ci.yml` runs on every push/PR: `gofmt -l` (must be
-empty), `go vet`, `go build`, and `go test ./... -race` against a real
-Postgres service container. Dependency vulnerability scanning
-(`govulncheck` or similar) is not yet wired in — tracked in
-`docs/ROADMAP.md`.
+`.github/workflows/ci.yml` runs on every push/PR:
+- **API**: `gofmt -l` (must be empty), `go vet`, `go build`,
+  `go test ./... -race` against a real Postgres service container, and
+  `govulncheck` (fails the build on a known-exploitable vulnerability
+  reachable from Nodera's own code — not merely present in a dependency
+  tree, which is a much noisier signal).
+- **Web**: `tsc --noEmit`, `next build`, and `npm audit --audit-level=critical`
+  (fails only on `critical` — the known high-severity PostCSS finding below
+  stays visible in the log without blocking every PR on an issue that
+  needs a Next.js major upgrade to fully resolve).
 
 ## CORS — IMPLEMENTED
 
