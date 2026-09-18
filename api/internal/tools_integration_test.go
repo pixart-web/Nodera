@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -356,5 +357,150 @@ func TestTools_RunExpirySweepExpiresAcrossOrganizations(t *testing.T) {
 	}
 	if len(approvalsB) != 1 || approvalsB[0].ID != *resultB.ApprovalID {
 		t.Fatalf("expected org B's approval to remain pending, got %+v", approvalsB)
+	}
+}
+
+// approvalTTLTolerance accounts for the real (small) wall-clock gap between
+// this test computing an expected expires_at and the server computing its
+// own via time.Now() inside createApproval.
+const approvalTTLTolerance = 5 * time.Second
+
+// With no per-org override, a new approval's expiry is defaultApprovalTTL
+// (24h) after creation.
+func TestTools_ApprovalTTLDefaultsWhenNoOverride(t *testing.T) {
+	pool := testhelpers.RequirePool(t)
+	ctx := context.Background()
+	h := newHarness(pool)
+	ac, _ := h.newOwnerContext(t, ctx, "ttl-default-owner@nodera.dev")
+
+	toolsSvc := tools.New(pool, h.audit)
+	if _, err := toolsSvc.Execute(ctx, ac, "restart_container", tools.ExecuteInput{ResourceType: "container", ResourceID: "x"}); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	approvals, err := toolsSvc.ListApprovals(ctx, ac, "pending")
+	if err != nil {
+		t.Fatalf("ListApprovals: %v", err)
+	}
+	a := approvals[0]
+	want := a.CreatedAt.Add(24 * time.Hour)
+	if diff := a.ExpiresAt.Sub(want); diff < -approvalTTLTolerance || diff > approvalTTLTolerance {
+		t.Fatalf("expected expires_at ~%v (24h default) after created_at, got %v (diff %v)", want, *a.ExpiresAt, diff)
+	}
+}
+
+// SetApprovalTTL's override takes effect for approvals created after it,
+// producing a materially different expires_at than the 24h default.
+func TestTools_SetApprovalTTLOverrideAppliesToNewApprovals(t *testing.T) {
+	pool := testhelpers.RequirePool(t)
+	ctx := context.Background()
+	h := newHarness(pool)
+	ac, _ := h.newOwnerContext(t, ctx, "ttl-override-owner@nodera.dev")
+
+	toolsSvc := tools.New(pool, h.audit)
+
+	setting, err := toolsSvc.SetApprovalTTL(ctx, ac, "restart_container", 10*time.Minute)
+	if err != nil {
+		t.Fatalf("SetApprovalTTL: %v", err)
+	}
+	if setting.ApprovalTTLSeconds != 600 {
+		t.Fatalf("expected 600 seconds, got %d", setting.ApprovalTTLSeconds)
+	}
+
+	result, err := toolsSvc.Execute(ctx, ac, "restart_container", tools.ExecuteInput{ResourceType: "container", ResourceID: "y"})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	approvals, err := toolsSvc.ListApprovals(ctx, ac, "pending")
+	if err != nil {
+		t.Fatalf("ListApprovals: %v", err)
+	}
+	var a tools.Approval
+	for _, cand := range approvals {
+		if cand.ID == *result.ApprovalID {
+			a = cand
+		}
+	}
+	want := a.CreatedAt.Add(10 * time.Minute)
+	if diff := a.ExpiresAt.Sub(want); diff < -approvalTTLTolerance || diff > approvalTTLTolerance {
+		t.Fatalf("expected expires_at ~%v (10m override) after created_at, got %v (diff %v)", want, *a.ExpiresAt, diff)
+	}
+
+	overrides, err := toolsSvc.ListApprovalTTLOverrides(ctx, ac)
+	if err != nil {
+		t.Fatalf("ListApprovalTTLOverrides: %v", err)
+	}
+	if len(overrides) != 1 || overrides[0].ToolKey != "restart_container" || overrides[0].ApprovalTTLSeconds != 600 {
+		t.Fatalf("expected the override to be listed, got %+v", overrides)
+	}
+
+	// ClearApprovalTTL reverts subsequent approvals back to the 24h default.
+	if err := toolsSvc.ClearApprovalTTL(ctx, ac, "restart_container"); err != nil {
+		t.Fatalf("ClearApprovalTTL: %v", err)
+	}
+	overridesAfterClear, err := toolsSvc.ListApprovalTTLOverrides(ctx, ac)
+	if err != nil {
+		t.Fatalf("ListApprovalTTLOverrides after clear: %v", err)
+	}
+	if len(overridesAfterClear) != 0 {
+		t.Fatalf("expected no overrides after clearing, got %+v", overridesAfterClear)
+	}
+
+	result2, err := toolsSvc.Execute(ctx, ac, "restart_container", tools.ExecuteInput{ResourceType: "container", ResourceID: "z"})
+	if err != nil {
+		t.Fatalf("Execute (after clear): %v", err)
+	}
+	approvals2, err := toolsSvc.ListApprovals(ctx, ac, "pending")
+	if err != nil {
+		t.Fatalf("ListApprovals (after clear): %v", err)
+	}
+	var a2 tools.Approval
+	for _, cand := range approvals2 {
+		if cand.ID == *result2.ApprovalID {
+			a2 = cand
+		}
+	}
+	want2 := a2.CreatedAt.Add(24 * time.Hour)
+	if diff := a2.ExpiresAt.Sub(want2); diff < -approvalTTLTolerance || diff > approvalTTLTolerance {
+		t.Fatalf("expected expires_at ~%v (back to 24h default) after created_at, got %v (diff %v)", want2, *a2.ExpiresAt, diff)
+	}
+}
+
+// SetApprovalTTL rejects TTLs outside [minApprovalTTL, maxApprovalTTL] and
+// unknown tool keys, before ever touching the database row.
+func TestTools_SetApprovalTTLRejectsInvalidInput(t *testing.T) {
+	pool := testhelpers.RequirePool(t)
+	ctx := context.Background()
+	h := newHarness(pool)
+	ac, _ := h.newOwnerContext(t, ctx, "ttl-invalid-owner@nodera.dev")
+
+	toolsSvc := tools.New(pool, h.audit)
+
+	if _, err := toolsSvc.SetApprovalTTL(ctx, ac, "restart_container", 1*time.Second); err == nil {
+		t.Fatal("expected a TTL below the minimum to be rejected")
+	}
+	if _, err := toolsSvc.SetApprovalTTL(ctx, ac, "restart_container", 365*24*time.Hour); err == nil {
+		t.Fatal("expected a TTL above the maximum to be rejected")
+	}
+	if _, err := toolsSvc.SetApprovalTTL(ctx, ac, "not_a_real_tool", 10*time.Minute); err == nil {
+		t.Fatal("expected setting a TTL for an unknown tool to be rejected")
+	}
+}
+
+// Configuring approval TTLs is gated by tools.manage, which a plain member
+// doesn't hold — distinct from approvals.decide and tools.privileged.
+func TestTools_SetApprovalTTLRequiresToolsManage(t *testing.T) {
+	pool := testhelpers.RequirePool(t)
+	ctx := context.Background()
+	h := newHarness(pool)
+	ac, _ := h.newOwnerContext(t, ctx, "ttl-perm-owner@nodera.dev")
+	memberAC := h.newMemberContext(t, ctx, ac.OrganizationID, "ttl-perm-member@nodera.dev")
+
+	toolsSvc := tools.New(pool, h.audit)
+
+	if _, err := toolsSvc.SetApprovalTTL(ctx, memberAC, "restart_container", 10*time.Minute); err == nil {
+		t.Fatal("expected a member without tools.manage to be forbidden from setting an approval TTL")
+	} else if ae, ok := err.(*apierr.Error); !ok || ae.Code != apierr.CodeForbidden {
+		t.Fatalf("expected FORBIDDEN, got %v", err)
 	}
 }

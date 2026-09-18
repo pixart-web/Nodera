@@ -35,8 +35,24 @@ yet — those are different facts, both recorded truthfully, rule 36).
 Rejecting never executes anything, proven by
 `TestTools_RejectingApprovalNeverExecutes`.
 
-A pending approval also expires (`defaultApprovalTTL`, 24h, not yet
-configurable). Expiry is checked two ways: lazily, at the top of
+A pending approval also expires — `defaultApprovalTTL` (24h) unless the
+organization has configured its own TTL for that specific tool via
+`organization_tool_settings` (migration `0013`; `tools.manage` permission,
+distinct from `approvals.decide` and every `tools.*` execution
+permission). `Registry.SetApprovalTTL`/`ClearApprovalTTL`/
+`ListApprovalTTLOverrides` manage those overrides
+(`PUT`/`DELETE`/`GET /api/v1/tools/{key}/approval-ttl` and
+`GET /api/v1/tools/approval-ttl`), bounded to
+`[minApprovalTTL, maxApprovalTTL]` = `[5m, 30d]`. `createApproval` resolves
+the effective TTL per call (`resolveApprovalTTL`) — changing an
+organization's override only affects approvals created afterward, never
+retroactively. Verified by `TestTools_ApprovalTTLDefaultsWhenNoOverride`
+and `TestTools_SetApprovalTTLOverrideAppliesToNewApprovals`, and live
+against the real HTTP API (setting a 10-minute override, confirming the
+next approval's `expires_at` was exactly 10 minutes after `created_at`,
+clearing it, and confirming the next one reverted to 24h).
+
+Expiry itself is checked two ways: lazily, at the top of
 `ListApprovals` and `DecideApproval` (scoped to the calling org — instant,
 no waiting on the background sweep), and by `Registry.RunExpirySweep`, run
 every 5 minutes across every organization by a goroutine started in
@@ -152,6 +168,4 @@ identity + execution substrate, not agent-specific behavior.
   doesn't exist as a package yet)
 - Any autonomous/LLM-directed tool selection or scheduling loop (by design,
   see above — rule 38)
-- A per-tool/per-org-configurable approval TTL (today's `defaultApprovalTTL`
-  is a single global 24h constant)
 - Handlers for tools besides `get_server_metrics` and `check_ssl`

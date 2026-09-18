@@ -114,6 +114,9 @@ func newRouter(d apiDeps) http.Handler {
 
 				r.Get("/tools", d.handleListTools)
 				r.Post("/tools/{key}/execute", d.handleExecuteTool)
+				r.Get("/tools/approval-ttl", d.handleListApprovalTTLOverrides)
+				r.Put("/tools/{key}/approval-ttl", d.handleSetApprovalTTL)
+				r.Delete("/tools/{key}/approval-ttl", d.handleClearApprovalTTL)
 				r.Get("/approvals", d.handleListApprovals)
 				r.Post("/approvals/{id}/decide", d.handleDecideApproval)
 
@@ -718,6 +721,40 @@ func (d apiDeps) handleExecuteTool(w http.ResponseWriter, r *http.Request) {
 		status = http.StatusAccepted
 	}
 	httpserver.WriteJSON(w, status, result)
+}
+
+func (d apiDeps) handleListApprovalTTLOverrides(w http.ResponseWriter, r *http.Request) {
+	list, err := d.tools.ListApprovalTTLOverrides(r.Context(), mustAuthContext(r))
+	if err != nil {
+		httpserver.WriteError(w, r, err)
+		return
+	}
+	httpserver.WriteJSON(w, http.StatusOK, list)
+}
+
+func (d apiDeps) handleSetApprovalTTL(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		ApprovalTTLSeconds int `json:"approval_ttl_seconds"`
+	}
+	if !decodeJSON(w, r, &body) {
+		return
+	}
+	key := chi.URLParam(r, "key")
+	s, err := d.tools.SetApprovalTTL(r.Context(), mustAuthContext(r), key, time.Duration(body.ApprovalTTLSeconds)*time.Second)
+	if err != nil {
+		httpserver.WriteError(w, r, err)
+		return
+	}
+	httpserver.WriteJSON(w, http.StatusOK, s)
+}
+
+func (d apiDeps) handleClearApprovalTTL(w http.ResponseWriter, r *http.Request) {
+	key := chi.URLParam(r, "key")
+	if err := d.tools.ClearApprovalTTL(r.Context(), mustAuthContext(r), key); err != nil {
+		httpserver.WriteError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (d apiDeps) handleListApprovals(w http.ResponseWriter, r *http.Request) {

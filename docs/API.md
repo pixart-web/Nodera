@@ -116,6 +116,9 @@ tracked in `docs/ROADMAP.md` if that stops being true.
 | DELETE | `/api/v1/secrets/{key}` | session or token + org | Delete a secret (`secrets.manage`) |
 | GET | `/api/v1/tools` | session or token + org | List the tool registry (`tools.read`) |
 | POST | `/api/v1/tools/{key}/execute` | session or token + org | Execute a tool. `read`/`safe` run immediately (`200`); `privileged`/`critical` return `202` with an `approval_id` instead of running |
+| GET | `/api/v1/tools/approval-ttl` | session or token + org | List the organization's per-tool approval TTL overrides (`tools.manage`) — a tool with no row uses the 24h default |
+| PUT | `/api/v1/tools/{key}/approval-ttl` | session or token + org | Set/update the organization's approval TTL override for a tool (`tools.manage`); `approval_ttl_seconds` must be between 300 (5m) and 2592000 (30d) |
+| DELETE | `/api/v1/tools/{key}/approval-ttl` | session or token + org | Clear the organization's override for a tool, reverting it to the 24h default (`tools.manage`) |
 | GET | `/api/v1/approvals` | session or token + org | List approvals, optional `?status=` filter (`approvals.decide`) |
 | POST | `/api/v1/approvals/{id}/decide` | session or token + org | Approve or reject a pending approval (`approvals.decide`) — approving attempts execution immediately |
 | GET | `/api/v1/audit` | session or token + org | Query the audit log, paginated, optional `?resource_type=`/`?action=` filters (`audit.read`) |

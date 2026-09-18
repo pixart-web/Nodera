@@ -1533,6 +1533,125 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/tools/approval-ttl": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List the calling organization's per-tool approval TTL overrides (tools.manage) */
+        get: {
+            parameters: {
+                query?: never;
+                header?: {
+                    /** @description Required for a session token (which org to act within). Optional for an API token, which already embeds one — if present it must match. */
+                    "X-Nodera-Org"?: components["parameters"]["OrgHeader"];
+                };
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Overrides for this organization; a tool with no row here uses the 24h default */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["OrganizationToolSetting"][];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tools/{key}/approval-ttl": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Set (or update) this organization's approval TTL override for a tool (tools.manage) */
+        put: {
+            parameters: {
+                query?: never;
+                header?: {
+                    /** @description Required for a session token (which org to act within). Optional for an API token, which already embeds one — if present it must match. */
+                    "X-Nodera-Org"?: components["parameters"]["OrgHeader"];
+                };
+                path: {
+                    /** @example restart_container */
+                    key: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        /** @description Between 300 (5 minutes) and 2592000 (30 days) */
+                        approval_ttl_seconds: number;
+                    };
+                };
+            };
+            responses: {
+                /** @description Override created or updated */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["OrganizationToolSetting"];
+                    };
+                };
+                /** @description approval_ttl_seconds out of range, or an unknown tool key */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        post?: never;
+        /** Clear this organization's approval TTL override for a tool, reverting to the 24h default (tools.manage) */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: {
+                    /** @description Required for a session token (which org to act within). Optional for an API token, which already embeds one — if present it must match. */
+                    "X-Nodera-Org"?: components["parameters"]["OrgHeader"];
+                };
+                path: {
+                    /** @example restart_container */
+                    key: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Override cleared (or none existed) */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/approvals": {
         parameters: {
             query?: never;
@@ -2328,6 +2447,12 @@ export interface components {
             limit?: number;
             offset?: number;
             has_more?: boolean;
+        };
+        OrganizationToolSetting: {
+            tool_key?: string;
+            approval_ttl_seconds?: number;
+            /** Format: date-time */
+            updated_at?: string;
         };
     };
     responses: {

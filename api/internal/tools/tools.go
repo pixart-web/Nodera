@@ -197,9 +197,140 @@ func (r *Registry) runHandler(ctx context.Context, ac authctx.AuthContext, tool 
 // --- Approvals ---
 
 // defaultApprovalTTL is how long a pending approval stays actionable
-// before it's treated as expired. Not yet configurable per-tool or
-// per-organization — a deliberate phase-1 simplification (docs/AGENTS.md).
+// before it's treated as expired, when the organization hasn't set its own
+// override for that tool (organization_tool_settings, migration 0013).
 const defaultApprovalTTL = 24 * time.Hour
+
+// minApprovalTTL / maxApprovalTTL bound what an organization can configure
+// a tool's approval TTL to. Below the minimum, a human realistically can't
+// react in time and every privileged/critical call becomes de facto
+// unusable; above the maximum, a stale pending approval sits actionable
+// long enough that the context behind the original request (who asked,
+// why, whether it's still needed) has likely gone stale too.
+const (
+	minApprovalTTL = 5 * time.Minute
+	maxApprovalTTL = 30 * 24 * time.Hour
+)
+
+const permToolsManage = "tools.manage"
+
+// OrganizationToolSetting is one organization's approval-TTL override for
+// one tool. Absence of a row for a (organization, tool) pair means "use
+// defaultApprovalTTL", not "TTL is zero" — see resolveApprovalTTL.
+type OrganizationToolSetting struct {
+	ToolKey            string    `json:"tool_key"`
+	ApprovalTTLSeconds int       `json:"approval_ttl_seconds"`
+	UpdatedAt          time.Time `json:"updated_at"`
+}
+
+// SetApprovalTTL creates or updates the calling organization's approval-TTL
+// override for toolKey. Takes effect for approvals created after this
+// call; it never retroactively changes an already-pending approval's
+// expires_at.
+func (r *Registry) SetApprovalTTL(ctx context.Context, ac authctx.AuthContext, toolKey string, ttl time.Duration) (OrganizationToolSetting, error) {
+	if err := rbac.Require(ac, permToolsManage); err != nil {
+		return OrganizationToolSetting{}, err
+	}
+	if _, err := r.getTool(ctx, toolKey); err != nil {
+		return OrganizationToolSetting{}, err
+	}
+	if ttl < minApprovalTTL || ttl > maxApprovalTTL {
+		return OrganizationToolSetting{}, apierr.Validation(
+			"approval_ttl_seconds must be between " + minApprovalTTL.String() + " and " + maxApprovalTTL.String())
+	}
+
+	var updatedByUserID *uuid.UUID
+	if ac.ActorType == authctx.ActorUser {
+		id := ac.ActorID
+		updatedByUserID = &id
+	}
+
+	var s OrganizationToolSetting
+	err := r.pool.QueryRow(ctx, `
+		INSERT INTO organization_tool_settings (organization_id, tool_key, approval_ttl_seconds, updated_by_user_id)
+		VALUES ($1, $2, $3, $4)
+		ON CONFLICT (organization_id, tool_key)
+		DO UPDATE SET approval_ttl_seconds = $3, updated_by_user_id = $4, updated_at = now()
+		RETURNING tool_key, approval_ttl_seconds, updated_at
+	`, ac.OrganizationID, toolKey, int(ttl.Seconds()), updatedByUserID).Scan(&s.ToolKey, &s.ApprovalTTLSeconds, &s.UpdatedAt)
+	if err != nil {
+		return OrganizationToolSetting{}, apierr.Wrap(apierr.CodeInternal, "failed to set approval TTL override", err)
+	}
+
+	if err := r.audit.Record(ctx, ac, audit.Entry{
+		Action: "tools.approval_ttl.set", ResourceType: "tool", ResourceID: toolKey,
+		Success: true, ResultingState: s,
+	}); err != nil {
+		logger.FromContext(ctx).Error("failed to write audit entry", "error", err)
+	}
+
+	return s, nil
+}
+
+// ClearApprovalTTL removes the calling organization's override for toolKey,
+// reverting it to defaultApprovalTTL. Not an error if no override existed.
+func (r *Registry) ClearApprovalTTL(ctx context.Context, ac authctx.AuthContext, toolKey string) error {
+	if err := rbac.Require(ac, permToolsManage); err != nil {
+		return err
+	}
+	if _, err := r.pool.Exec(ctx, `
+		DELETE FROM organization_tool_settings WHERE organization_id = $1 AND tool_key = $2
+	`, ac.OrganizationID, toolKey); err != nil {
+		return apierr.Wrap(apierr.CodeInternal, "failed to clear approval TTL override", err)
+	}
+
+	if err := r.audit.Record(ctx, ac, audit.Entry{
+		Action: "tools.approval_ttl.cleared", ResourceType: "tool", ResourceID: toolKey,
+		Success: true,
+	}); err != nil {
+		logger.FromContext(ctx).Error("failed to write audit entry", "error", err)
+	}
+
+	return nil
+}
+
+// ListApprovalTTLOverrides returns every approval-TTL override the calling
+// organization has set. A tool with no row in the result uses
+// defaultApprovalTTL.
+func (r *Registry) ListApprovalTTLOverrides(ctx context.Context, ac authctx.AuthContext) ([]OrganizationToolSetting, error) {
+	if err := rbac.Require(ac, permToolsManage); err != nil {
+		return nil, err
+	}
+	rows, err := r.pool.Query(ctx, `
+		SELECT tool_key, approval_ttl_seconds, updated_at
+		FROM organization_tool_settings WHERE organization_id = $1 ORDER BY tool_key ASC
+	`, ac.OrganizationID)
+	if err != nil {
+		return nil, apierr.Wrap(apierr.CodeInternal, "failed to list approval TTL overrides", err)
+	}
+	defer rows.Close()
+
+	var out []OrganizationToolSetting
+	for rows.Next() {
+		var s OrganizationToolSetting
+		if err := rows.Scan(&s.ToolKey, &s.ApprovalTTLSeconds, &s.UpdatedAt); err != nil {
+			return nil, apierr.Wrap(apierr.CodeInternal, "failed to scan approval TTL override", err)
+		}
+		out = append(out, s)
+	}
+	return out, rows.Err()
+}
+
+// resolveApprovalTTL returns the organization's configured TTL for toolKey,
+// falling back to defaultApprovalTTL if no override row exists.
+func (r *Registry) resolveApprovalTTL(ctx context.Context, orgID uuid.UUID, toolKey string) (time.Duration, error) {
+	var seconds int
+	err := r.pool.QueryRow(ctx, `
+		SELECT approval_ttl_seconds FROM organization_tool_settings WHERE organization_id = $1 AND tool_key = $2
+	`, orgID, toolKey).Scan(&seconds)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return defaultApprovalTTL, nil
+	}
+	if err != nil {
+		return 0, apierr.Wrap(apierr.CodeInternal, "failed to resolve approval TTL", err)
+	}
+	return time.Duration(seconds) * time.Second, nil
+}
 
 type Approval struct {
 	ID              uuid.UUID       `json:"id"`
@@ -228,7 +359,11 @@ func (r *Registry) createApproval(ctx context.Context, ac authctx.AuthContext, t
 		userID = &id
 	}
 
-	expiresAt := time.Now().Add(defaultApprovalTTL)
+	ttl, err := r.resolveApprovalTTL(ctx, ac.OrganizationID, tool.Key)
+	if err != nil {
+		return Approval{}, err
+	}
+	expiresAt := time.Now().Add(ttl)
 
 	var a Approval
 	err = r.pool.QueryRow(ctx, `

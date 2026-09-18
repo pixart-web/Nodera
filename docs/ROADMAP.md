@@ -264,6 +264,41 @@ scanning in CI (`govulncheck`, `npm audit`).
       rate limiting and CI vulnerability scanning were both already done,
       just not removed from that list at the time)
 
+**Phase 15** — this pass:
+- [x] Per-tool/per-org-configurable approval TTL, resolving the last
+      remaining roadmap bullet from the original approvals-workflow phase.
+      Migration `0013`: `organization_tool_settings` table (one row per
+      configured `(organization_id, tool_key)` pair) and a new
+      `tools.manage` permission (seeded to owner/admin), kept distinct
+      from `approvals.decide` and every `tools.*` execution permission —
+      configuring how long a tool's approvals stay open is an org-admin
+      decision, not something every approver should be able to change
+- [x] `internal/tools`: `SetApprovalTTL`/`ClearApprovalTTL`/
+      `ListApprovalTTLOverrides`, bounded to `[5m, 30d]`
+      (`minApprovalTTL`/`maxApprovalTTL`) — below 5 minutes a human
+      realistically can't react in time; above 30 days a stale pending
+      approval outlives the context behind the original request.
+      `createApproval` resolves the effective TTL per call
+      (`resolveApprovalTTL`: override if one exists, else the unchanged
+      24h `defaultApprovalTTL`) — changing an override only affects
+      approvals created afterward, never retroactively
+- [x] 4 new integration tests (`-race` clean): default TTL with no
+      override, an override actually changing a new approval's
+      `expires_at` (and clearing it reverting to the default), out-of-range
+      and unknown-tool-key rejection, and `tools.manage` permission
+      enforcement against a plain member
+- [x] 3 new HTTP routes (`GET /tools/approval-ttl`,
+      `PUT`/`DELETE /tools/{key}/approval-ttl`) and OpenAPI additions
+      (`OrganizationToolSetting` schema, validated with `@redocly/cli
+      lint`); `web/lib/api-types.generated.ts` regenerated
+- [x] Verified live end-to-end through the real HTTP API: set a 10-minute
+      override, executed `restart_container`, confirmed the resulting
+      approval's `expires_at` was exactly 10 minutes after `created_at`
+      (not the 24h default); cleared the override and confirmed the next
+      approval reverted to 24h; confirmed both the out-of-range-TTL and
+      unknown-tool-key validation paths return `400`/`404` over real HTTP
+- [x] Docs (`AGENTS.md`, `API.md`, `README.md`) updated to match
+
 ## Next up
 
 1. **Concrete job types**: the worker dispatcher is real but nothing
@@ -281,11 +316,10 @@ scanning in CI (`govulncheck`, `npm audit`).
 5. **A "platform secrets" mechanism** for cloud provider credentials
    (`docs/AI_ARCHITECTURE.md` Credential handling), or a further cloud
    adapter (OpenAI) if that mismatch is deferred again.
-6. **Per-tool/per-org-configurable approval TTL** (today's
-   `defaultApprovalTTL` is a single global 24h constant).
-7. **Remaining frontend follow-ups**: AI profile/chat UI, provider/model
-   registry UI, RBAC/settings management UI, an agents management UI,
-   real-time updates (polling or websockets) instead of load-once pages.
+6. **Remaining frontend follow-ups**: AI profile/chat UI, provider/model
+   registry UI, RBAC/settings management UI, an agents management UI, a
+   tool-approval-TTL settings UI, real-time updates (polling or
+   websockets) instead of load-once pages.
 
 ## Explicitly not started (rule 38 — deferred by design)
 
