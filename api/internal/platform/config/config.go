@@ -12,13 +12,14 @@ import (
 )
 
 type Config struct {
-	Env     string // "development" | "test" | "production"
-	HTTP    HTTPConfig
-	DB      DBConfig
-	Redis   RedisConfig
-	Auth    AuthConfig
-	Secrets SecretsConfig
-	Ollama  OllamaConfig
+	Env       string // "development" | "test" | "production"
+	HTTP      HTTPConfig
+	DB        DBConfig
+	Redis     RedisConfig
+	Auth      AuthConfig
+	Secrets   SecretsConfig
+	Ollama    OllamaConfig
+	Anthropic AnthropicConfig
 }
 
 type HTTPConfig struct {
@@ -63,6 +64,17 @@ type OllamaConfig struct {
 	BaseURL string
 }
 
+type AnthropicConfig struct {
+	// APIKey is a real secret (unlike OllamaConfig.BaseURL) — treat it with
+	// the same care as NODERA_DATABASE_URL: never log it, never commit a
+	// real value to .env. Empty means the Anthropic provider adapter is not
+	// registered — see docs/AI_ARCHITECTURE.md for why this is an env var
+	// rather than internal/secrets in this phase (ai_providers is
+	// platform-wide; internal/secrets is org-scoped — a deliberate
+	// mismatch not yet resolved).
+	APIKey string
+}
+
 // Load reads configuration from the environment. It returns an error rather
 // than panicking so callers (including tests) can handle misconfiguration
 // explicitly.
@@ -102,6 +114,9 @@ func Load() (Config, error) {
 		},
 		Ollama: OllamaConfig{
 			BaseURL: os.Getenv("NODERA_OLLAMA_BASE_URL"),
+		},
+		Anthropic: AnthropicConfig{
+			APIKey: os.Getenv("NODERA_ANTHROPIC_API_KEY"),
 		},
 	}
 

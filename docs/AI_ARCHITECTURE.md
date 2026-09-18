@@ -1,12 +1,13 @@
 # AI Architecture
 
-Status: **IMPLEMENTED**, including one real production-capable provider
-adapter (Ollama). The profile registry, provider/model registry, the
-deterministic router (including enforced privacy-level policy), gateway
-`/api/v1/ai/*` HTTP surface, and usage tracking are real, tested code — see
-`internal/ai/ai.go`, `internal/ai/registry.go`, and
-`internal/integration_test.go` / `internal/ollama_integration_test.go`. See
-[ADR-006](DECISIONS.md#adr-006-ai-gateway-agent-runtime-and-tool-gateway-ship-as-interfaces--deterministic-stubs-in-phase-1).
+Status: **IMPLEMENTED**, including two real production-capable provider
+adapters — one local (Ollama), one cloud (Anthropic). The profile registry,
+provider/model registry, the deterministic router (including enforced
+privacy-level policy), gateway `/api/v1/ai/*` HTTP surface, and usage
+tracking are real, tested code — see `internal/ai/ai.go`,
+`internal/ai/registry.go`, and `internal/integration_test.go` /
+`internal/ollama_integration_test.go` / `internal/anthropic_integration_test.go`.
+See [ADR-006](DECISIONS.md#adr-006-ai-gateway-agent-runtime-and-tool-gateway-ship-as-interfaces--deterministic-stubs-in-phase-1).
 
 ## Why applications never call a vendor SDK directly
 
@@ -84,17 +85,45 @@ never a fabricated call (rule 36; see
   model still has to be registered separately (`POST /api/v1/ai/models`)
   once you know which model(s) your Ollama instance actually serves —
   Nodera has no way to introspect that automatically yet.
+- **`anthropic`** (`internal/ai/providers/anthropic`): a real adapter for
+  the Anthropic Messages API (`kind: cloud`, so `restricted`-privacy
+  profiles correctly refuse to route to it — verified by
+  `TestAIRestrictedProfileNeverRoutesToAnthropic`). Registered only when
+  `NODERA_ANTHROPIC_API_KEY` is set. Anthropic's request shape differs from
+  Ollama's in one structural way the adapter handles: a system prompt is a
+  separate top-level `system` field, not a `"system"`-role message —
+  `Chat` extracts and joins any `"system"`-role messages out of the
+  request before sending it, rather than passing them through and having
+  Anthropic reject the call. Tested against a mock HTTP server, not a real
+  Anthropic account (rule 39) — no test anywhere in the codebase depends
+  on `NODERA_ANTHROPIC_API_KEY` being set.
+
+## Credential handling for cloud providers
+
+`NODERA_ANTHROPIC_API_KEY` is sourced from an environment variable, not
+`internal/secrets`, even though the secrets module already exists and is
+exactly the kind of thing it's for. The reason is a real, not-yet-resolved
+architectural mismatch: `ai_providers`/`ai_models` are platform-wide (no
+`organization_id` — see `internal/ai/registry.go`), while `internal/secrets`
+is org-scoped by design (every secret belongs to one organization,
+`docs/SECURITY.md`). There's no organization to scope a platform-wide
+provider's credential to. Resolving this — likely a small "platform
+secrets" concept distinct from org secrets — is tracked in
+`docs/ROADMAP.md` rather than worked around silently.
 
 ## What's deliberately not built yet
 
-- Cloud provider adapters (OpenAI, Anthropic, ...) — the registry, router,
-  and gateway are provider-agnostic and ready for one; Ollama was
-  prioritized first specifically because it doesn't need a cloud credential
+- Further cloud provider adapters (OpenAI, etc.) — the registry, router,
+  and gateway are provider-agnostic and ready for one; the Ollama → Anthropic
+  order was deliberate (no-credential-needed adapter proven first)
 - Cost/latency/quality-aware routing (section 13 explicitly asks for the
   deterministic router first, which is what exists)
 - Embeddings/RAG (`docs/ARCHITECTURE.md` §7 sketches the shape; no code yet)
 - Prompt/response content logging (deliberately out of scope by default —
   see the Usage tracking section above)
-- Auto-discovery of models an Ollama instance actually has pulled
+- Auto-discovery of models an Ollama instance actually has pulled, or
+  models an Anthropic API key has access to
+- A "platform secrets" mechanism for cloud provider credentials, resolving
+  the org-scoped-secrets-vs-platform-wide-provider mismatch noted above
 
 These are prioritized in `docs/ROADMAP.md`.

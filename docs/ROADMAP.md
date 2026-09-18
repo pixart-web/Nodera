@@ -135,6 +135,37 @@ scanning in CI (`govulncheck`, `npm audit`).
       unaffected (no Go changes this pass)
 - [x] Docs (`FRONTEND.md`, `README.md`) updated to match
 
+**Phase 12** — this pass:
+- [x] `internal/ai/providers/anthropic`: a real adapter for the Anthropic
+      Messages API — the first **cloud** provider (Ollama was local),
+      proving the router's privacy-policy enforcement against an actual
+      registered cloud adapter rather than a hypothetical one
+- [x] Handles a real structural difference from Ollama: Anthropic takes the
+      system prompt as a separate top-level field, not a `"system"`-role
+      message — `Chat` extracts and joins any such messages before sending,
+      rather than passing them through and having the API reject the call
+- [x] `NODERA_ANTHROPIC_API_KEY` (optional; unset → adapter not registered,
+      `UNAVAILABLE` rather than a crash, same pattern as
+      `NODERA_OLLAMA_BASE_URL`) — but this one is a genuine secret, unlike
+      Ollama's base URL, so `docs/AI_ARCHITECTURE.md` documents *why* it's
+      an env var rather than `internal/secrets`: the registry is
+      platform-wide, secrets are org-scoped, and that mismatch isn't
+      resolved yet (tracked below, not silently worked around)
+- [x] Tests: 6 new unit tests for the adapter (success — including
+      asserting the system-message extraction actually happened on the
+      wire, multi-system-message joining, default max_tokens, server
+      error, malformed response, context cancellation) plus 2 new
+      integration tests (full pipeline through a mock server; a
+      RESTRICTED profile refusing to route to the now-real, now-registered
+      cloud adapter) — all passing under `-race`
+- [x] Verified live that the optional-config fail-closed path still works
+      with no live Anthropic account available to test against: booted
+      the server with `NODERA_ANTHROPIC_API_KEY` unset, confirmed no
+      registration log line, confirmed `/health`/`/ready` unaffected —
+      did not fabricate a live end-to-end AI response, since no real
+      credential was available (rule 36)
+- [x] Docs (`AI_ARCHITECTURE.md`, `README.md`, `.env.example`) updated
+
 ## Next up
 
 1. **Concrete job types**: the worker dispatcher is real but nothing
@@ -148,9 +179,9 @@ scanning in CI (`govulncheck`, `npm audit`).
 4. **Generate the OpenAPI spec from code** instead of hand-maintaining it,
    and swap `web/`'s hand-written `lib/types.ts` over to the generated
    `lib/api-types.generated.ts`.
-5. **A cloud AI provider adapter** (OpenAI or Anthropic) now that the
-   provider/adapter separation pattern is proven with Ollama — will need
-   the secrets module for credential storage.
+5. **A "platform secrets" mechanism** for cloud provider credentials
+   (`docs/AI_ARCHITECTURE.md` Credential handling), or a further cloud
+   adapter (OpenAI) if that mismatch is deferred again.
 6. **Agent execution loop**: read `agents.system_instructions`, drive the
    AI gateway, enforce `allowed_tool_keys` when an agent (not a human) is
    the caller of `tools.Execute`.

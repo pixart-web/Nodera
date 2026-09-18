@@ -37,7 +37,7 @@ schema/interfaces, no production backend yet) · **PLANNED** (not started).
 | Jobs | IMPLEMENTED | Postgres-backed queue + `FOR UPDATE SKIP LOCKED` worker; no job types registered yet beyond what callers enqueue |
 | AI provider/model registry | IMPLEMENTED | Platform-wide (not org-scoped by design), managed via API (`ai.manage`); seeded `local-echo` test provider + auto-registered `ollama` when configured |
 | AI profiles/routing/usage | IMPLEMENTED | Deterministic router with enforced privacy-level policy, real usage tracking; a registry row with no registered Go adapter correctly fails closed rather than fabricating a response |
-| AI provider adapters | IMPLEMENTED (Ollama) | `local-echo` (test) + a real Ollama adapter (`NODERA_OLLAMA_BASE_URL`); cloud adapters (OpenAI, Anthropic, ...) are PLANNED |
+| AI provider adapters | IMPLEMENTED (Ollama + Anthropic) | `local-echo` (test) + real Ollama (`NODERA_OLLAMA_BASE_URL`) and Anthropic (`NODERA_ANTHROPIC_API_KEY`) adapters; further cloud adapters (OpenAI, ...) are PLANNED |
 | Secrets | IMPLEMENTED | AES-256-GCM encrypted at rest; values never exposed over HTTP, only `Reveal`-able in-process; optional at config level |
 | Tool Gateway + approvals | IMPLEMENTED | Permission → risk-tier → approval → execution → audit pipeline is real, with expiration; `get_server_metrics` and `check_ssl` (a genuine live TLS check) have real handlers, every other seeded tool honestly reports `NOT_IMPLEMENTED` |
 | Agent execution loop | PLANNED | `agents` table exists; nothing drives `system_instructions` through the AI gateway or enforces `allowed_tool_keys` yet |

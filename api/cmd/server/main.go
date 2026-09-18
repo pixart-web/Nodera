@@ -17,6 +17,7 @@ import (
 
 	"github.com/nodera/nodera/internal/ai"
 	"github.com/nodera/nodera/internal/ai/providers"
+	"github.com/nodera/nodera/internal/ai/providers/anthropic"
 	"github.com/nodera/nodera/internal/ai/providers/localecho"
 	"github.com/nodera/nodera/internal/ai/providers/ollama"
 	"github.com/nodera/nodera/internal/applications"
@@ -84,21 +85,25 @@ func run() error {
 	if cfg.Ollama.BaseURL != "" {
 		registeredProviders = append(registeredProviders, ollama.New("ollama", cfg.Ollama.BaseURL))
 	}
+	if cfg.Anthropic.APIKey != "" {
+		registeredProviders = append(registeredProviders, anthropic.New("anthropic", cfg.Anthropic.APIKey))
+	}
 	aiSvc := ai.New(pool, auditSvc, registeredProviders...)
 
+	// Auto-register each configured provider's row so it shows up in the
+	// registry without a manual POST /api/v1/ai/providers call — the Go
+	// adapter above is what actually makes it callable; this just makes it
+	// discoverable. System actor bypasses the per-org permission check
+	// (rbac.Require) since this isn't derived from a client request.
 	if cfg.Ollama.BaseURL != "" {
-		// Auto-register the provider row so it shows up in the registry
-		// without a manual POST /api/v1/ai/providers call — the Go adapter
-		// above is what actually makes it callable; this just makes it
-		// discoverable. System actor bypasses the per-org permission check
-		// (rbac.Require) since this isn't derived from a client request.
-		if _, err := aiSvc.UpsertProvider(ctx, authctx.System(uuid.Nil), ai.UpsertProviderInput{
+		autoRegisterProvider(ctx, log, aiSvc, ai.UpsertProviderInput{
 			Key: "ollama", Kind: "local", DisplayName: "Ollama (local)", Status: "active",
-		}); err != nil {
-			log.Error("failed to auto-register ollama provider", "error", err)
-		} else {
-			log.Info("ollama provider registered", "base_url", cfg.Ollama.BaseURL)
-		}
+		})
+	}
+	if cfg.Anthropic.APIKey != "" {
+		autoRegisterProvider(ctx, log, aiSvc, ai.UpsertProviderInput{
+			Key: "anthropic", Kind: "cloud", DisplayName: "Anthropic", Status: "active",
+		})
 	}
 
 	// The secrets module is optional at the config level (rule 36: report
@@ -171,6 +176,20 @@ func run() error {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	return srv.Shutdown(shutdownCtx)
+}
+
+// autoRegisterProvider upserts a provider's registry row for a provider
+// whose Go adapter was just registered with aiSvc. A failure here doesn't
+// stop startup — the adapter still works for Chat calls that reference it
+// by key directly; only its discoverability via GET /api/v1/ai/providers
+// is affected, which is why this logs and continues rather than returning
+// an error.
+func autoRegisterProvider(ctx context.Context, log *slog.Logger, aiSvc *ai.Service, in ai.UpsertProviderInput) {
+	if _, err := aiSvc.UpsertProvider(ctx, authctx.System(uuid.Nil), in); err != nil {
+		log.Error("failed to auto-register AI provider", "provider", in.Key, "error", err)
+	} else {
+		log.Info("AI provider registered", "provider", in.Key, "kind", in.Kind)
+	}
 }
 
 // approvalExpirySweepInterval is how often RunExpirySweep runs
