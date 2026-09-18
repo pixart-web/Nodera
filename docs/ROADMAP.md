@@ -459,6 +459,50 @@ scanning in CI (`govulncheck`, `npm audit`).
 - [x] Docs (`API.md`, `FRONTEND.md`, `README.md`) updated; removed the
       now-fulfilled "add member endpoint" bullet from Next up
 
+**Phase 21** — this pass:
+- [x] Custom role creation/editing, resolving the last remaining bullet
+      from the original RBAC/settings phase. `internal/rbac.CreateRole`/
+      `UpdateRolePermissions`/`DeleteRole`, all `organization.manage`-gated,
+      using schema that already existed (`roles.organization_id` for
+      org-scoped custom roles) — no migration needed, purely additive Go
+      code
+- [x] `CreateRole`/`UpdateRolePermissions` enforce the same
+      no-privilege-escalation rule as API token scopes and agent
+      `permission_scope`: requested permissions must be a subset of the
+      caller's own, and must each be a real key in the `permissions`
+      catalog — validated in that order (unknown-key check first) after a
+      test caught the alternate order producing a misleading `FORBIDDEN`
+      for a typo'd permission instead of the more useful
+      `VALIDATION_ERROR`
+- [x] `getCustomRole` (used by both update and delete) refuses any system
+      role or another org's role with the same `NOT_FOUND` a nonexistent
+      ID would produce — a system role's fixed permission set can only
+      ever change via a migration, never through this path
+- [x] `DeleteRole` refuses (`CONFLICT`) a role still held by any member —
+      the caller must revoke every assignment first, so deleting a role
+      never silently changes what a member can do as a side effect
+- [x] 4 new integration tests, all passing under `-race`: create + assign
+      a custom role and see it reflected in both `ListRoles` and
+      `ListMembers`, both escalation/unknown-key rejections, replacing a
+      custom role's permission set while a system role is refused, and
+      delete-blocked-while-assigned then succeeding after revoke
+- [x] 3 new HTTP routes (`POST /roles`, `PUT /roles/{id}/permissions`,
+      `DELETE /roles/{id}`) and OpenAPI additions, validated with
+      `@redocly/cli lint`; `lib/api-types.generated.ts` regenerated
+- [x] `web/app/(org)/settings/page.tsx`: a "Create role" form above the
+      Roles table and a "Delete" control per custom role (system roles
+      show `system` instead, never delete)
+- [x] Verified live end to end through the real UI: created a custom
+      `auditor` role (`audit.read`, `infrastructure.read`), assigned it to
+      a real member alongside their existing `member` role, attempted
+      delete and saw the real `CONFLICT` render inline, revoked it from
+      the member, and confirmed delete then succeeded and the role
+      disappeared from the table. Checked the browser console on a fresh
+      tab afterward — zero errors
+- [x] Full backend and frontend verification clean
+- [x] Docs (`API.md`, `FRONTEND.md`, `README.md`) updated; removed the
+      now-fulfilled "custom role creation/editing" bullet from Next up
+
 ## Next up
 
 1. **Concrete job types**: the worker dispatcher is real but nothing
@@ -476,12 +520,11 @@ scanning in CI (`govulncheck`, `npm audit`).
 5. **A "platform secrets" mechanism** for cloud provider credentials
    (`docs/AI_ARCHITECTURE.md` Credential handling), or a further cloud
    adapter (OpenAI) if that mismatch is deferred again.
-6. **Custom role creation/editing** — the schema supports org-scoped
-   custom roles (`roles.organization_id`), but no endpoint creates one;
-   only the 3 seeded system roles exist anywhere.
-7. **Actual invite-by-email** (as opposed to Phase 20's "add an existing
+6. **Actual invite-by-email** (as opposed to Phase 20's "add an existing
    account") — needs outbound email delivery, which doesn't exist in this
    phase at all.
+7. **Renaming/editing a custom role's name or description** after
+   creation — only its permission set can be replaced today.
 8. **Remaining frontend follow-ups**: real-time updates (polling or
    websockets) instead of load-once pages.
 

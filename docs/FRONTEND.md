@@ -168,9 +168,22 @@ revoked it, watching the badges update each time).
 
 This required new backend surface that didn't exist before this pass:
 `internal/rbac.ListRoles`/`ListMembers`/`AssignRole`/`RevokeRole`, all
-gated by `organization.manage` — roles themselves remain seeded
-(owner/admin/member) and not creatable from the UI or API yet; this page
-manages who holds which of the existing ones, not the role catalog itself.
+gated by `organization.manage`.
+
+The Roles table also has a "Create role" form (name, description,
+comma-separated permissions — same convention as the Agents/AI Gateway
+pages' comma-separated inputs) and, per custom (non-system) role, a
+"Delete" button; system roles show `system` instead, never a delete
+control. Creating a role enforces the same no-privilege-escalation rule
+as API token scopes and agent `permission_scope`: the permissions can
+never exceed the caller's own. Deleting a role that's still assigned to a
+member is refused server-side (`CONFLICT`) rather than silently changing
+what that member can do — verified live: created a custom `auditor` role,
+assigned it to a member alongside their existing `member` role, attempted
+delete and saw the real `CONFLICT` ("role is still assigned to one or
+more members; revoke it from them first") render inline, revoked it from
+the member, and confirmed delete then succeeded and the role disappeared
+from the table.
 
 The Members section also has an "Add member" form (email in, `POST
 /api/v1/organization/members`) — added in a later pass once the gap it
@@ -189,8 +202,9 @@ account surfaced the real `NOT_FOUND` ("user not found") — both as
 
 - Real-time updates (polling/websockets) — every page loads once and offers
   no live refresh beyond a manual reload after a mutating action
-- Creating/editing custom roles, or editing a system role's permission set
-  (the schema supports org-scoped custom roles — `organization_id` on
-  `roles` — but no endpoint creates one yet)
+- Editing a custom role's name/description after creation (only its
+  permission set can be replaced, via `PUT /roles/{id}/permissions` — no
+  UI or API path renames one) or editing a system role's fixed permission
+  set at all
 
 Tracked in `docs/ROADMAP.md`.

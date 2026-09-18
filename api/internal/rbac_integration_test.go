@@ -190,3 +190,147 @@ func TestRBAC_AssignRoleRejectsInvalidTargets(t *testing.T) {
 		t.Fatalf("expected NOT_FOUND for an unknown role, got %v", err)
 	}
 }
+
+// CreateRole defines a new org-scoped custom role and it becomes
+// immediately assignable, appearing in ListRoles/ListMembers exactly like
+// a system role once granted.
+func TestRBAC_CreateRoleAndAssignIt(t *testing.T) {
+	pool := testhelpers.RequirePool(t)
+	ctx := context.Background()
+	h := newHarness(pool)
+	ac, _ := h.newOwnerContext(t, ctx, "rbac-createrole-owner@nodera.dev")
+	memberAC := h.newMemberContext(t, ctx, ac.OrganizationID, "rbac-createrole-member@nodera.dev")
+
+	role, err := h.rbac.CreateRole(ctx, ac, "auditor", "Read-only audit access", []string{"audit.read", "infrastructure.read"})
+	if err != nil {
+		t.Fatalf("CreateRole: %v", err)
+	}
+	if role.IsSystem {
+		t.Fatal("expected a custom role to not be marked is_system")
+	}
+	if len(role.Permissions) != 2 {
+		t.Fatalf("expected 2 permissions, got %+v", role.Permissions)
+	}
+
+	roles, err := h.rbac.ListRoles(ctx, ac)
+	if err != nil {
+		t.Fatalf("ListRoles: %v", err)
+	}
+	if len(roles) != 4 {
+		t.Fatalf("expected 3 system roles + 1 custom role, got %d: %+v", len(roles), roles)
+	}
+
+	if err := h.rbac.AssignRole(ctx, ac, memberAC.ActorID, role.ID); err != nil {
+		t.Fatalf("AssignRole (custom role): %v", err)
+	}
+	members, err := h.rbac.ListMembers(ctx, ac)
+	if err != nil {
+		t.Fatalf("ListMembers: %v", err)
+	}
+	for _, m := range members {
+		if m.Email == "rbac-createrole-member@nodera.dev" {
+			var names []string
+			for _, r := range m.Roles {
+				names = append(names, r.Name)
+			}
+			if len(names) != 2 {
+				t.Fatalf("expected the member to hold both member and auditor, got %+v", names)
+			}
+		}
+	}
+}
+
+// CreateRole enforces the same no-privilege-escalation rule as API token
+// scopes and agent permission_scope: a caller can't grant a permission it
+// doesn't itself hold, and every permission key must be real.
+func TestRBAC_CreateRoleRejectsInvalidPermissions(t *testing.T) {
+	pool := testhelpers.RequirePool(t)
+	ctx := context.Background()
+	h := newHarness(pool)
+	ac, _ := h.newOwnerContext(t, ctx, "rbac-createrole-invalid-owner@nodera.dev")
+	memberAC := h.newMemberContext(t, ctx, ac.OrganizationID, "rbac-createrole-invalid-member@nodera.dev")
+
+	if _, err := h.rbac.CreateRole(ctx, memberAC, "escalated", "", []string{"organization.manage"}); err == nil {
+		t.Fatal("expected a member to be forbidden from creating a role with a permission they don't hold")
+	} else if ae, ok := err.(*apierr.Error); !ok || ae.Code != apierr.CodeForbidden {
+		t.Fatalf("expected FORBIDDEN, got %v", err)
+	}
+
+	if _, err := h.rbac.CreateRole(ctx, ac, "bad-perm-role", "", []string{"not.a.real.permission"}); err == nil {
+		t.Fatal("expected creating a role with an unknown permission key to fail")
+	} else if ae, ok := err.(*apierr.Error); !ok || ae.Code != apierr.CodeValidation {
+		t.Fatalf("expected VALIDATION_ERROR, got %v", err)
+	}
+}
+
+// UpdateRolePermissions replaces a custom role's entire permission set,
+// and refuses to touch a system role (getCustomRole excludes them, so the
+// same "role not found" error a nonexistent ID would produce).
+func TestRBAC_UpdateRolePermissions(t *testing.T) {
+	pool := testhelpers.RequirePool(t)
+	ctx := context.Background()
+	h := newHarness(pool)
+	ac, _ := h.newOwnerContext(t, ctx, "rbac-updaterole-owner@nodera.dev")
+
+	role, err := h.rbac.CreateRole(ctx, ac, "limited", "", []string{"audit.read"})
+	if err != nil {
+		t.Fatalf("CreateRole: %v", err)
+	}
+
+	updated, err := h.rbac.UpdateRolePermissions(ctx, ac, role.ID, []string{"infrastructure.read", "jobs.read"})
+	if err != nil {
+		t.Fatalf("UpdateRolePermissions: %v", err)
+	}
+	if len(updated.Permissions) != 2 {
+		t.Fatalf("expected the permission set to be fully replaced with 2 entries, got %+v", updated.Permissions)
+	}
+
+	systemAdminRoleID := mustParseUUID(t, systemAdminRoleIDStr)
+	if _, err := h.rbac.UpdateRolePermissions(ctx, ac, systemAdminRoleID, []string{"audit.read"}); err == nil {
+		t.Fatal("expected updating a system role's permissions to fail")
+	} else if ae, ok := err.(*apierr.Error); !ok || ae.Code != apierr.CodeNotFound {
+		t.Fatalf("expected NOT_FOUND for a system role, got %v", err)
+	}
+}
+
+// DeleteRole refuses to remove a role still assigned to a member — the
+// caller must revoke it first, so deletion never silently changes what a
+// member can do.
+func TestRBAC_DeleteRoleRequiresNoAssignments(t *testing.T) {
+	pool := testhelpers.RequirePool(t)
+	ctx := context.Background()
+	h := newHarness(pool)
+	ac, _ := h.newOwnerContext(t, ctx, "rbac-deleterole-owner@nodera.dev")
+	memberAC := h.newMemberContext(t, ctx, ac.OrganizationID, "rbac-deleterole-member@nodera.dev")
+
+	role, err := h.rbac.CreateRole(ctx, ac, "temp-role", "", []string{"audit.read"})
+	if err != nil {
+		t.Fatalf("CreateRole: %v", err)
+	}
+	if err := h.rbac.AssignRole(ctx, ac, memberAC.ActorID, role.ID); err != nil {
+		t.Fatalf("AssignRole: %v", err)
+	}
+
+	if err := h.rbac.DeleteRole(ctx, ac, role.ID); err == nil {
+		t.Fatal("expected deleting an assigned role to fail")
+	} else if ae, ok := err.(*apierr.Error); !ok || ae.Code != apierr.CodeConflict {
+		t.Fatalf("expected CONFLICT, got %v", err)
+	}
+
+	if err := h.rbac.RevokeRole(ctx, ac, memberAC.ActorID, role.ID); err != nil {
+		t.Fatalf("RevokeRole: %v", err)
+	}
+	if err := h.rbac.DeleteRole(ctx, ac, role.ID); err != nil {
+		t.Fatalf("DeleteRole (after revoking): %v", err)
+	}
+
+	roles, err := h.rbac.ListRoles(ctx, ac)
+	if err != nil {
+		t.Fatalf("ListRoles: %v", err)
+	}
+	for _, r := range roles {
+		if r.ID == role.ID {
+			t.Fatalf("expected the deleted role to no longer be listed, got %+v", roles)
+		}
+	}
+}

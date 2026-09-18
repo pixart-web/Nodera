@@ -693,6 +693,61 @@
             }
           }
         }
+      },
+      "post": {
+        "tags": [
+          "organizations"
+        ],
+        "summary": "Create a custom role scoped to the calling organization (organization.manage) \u2014 permissions must be a subset of the caller's own",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OrgHeader"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "name"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "permissions": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Role created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Role"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A requested permission the caller doesn't hold"
+          },
+          "409": {
+            "description": "A role with this name already exists in this organization"
+          }
+        }
       }
     },
     "/api/v1/organization/members": {
@@ -2170,6 +2225,93 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "/api/v1/roles/{id}/permissions": {
+      "put": {
+        "tags": [
+          "organizations"
+        ],
+        "summary": "Replace a custom role's entire permission set (organization.manage) \u2014 refuses system roles",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OrgHeader"
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "permissions": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Permission set replaced",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Role"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not a custom role of this organization (includes every system role)"
+          }
+        }
+      }
+    },
+    "/api/v1/roles/{id}": {
+      "delete": {
+        "tags": [
+          "organizations"
+        ],
+        "summary": "Delete a custom role (organization.manage) \u2014 refuses if any member still holds it",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OrgHeader"
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Role deleted"
+          },
+          "404": {
+            "description": "Not a custom role of this organization"
+          },
+          "409": {
+            "description": "Role is still assigned to one or more members"
           }
         }
       }

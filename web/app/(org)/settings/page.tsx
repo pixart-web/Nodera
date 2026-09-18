@@ -48,6 +48,82 @@ function AssignRoleForm({ member, roles, onDone }: { member: Member; roles: Role
   );
 }
 
+function parseList(raw: string): string[] {
+  return raw
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+function CreateRoleForm({ onDone }: { onDone: () => void }) {
+  const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
+  const [permissions, setPermissions] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    setBusy(true);
+    try {
+      await api.post("/api/v1/roles", { name, description, permissions: parseList(permissions) });
+      setName("");
+      setDescription("");
+      setPermissions("");
+      onDone();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Failed to create role");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form onSubmit={submit} className="card mb-4 space-y-3 p-4">
+      {error && <ErrorBanner message={error} />}
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <label className="label" htmlFor="role-name">
+            Name
+          </label>
+          <input id="role-name" className="input" value={name} onChange={(e) => setName(e.target.value)} required />
+        </div>
+        <div>
+          <label className="label" htmlFor="role-description">
+            Description
+          </label>
+          <input
+            id="role-description"
+            className="input"
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+          />
+        </div>
+      </div>
+      <div>
+        <label className="label" htmlFor="role-permissions">
+          Permissions (comma-separated)
+        </label>
+        <input
+          id="role-permissions"
+          className="input font-mono"
+          value={permissions}
+          onChange={(e) => setPermissions(e.target.value)}
+          placeholder="audit.read, infrastructure.read"
+        />
+      </div>
+      <p className="text-xs text-base-400">
+        Permissions can never exceed your own held permissions — the API rejects anything broader (no privilege
+        escalation).
+      </p>
+      <button type="submit" className="btn-primary" disabled={busy}>
+        {busy ? "Creating…" : "Create role"}
+      </button>
+    </form>
+  );
+}
+
 function AddMemberForm({ onDone }: { onDone: () => void }) {
   const [email, setEmail] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -102,6 +178,8 @@ export default function SettingsPage() {
   const [error, setError] = useState<string | null>(null);
   const [assigningFor, setAssigningFor] = useState<string | null>(null);
   const [showAddMember, setShowAddMember] = useState(false);
+  const [showCreateRole, setShowCreateRole] = useState(false);
+  const [roleError, setRoleError] = useState<string | null>(null);
 
   async function revoke(userID: string, roleID: string) {
     setError(null);
@@ -113,6 +191,16 @@ export default function SettingsPage() {
     }
   }
 
+  async function deleteRole(roleID: string) {
+    setRoleError(null);
+    try {
+      await api.del(`/api/v1/roles/${roleID}`);
+      roles.reload();
+    } catch (err) {
+      setRoleError(err instanceof ApiError ? err.message : "Failed to delete role");
+    }
+  }
+
   return (
     <div>
       <PageHeader
@@ -121,8 +209,22 @@ export default function SettingsPage() {
       />
 
       <div className="mb-8">
-        <h2 className="mb-3 text-sm font-medium text-base-100">Roles</h2>
+        <div className="mb-3 flex items-center justify-between">
+          <h2 className="text-sm font-medium text-base-100">Roles</h2>
+          <button className="btn-primary" onClick={() => setShowCreateRole((v) => !v)}>
+            {showCreateRole ? "Cancel" : "Create role"}
+          </button>
+        </div>
+        {showCreateRole && (
+          <CreateRoleForm
+            onDone={() => {
+              setShowCreateRole(false);
+              roles.reload();
+            }}
+          />
+        )}
         {roles.error && <ErrorBanner message={roles.error} />}
+        {roleError && <ErrorBanner message={roleError} />}
         <div className="card">
           {roles.loading ? (
             <div className="p-4 text-sm text-base-400">Loading…</div>
@@ -135,6 +237,7 @@ export default function SettingsPage() {
                   <th>Name</th>
                   <th>Description</th>
                   <th>Permissions</th>
+                  <th></th>
                 </tr>
               </thead>
               <tbody>
@@ -144,6 +247,15 @@ export default function SettingsPage() {
                     <td className="text-xs text-base-300">{r.description}</td>
                     <td className="text-xs text-base-400">
                       {r.permissions.length > 8 ? `${r.permissions.length} permissions` : r.permissions.join(", ") || "—"}
+                    </td>
+                    <td>
+                      {r.is_system ? (
+                        <span className="text-xs text-base-500">system</span>
+                      ) : (
+                        <button className="text-xs text-base-400 hover:text-danger" onClick={() => deleteRole(r.id)}>
+                          Delete
+                        </button>
+                      )}
                     </td>
                   </tr>
                 ))}

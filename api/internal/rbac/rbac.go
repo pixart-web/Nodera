@@ -6,9 +6,11 @@ package rbac
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/nodera/nodera/internal/audit"
@@ -239,6 +241,210 @@ func (s *Service) RevokeRole(ctx context.Context, ac authctx.AuthContext, userID
 	return nil
 }
 
+// validatePermissionSubset returns apierr.Forbidden unless every key in
+// permissions is one ac itself holds — the same no-privilege-escalation
+// rule applied to API token scopes (internal/identity) and agent
+// permission_scope (internal/agents): nobody can grant a role broader
+// power than they themselves have.
+func validatePermissionSubset(ac authctx.AuthContext, permissions []string) error {
+	for _, p := range permissions {
+		if !ac.HasPermission(p) {
+			return apierr.Forbidden("cannot grant permission you do not hold: " + p)
+		}
+	}
+	return nil
+}
+
+// validatePermissionKeys returns apierr.Validation if any key in
+// permissions doesn't exist in the permissions catalog.
+func (s *Service) validatePermissionKeys(ctx context.Context, permissions []string) error {
+	for _, p := range permissions {
+		var exists bool
+		if err := s.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM permissions WHERE key = $1)`, p).Scan(&exists); err != nil {
+			return apierr.Wrap(apierr.CodeInternal, "failed to validate permission key", err)
+		}
+		if !exists {
+			return apierr.Validation("unknown permission key: " + p)
+		}
+	}
+	return nil
+}
+
+// CreateRole defines a new custom role scoped to the calling organization
+// (roles.organization_id) — distinct from the 3 seeded system roles
+// (owner/admin/member), which remain fixed. permissions must be a subset
+// of the caller's own held permissions (no privilege escalation) and must
+// each be a real key in the permissions catalog.
+func (s *Service) CreateRole(ctx context.Context, ac authctx.AuthContext, name, description string, permissions []string) (Role, error) {
+	if err := Require(ac, "organization.manage"); err != nil {
+		return Role{}, err
+	}
+	if name == "" {
+		return Role{}, apierr.Validation("role name is required")
+	}
+	if err := s.validatePermissionKeys(ctx, permissions); err != nil {
+		return Role{}, err
+	}
+	if err := validatePermissionSubset(ac, permissions); err != nil {
+		return Role{}, err
+	}
+
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return Role{}, apierr.Wrap(apierr.CodeInternal, "failed to begin transaction", err)
+	}
+	defer tx.Rollback(ctx)
+
+	var r Role
+	err = tx.QueryRow(ctx, `
+		INSERT INTO roles (organization_id, name, description, is_system) VALUES ($1, $2, $3, false)
+		RETURNING id, name, description, is_system
+	`, ac.OrganizationID, name, description).Scan(&r.ID, &r.Name, &r.Description, &r.IsSystem)
+	if err != nil {
+		if isUniqueViolation(err) {
+			return Role{}, apierr.Conflict("a role with this name already exists in this organization")
+		}
+		return Role{}, apierr.Wrap(apierr.CodeInternal, "failed to create role", err)
+	}
+
+	for _, p := range permissions {
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO role_permissions (role_id, permission_key) VALUES ($1, $2)
+		`, r.ID, p); err != nil {
+			return Role{}, apierr.Wrap(apierr.CodeInternal, "failed to grant permission to role", err)
+		}
+	}
+	r.Permissions = permissions
+	if r.Permissions == nil {
+		r.Permissions = []string{}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return Role{}, apierr.Wrap(apierr.CodeInternal, "failed to commit transaction", err)
+	}
+
+	if err := s.audit.Record(ctx, ac, audit.Entry{
+		Action: "rbac.role.created", ResourceType: "role", ResourceID: r.ID.String(),
+		Success: true, ResultingState: r,
+	}); err != nil {
+		logger.FromContext(ctx).Error("failed to write audit entry", "error", err)
+	}
+
+	return r, nil
+}
+
+// getCustomRole loads a role by ID, scoped to the calling org, and refuses
+// (NotFound) if it's a system role or belongs to a different org — every
+// mutation below (UpdateRolePermissions, DeleteRole) starts here so a
+// system role's fixed permission set can never be edited through this
+// path, only through a migration (docs/AGENTS.md-style deliberate
+// friction for a sensitive, rarely-changed catalog).
+func (s *Service) getCustomRole(ctx context.Context, orgID, roleID uuid.UUID) (Role, error) {
+	var r Role
+	var dbOrgID *uuid.UUID
+	err := s.pool.QueryRow(ctx, `
+		SELECT id, organization_id, name, description, is_system FROM roles WHERE id = $1
+	`, roleID).Scan(&r.ID, &dbOrgID, &r.Name, &r.Description, &r.IsSystem)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Role{}, apierr.NotFound("role")
+	}
+	if err != nil {
+		return Role{}, apierr.Wrap(apierr.CodeInternal, "failed to load role", err)
+	}
+	if r.IsSystem || dbOrgID == nil || *dbOrgID != orgID {
+		return Role{}, apierr.NotFound("role")
+	}
+	return r, nil
+}
+
+// UpdateRolePermissions replaces a custom role's entire permission set.
+// The new set, like CreateRole's, must be a subset of the caller's own
+// held permissions.
+func (s *Service) UpdateRolePermissions(ctx context.Context, ac authctx.AuthContext, roleID uuid.UUID, permissions []string) (Role, error) {
+	if err := Require(ac, "organization.manage"); err != nil {
+		return Role{}, err
+	}
+	r, err := s.getCustomRole(ctx, ac.OrganizationID, roleID)
+	if err != nil {
+		return Role{}, err
+	}
+	if err := s.validatePermissionKeys(ctx, permissions); err != nil {
+		return Role{}, err
+	}
+	if err := validatePermissionSubset(ac, permissions); err != nil {
+		return Role{}, err
+	}
+
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return Role{}, apierr.Wrap(apierr.CodeInternal, "failed to begin transaction", err)
+	}
+	defer tx.Rollback(ctx)
+
+	if _, err := tx.Exec(ctx, `DELETE FROM role_permissions WHERE role_id = $1`, roleID); err != nil {
+		return Role{}, apierr.Wrap(apierr.CodeInternal, "failed to clear existing permissions", err)
+	}
+	for _, p := range permissions {
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO role_permissions (role_id, permission_key) VALUES ($1, $2)
+		`, roleID, p); err != nil {
+			return Role{}, apierr.Wrap(apierr.CodeInternal, "failed to grant permission to role", err)
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return Role{}, apierr.Wrap(apierr.CodeInternal, "failed to commit transaction", err)
+	}
+
+	r.Permissions = permissions
+	if r.Permissions == nil {
+		r.Permissions = []string{}
+	}
+
+	if err := s.audit.Record(ctx, ac, audit.Entry{
+		Action: "rbac.role.permissions_updated", ResourceType: "role", ResourceID: r.ID.String(),
+		Success: true, ResultingState: r,
+	}); err != nil {
+		logger.FromContext(ctx).Error("failed to write audit entry", "error", err)
+	}
+
+	return r, nil
+}
+
+// DeleteRole removes a custom role, refusing (Conflict) if any member
+// currently holds it — the caller must revoke every assignment first,
+// rather than this silently changing what a member can do as a side
+// effect of an unrelated cleanup action.
+func (s *Service) DeleteRole(ctx context.Context, ac authctx.AuthContext, roleID uuid.UUID) error {
+	if err := Require(ac, "organization.manage"); err != nil {
+		return err
+	}
+	if _, err := s.getCustomRole(ctx, ac.OrganizationID, roleID); err != nil {
+		return err
+	}
+
+	var assignedCount int
+	if err := s.pool.QueryRow(ctx, `
+		SELECT count(*) FROM organization_member_roles WHERE role_id = $1
+	`, roleID).Scan(&assignedCount); err != nil {
+		return apierr.Wrap(apierr.CodeInternal, "failed to check role assignments", err)
+	}
+	if assignedCount > 0 {
+		return apierr.Conflict("role is still assigned to one or more members; revoke it from them first")
+	}
+
+	if _, err := s.pool.Exec(ctx, `DELETE FROM roles WHERE id = $1`, roleID); err != nil {
+		return apierr.Wrap(apierr.CodeInternal, "failed to delete role", err)
+	}
+
+	if err := s.audit.Record(ctx, ac, audit.Entry{
+		Action: "rbac.role.deleted", ResourceType: "role", ResourceID: roleID.String(),
+		Success: true,
+	}); err != nil {
+		logger.FromContext(ctx).Error("failed to write audit entry", "error", err)
+	}
+	return nil
+}
+
 // Require returns a *apierr.Error (CodeForbidden) unless ac holds permission,
 // or ac is a system actor (authctx.ActorSystem), which bypasses checks
 // entirely because it is never derived from an untrusted client request.
@@ -253,4 +459,12 @@ func Require(ac authctx.AuthContext, permission string) error {
 		return apierr.Forbidden(fmt.Sprintf("missing required permission: %s", permission))
 	}
 	return nil
+}
+
+func isUniqueViolation(err error) bool {
+	var pgErr interface{ SQLState() string }
+	if errors.As(err, &pgErr) {
+		return pgErr.SQLState() == "23505"
+	}
+	return false
 }

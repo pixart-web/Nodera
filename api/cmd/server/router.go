@@ -93,6 +93,9 @@ func newRouter(d apiDeps) http.Handler {
 				r.Delete("/organization/api-tokens/{id}", d.handleAdminRevokeAPIToken)
 
 				r.Get("/roles", d.handleListRoles)
+				r.Post("/roles", d.handleCreateRole)
+				r.Put("/roles/{id}/permissions", d.handleUpdateRolePermissions)
+				r.Delete("/roles/{id}", d.handleDeleteRole)
 				r.Get("/organization/members", d.handleListMembers)
 				r.Post("/organization/members", d.handleAddMember)
 				r.Post("/organization/members/{userID}/roles", d.handleAssignRole)
@@ -428,6 +431,56 @@ func (d apiDeps) handleListRoles(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpserver.WriteJSON(w, http.StatusOK, list)
+}
+
+func (d apiDeps) handleCreateRole(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Name        string   `json:"name"`
+		Description string   `json:"description"`
+		Permissions []string `json:"permissions"`
+	}
+	if !decodeJSON(w, r, &body) {
+		return
+	}
+	role, err := d.rbac.CreateRole(r.Context(), mustAuthContext(r), body.Name, body.Description, body.Permissions)
+	if err != nil {
+		httpserver.WriteError(w, r, err)
+		return
+	}
+	httpserver.WriteJSON(w, http.StatusCreated, role)
+}
+
+func (d apiDeps) handleUpdateRolePermissions(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		httpserver.WriteError(w, r, apierr.Validation("invalid role id"))
+		return
+	}
+	var body struct {
+		Permissions []string `json:"permissions"`
+	}
+	if !decodeJSON(w, r, &body) {
+		return
+	}
+	role, err := d.rbac.UpdateRolePermissions(r.Context(), mustAuthContext(r), id, body.Permissions)
+	if err != nil {
+		httpserver.WriteError(w, r, err)
+		return
+	}
+	httpserver.WriteJSON(w, http.StatusOK, role)
+}
+
+func (d apiDeps) handleDeleteRole(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		httpserver.WriteError(w, r, apierr.Validation("invalid role id"))
+		return
+	}
+	if err := d.rbac.DeleteRole(r.Context(), mustAuthContext(r), id); err != nil {
+		httpserver.WriteError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (d apiDeps) handleListMembers(w http.ResponseWriter, r *http.Request) {
