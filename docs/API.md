@@ -72,6 +72,10 @@ Two bearer token types are accepted on `Authorization: Bearer <token>`, and
 | GET | `/api/v1/ai/profiles` | session or token + org | List AI profiles (`ai.use`) |
 | POST | `/api/v1/ai/profiles` | session or token + org | Create an AI profile (`ai.manage`) |
 | POST | `/api/v1/ai/chat` | session or token + org | Call the AI gateway with a profile key + messages (`ai.use`) |
+| GET | `/api/v1/ai/providers` | session or token + org | List the platform-wide provider registry (`ai.use`) |
+| POST | `/api/v1/ai/providers` | session or token + org | Register/update a provider (`ai.manage`) — platform-wide, see note below |
+| GET | `/api/v1/ai/models` | session or token + org | List the platform-wide model registry (`ai.use`) |
+| POST | `/api/v1/ai/models` | session or token + org | Register/update a model under an existing provider (`ai.manage`) |
 | GET | `/api/v1/secrets` | session or token + org | List secret metadata only — never values (`secrets.read`) |
 | PUT | `/api/v1/secrets/{key}` | session or token + org | Create or rotate a secret (`secrets.manage`) — `503 UNAVAILABLE` if the server has no `NODERA_SECRETS_ENCRYPTION_KEY` configured |
 | DELETE | `/api/v1/secrets/{key}` | session or token + org | Delete a secret (`secrets.manage`) |
@@ -85,6 +89,13 @@ uses `organization.manage` rather than a dedicated `tokens.manage` key — see
 
 There is deliberately no endpoint that returns a secret's plaintext value —
 see `docs/SECURITY.md` Secrets.
+
+`/api/v1/ai/providers` and `/api/v1/ai/models` manage a **platform-wide**
+registry (`ai_providers`/`ai_models` have no `organization_id`) — any caller
+with `ai.manage` in *any* organization can register a provider/model
+affecting every organization on this deployment. This is a deliberate
+phase-1 simplification for a single-administrating-org deployment, not an
+oversight — see `internal/ai/registry.go`.
 
 `POST /auth/login` is rate limited (5 attempts / 5 minutes per client IP);
 exceeding it returns `429` with code `RATE_LIMITED`.

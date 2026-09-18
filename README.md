@@ -34,8 +34,9 @@ schema/interfaces, no production backend yet) · **PLANNED** (not started).
 | Applications/services | IMPLEMENTED | Registration/inventory only — no deployment execution yet |
 | API tokens | IMPLEMENTED | User-owned, scope-limited (cannot exceed creator's own permissions); service-account-issued tokens are PLANNED |
 | Jobs | IMPLEMENTED | Postgres-backed queue + `FOR UPDATE SKIP LOCKED` worker; no job types registered yet beyond what callers enqueue |
-| AI provider/model registry | FOUNDATION ONLY | Real schema + seeded `local-echo` test provider; no production provider adapter |
-| AI profiles/routing/usage | IMPLEMENTED | Deterministic router with enforced privacy-level policy, real usage tracking — backed only by the `local-echo` test provider so far |
+| AI provider/model registry | IMPLEMENTED | Platform-wide (not org-scoped by design), managed via API (`ai.manage`); seeded `local-echo` test provider + auto-registered `ollama` when configured |
+| AI profiles/routing/usage | IMPLEMENTED | Deterministic router with enforced privacy-level policy, real usage tracking; a registry row with no registered Go adapter correctly fails closed rather than fabricating a response |
+| AI provider adapters | IMPLEMENTED (Ollama) | `local-echo` (test) + a real Ollama adapter (`NODERA_OLLAMA_BASE_URL`); cloud adapters (OpenAI, Anthropic, ...) are PLANNED |
 | Secrets | IMPLEMENTED | AES-256-GCM encrypted at rest; values never exposed over HTTP, only `Reveal`-able in-process; optional at config level |
 | Agents/Tools/Approvals | FOUNDATION ONLY | Schema + tool catalog registered as `implemented=false`; no execution backend |
 | Rate limiting | IMPLEMENTED | In-process, `/auth/login` only (5/5min per IP); other endpoints and a multi-instance-safe (Redis) limiter are PLANNED |

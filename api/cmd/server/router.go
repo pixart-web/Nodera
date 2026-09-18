@@ -88,6 +88,10 @@ func newRouter(d apiDeps) http.Handler {
 				r.Get("/ai/profiles", d.handleListAIProfiles)
 				r.Post("/ai/profiles", d.handleCreateAIProfile)
 				r.Post("/ai/chat", d.handleAIChat)
+				r.Get("/ai/providers", d.handleListAIProviders)
+				r.Post("/ai/providers", d.handleUpsertAIProvider)
+				r.Get("/ai/models", d.handleListAIModels)
+				r.Post("/ai/models", d.handleUpsertAIModel)
 
 				r.Get("/secrets", d.handleListSecrets)
 				r.Put("/secrets/{key}", d.handleSetSecret)
@@ -430,6 +434,50 @@ func (d apiDeps) handleAIChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpserver.WriteJSON(w, http.StatusOK, result)
+}
+
+func (d apiDeps) handleListAIProviders(w http.ResponseWriter, r *http.Request) {
+	list, err := d.ai.ListProviders(r.Context(), mustAuthContext(r))
+	if err != nil {
+		httpserver.WriteError(w, r, err)
+		return
+	}
+	httpserver.WriteJSON(w, http.StatusOK, list)
+}
+
+func (d apiDeps) handleUpsertAIProvider(w http.ResponseWriter, r *http.Request) {
+	var body ai.UpsertProviderInput
+	if !decodeJSON(w, r, &body) {
+		return
+	}
+	p, err := d.ai.UpsertProvider(r.Context(), mustAuthContext(r), body)
+	if err != nil {
+		httpserver.WriteError(w, r, err)
+		return
+	}
+	httpserver.WriteJSON(w, http.StatusOK, p)
+}
+
+func (d apiDeps) handleListAIModels(w http.ResponseWriter, r *http.Request) {
+	list, err := d.ai.ListModels(r.Context(), mustAuthContext(r))
+	if err != nil {
+		httpserver.WriteError(w, r, err)
+		return
+	}
+	httpserver.WriteJSON(w, http.StatusOK, list)
+}
+
+func (d apiDeps) handleUpsertAIModel(w http.ResponseWriter, r *http.Request) {
+	var body ai.UpsertModelInput
+	if !decodeJSON(w, r, &body) {
+		return
+	}
+	m, err := d.ai.UpsertModel(r.Context(), mustAuthContext(r), body)
+	if err != nil {
+		httpserver.WriteError(w, r, err)
+		return
+	}
+	httpserver.WriteJSON(w, http.StatusOK, m)
 }
 
 // --- secrets ---

@@ -42,6 +42,15 @@ tests. Everything else is FOUNDATION ONLY or PLANNED — see `README.md`.
   session-holder membership in that org before any domain call runs
   (`cmd/server/middleware.go: requireOrganization`).
 
+**Deliberate exception:** the AI provider/model registry
+(`ai_providers`/`ai_models`, managed via `internal/ai/registry.go` and
+`/api/v1/ai/providers`, `/api/v1/ai/models`) is platform-wide by design —
+these tables carry no `organization_id` (migration `0006_ai.sql`), matching
+the product brief's model of a centralized, shared registry underneath
+per-org `ai_profiles` policy. Any caller with `ai.manage` in *any*
+organization can affect this shared registry. This is a documented
+phase-1 simplification, not an oversight — see `docs/API.md`.
+
 ## Secrets — IMPLEMENTED
 
 `internal/secrets` stores values AES-256-GCM encrypted at rest

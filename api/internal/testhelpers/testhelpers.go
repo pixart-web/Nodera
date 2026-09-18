@@ -57,6 +57,7 @@ func truncateAll(ctx context.Context, t *testing.T, pool *pgxpool.Pool) {
 	tables := []string{
 		"audit_log", "approvals", "agents",
 		"ai_usage_records", "ai_profiles",
+		"ai_providers", // CASCADE also empties ai_models — see reseedLocalEcho
 		"jobs",
 		"secrets",
 		"applications", "nodes",
@@ -71,17 +72,25 @@ func truncateAll(ctx context.Context, t *testing.T, pool *pgxpool.Pool) {
 		}
 	}
 	reseedSystemRoles(ctx, t, pool)
-	reseedLocalEchoModel(ctx, t, pool)
+	reseedLocalEcho(ctx, t, pool)
 }
 
-// reseedLocalEchoModel restores the 'echo-1' test model seeded by migration
-// 0006_ai.sql. Truncating "nodes" with CASCADE also empties "ai_models" (its
-// node_id column has a FK to nodes) even though the seeded echo-1 row has a
-// NULL node_id — same CASCADE-truncates-the-whole-table behavior documented
-// on reseedSystemRoles. The 'local-echo' provider row itself is untouched
-// (nothing truncated references ai_providers), only its model.
-func reseedLocalEchoModel(ctx context.Context, t *testing.T, pool *pgxpool.Pool) {
+// reseedLocalEcho restores the 'local-echo' test provider and its 'echo-1'
+// model, seeded by migration 0006_ai.sql. Truncating "ai_providers" with
+// CASCADE also empties "ai_models" (its provider_id column has a FK to
+// ai_providers) — same CASCADE-truncates-the-whole-table behavior
+// documented on reseedSystemRoles. ai_providers is truncated at all (rather
+// than left alone) so tests that call ai.Service.UpsertProvider don't
+// accumulate rows across test runs.
+func reseedLocalEcho(ctx context.Context, t *testing.T, pool *pgxpool.Pool) {
 	t.Helper()
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO ai_providers (key, kind, display_name, status)
+		VALUES ('local-echo', 'local', 'Local Echo (test provider)', 'active')
+		ON CONFLICT (key) DO NOTHING
+	`); err != nil {
+		t.Fatalf("failed to reseed local-echo provider: %v", err)
+	}
 	if _, err := pool.Exec(ctx, `
 		INSERT INTO ai_models (provider_id, model_identifier, display_name, capabilities, context_window, status, tags)
 		SELECT id, 'echo-1', 'Echo 1 (deterministic test model)', ARRAY['chat'], 8192, 'available', ARRAY['test']

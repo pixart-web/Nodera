@@ -18,6 +18,7 @@ type Config struct {
 	Redis   RedisConfig
 	Auth    AuthConfig
 	Secrets SecretsConfig
+	Ollama  OllamaConfig
 }
 
 type HTTPConfig struct {
@@ -52,6 +53,14 @@ type SecretsConfig struct {
 	// internal/secrets. Empty means the secrets module is disabled — see
 	// docs/SECURITY.md and cmd/server/main.go.
 	EncryptionKeyBase64 string
+}
+
+type OllamaConfig struct {
+	// BaseURL, e.g. "http://localhost:11434". Empty means the Ollama
+	// provider adapter is not registered — an ai_profiles row referencing
+	// "ollama/<model>" simply won't resolve (rule 36), rather than the
+	// server failing to start or fabricating a response.
+	BaseURL string
 }
 
 // Load reads configuration from the environment. It returns an error rather
@@ -90,6 +99,9 @@ func Load() (Config, error) {
 		},
 		Secrets: SecretsConfig{
 			EncryptionKeyBase64: os.Getenv("NODERA_SECRETS_ENCRYPTION_KEY"),
+		},
+		Ollama: OllamaConfig{
+			BaseURL: os.Getenv("NODERA_OLLAMA_BASE_URL"),
 		},
 	}
 

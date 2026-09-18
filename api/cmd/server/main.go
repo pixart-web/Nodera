@@ -12,13 +12,18 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/nodera/nodera/internal/ai"
+	"github.com/nodera/nodera/internal/ai/providers"
 	"github.com/nodera/nodera/internal/ai/providers/localecho"
+	"github.com/nodera/nodera/internal/ai/providers/ollama"
 	"github.com/nodera/nodera/internal/applications"
 	"github.com/nodera/nodera/internal/audit"
 	"github.com/nodera/nodera/internal/identity"
 	"github.com/nodera/nodera/internal/infrastructure"
 	"github.com/nodera/nodera/internal/jobs"
+	"github.com/nodera/nodera/internal/platform/authctx"
 	"github.com/nodera/nodera/internal/platform/config"
 	"github.com/nodera/nodera/internal/platform/db"
 	"github.com/nodera/nodera/internal/platform/logger"
@@ -71,7 +76,27 @@ func run() error {
 	infraSvc := infrastructure.New(pool, auditSvc)
 	appsSvc := applications.New(pool, auditSvc)
 	jobsSvc := jobs.New(pool)
-	aiSvc := ai.New(pool, auditSvc, localecho.New())
+
+	registeredProviders := []providers.Provider{localecho.New()}
+	if cfg.Ollama.BaseURL != "" {
+		registeredProviders = append(registeredProviders, ollama.New("ollama", cfg.Ollama.BaseURL))
+	}
+	aiSvc := ai.New(pool, auditSvc, registeredProviders...)
+
+	if cfg.Ollama.BaseURL != "" {
+		// Auto-register the provider row so it shows up in the registry
+		// without a manual POST /api/v1/ai/providers call — the Go adapter
+		// above is what actually makes it callable; this just makes it
+		// discoverable. System actor bypasses the per-org permission check
+		// (rbac.Require) since this isn't derived from a client request.
+		if _, err := aiSvc.UpsertProvider(ctx, authctx.System(uuid.Nil), ai.UpsertProviderInput{
+			Key: "ollama", Kind: "local", DisplayName: "Ollama (local)", Status: "active",
+		}); err != nil {
+			log.Error("failed to auto-register ollama provider", "error", err)
+		} else {
+			log.Info("ollama provider registered", "base_url", cfg.Ollama.BaseURL)
+		}
+	}
 
 	// The secrets module is optional at the config level (rule 36: report
 	// "not configured" rather than fabricate or crash) — a fresh local
