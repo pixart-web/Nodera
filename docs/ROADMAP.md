@@ -352,6 +352,27 @@ scanning in CI (`govulncheck`, `npm audit`).
       unaffected (no Go changes this pass, sanity-checked anyway)
 - [x] Docs (`FRONTEND.md`, `README.md`) updated to match
 
+**Phase 18** — this pass:
+- [x] A tool-approval-TTL settings UI, added directly to
+      `web/app/(org)/tools/page.tsx` rather than a separate page — an
+      "Approval TTL" column, populated only for `privileged`/`critical`
+      tools (a `read`/`safe` tool never has an approval, so it always
+      shows `—`), showing the effective TTL (an org override, or
+      `24h (default)`) with an inline "Edit" control to set or clear the
+      org's override
+- [x] `lib/types.ts`: `OrganizationToolSetting` type matching
+      `internal/tools`'s real JSON tags
+- [x] Verified live end to end: set `restart_container` to a 15-minute
+      override through the UI, executed it, and confirmed via the real API
+      that the resulting approval's `expires_at` was exactly 15 minutes
+      after `created_at` (not the 24h default); cleared the override
+      through the UI and confirmed the column reverted to `1d (default)`.
+      Checked the browser console on a fresh tab afterward — zero errors
+- [x] Full frontend typecheck + production build clean; backend
+      unaffected (no Go changes this pass, sanity-checked anyway)
+- [x] Docs (`FRONTEND.md`) updated; removed the now-stale
+      "tool-approval-TTL settings UI" bullet from its not-built-yet list
+
 ## Next up
 
 1. **Concrete job types**: the worker dispatcher is real but nothing
@@ -369,9 +390,8 @@ scanning in CI (`govulncheck`, `npm audit`).
 5. **A "platform secrets" mechanism** for cloud provider credentials
    (`docs/AI_ARCHITECTURE.md` Credential handling), or a further cloud
    adapter (OpenAI) if that mismatch is deferred again.
-6. **Remaining frontend follow-ups**: RBAC/settings management UI, a
-   tool-approval-TTL settings UI, real-time updates (polling or
-   websockets) instead of load-once pages.
+6. **Remaining frontend follow-ups**: RBAC/settings management UI,
+   real-time updates (polling or websockets) instead of load-once pages.
 
 ## Explicitly not started (rule 38 — deferred by design)
 

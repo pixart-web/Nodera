@@ -156,6 +156,12 @@ export interface Approval {
   execution_result?: unknown;
 }
 
+export interface OrganizationToolSetting {
+  tool_key: string;
+  approval_ttl_seconds: number;
+  updated_at: string;
+}
+
 export interface Agent {
   id: string;
   name: string;

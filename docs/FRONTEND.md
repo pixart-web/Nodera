@@ -75,6 +75,17 @@ reason — exercising the real Tool Gateway pipeline end to end (verified
 live: `check_ssl` against `github.com` returns genuine certificate data;
 `deploy_application` correctly creates an approval instead of running).
 
+The table also has an "Approval TTL" column (`ApprovalTTLCell`), populated
+only for `privileged`/`critical` tools (a `read`/`safe` tool never has an
+approval, so it always shows `—`): the effective TTL (an org override, or
+`24h (default)`), with an inline "Edit" control that sets or clears the
+org's override for that tool (`tools.manage`-gated server-side; a
+`FORBIDDEN` surfaces inline rather than being pre-checked client-side).
+Verified live: set `restart_container` to a 15-minute override, executed
+it, and confirmed the resulting approval's real `expires_at` was exactly
+15 minutes after `created_at` (not the 24h default); cleared the override
+and confirmed the column reverted to `1d (default)`.
+
 `access/page.tsx` covers the caller's own API tokens (create/revoke),
 service accounts (create/disable, and issuing a token owned by one instead
 of the caller), and — only rendered if the `GET /organization/api-tokens`
@@ -142,8 +153,6 @@ immediately.
 
 - Real-time updates (polling/websockets) — every page loads once and offers
   no live refresh beyond a manual reload after a mutating action
-- A tool-approval-TTL settings UI (`docs/AGENTS.md` — the API supports
-  per-org per-tool overrides, but no page manages them yet)
 - Any settings/RBAC management UI (roles are seeded, not yet editable from
   the UI)
 

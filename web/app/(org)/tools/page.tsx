@@ -6,7 +6,103 @@ import { useApi } from "@/lib/useApi";
 import { PageHeader } from "@/components/PageHeader";
 import { ErrorBanner } from "@/components/ErrorBanner";
 import { StatusBadge } from "@/components/StatusBadge";
-import type { Approval, ExecuteResult, Tool } from "@/lib/types";
+import type { Approval, ExecuteResult, OrganizationToolSetting, Tool } from "@/lib/types";
+
+const DEFAULT_APPROVAL_TTL_SECONDS = 24 * 60 * 60;
+
+function formatTTL(seconds: number): string {
+  if (seconds % 86400 === 0) return `${seconds / 86400}d`;
+  if (seconds % 3600 === 0) return `${seconds / 3600}h`;
+  if (seconds % 60 === 0) return `${seconds / 60}m`;
+  return `${seconds}s`;
+}
+
+function ApprovalTTLCell({
+  tool,
+  override,
+  onChanged,
+}: {
+  tool: Tool;
+  override: OrganizationToolSetting | undefined;
+  onChanged: () => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [minutes, setMinutes] = useState(String(Math.round((override?.approval_ttl_seconds ?? DEFAULT_APPROVAL_TTL_SECONDS) / 60)));
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  if (tool.risk_level !== "privileged" && tool.risk_level !== "critical") {
+    return <span className="text-xs text-base-500">—</span>;
+  }
+
+  async function save() {
+    setError(null);
+    setBusy(true);
+    try {
+      await api.put(`/api/v1/tools/${tool.key}/approval-ttl`, { approval_ttl_seconds: Number(minutes) * 60 });
+      setEditing(false);
+      onChanged();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Failed to set approval TTL");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function clear() {
+    setError(null);
+    setBusy(true);
+    try {
+      await api.del(`/api/v1/tools/${tool.key}/approval-ttl`);
+      setEditing(false);
+      onChanged();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Failed to clear approval TTL override");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (!editing) {
+    return (
+      <div className="flex items-center gap-2">
+        <span className="text-xs text-base-300">
+          {override ? formatTTL(override.approval_ttl_seconds) : `${formatTTL(DEFAULT_APPROVAL_TTL_SECONDS)} (default)`}
+        </span>
+        <button className="text-xs text-accent-400 hover:text-accent-300" onClick={() => setEditing(true)}>
+          Edit
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-1">
+      {error && <div className="text-xs text-danger">{error}</div>}
+      <div className="flex items-center gap-2">
+        <input
+          className="input w-20 py-1 text-xs"
+          type="number"
+          min={5}
+          value={minutes}
+          onChange={(e) => setMinutes(e.target.value)}
+        />
+        <span className="text-xs text-base-400">min</span>
+        <button className="text-xs text-ok hover:underline" disabled={busy} onClick={save}>
+          Save
+        </button>
+        {override && (
+          <button className="text-xs text-base-400 hover:text-danger" disabled={busy} onClick={clear}>
+            Clear
+          </button>
+        )}
+        <button className="text-xs text-base-500 hover:text-base-300" onClick={() => setEditing(false)}>
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
 
 function riskBadgeColor(risk: Tool["risk_level"]): string {
   switch (risk) {
@@ -98,6 +194,7 @@ function ExecuteForm({ tool, onDone }: { tool: Tool; onDone: () => void }) {
 
 export default function ToolsPage() {
   const tools = useApi(() => api.get<Tool[]>("/api/v1/tools"), []);
+  const approvalTTLOverrides = useApi(() => api.get<OrganizationToolSetting[]>("/api/v1/tools/approval-ttl"), []);
   const [openTool, setOpenTool] = useState<string | null>(null);
 
   const [statusFilter, setStatusFilter] = useState("pending");
@@ -138,6 +235,7 @@ export default function ToolsPage() {
                 <th>Risk</th>
                 <th>Required permission</th>
                 <th>Status</th>
+                <th>Approval TTL</th>
                 <th></th>
               </tr>
             </thead>
@@ -159,6 +257,13 @@ export default function ToolsPage() {
                       )}
                     </td>
                     <td>
+                      <ApprovalTTLCell
+                        tool={t}
+                        override={approvalTTLOverrides.data?.find((o) => o.tool_key === t.key)}
+                        onChanged={() => approvalTTLOverrides.reload()}
+                      />
+                    </td>
+                    <td>
                       <button
                         className="text-xs text-accent-400 hover:text-accent-300"
                         onClick={() => setOpenTool(openTool === t.key ? null : t.key)}
@@ -169,7 +274,7 @@ export default function ToolsPage() {
                   </tr>
                   {openTool === t.key && (
                     <tr>
-                      <td colSpan={6} className="bg-base-800/40 p-3">
+                      <td colSpan={7} className="bg-base-800/40 p-3">
                         <ExecuteForm tool={t} onDone={() => approvals.reload()} />
                       </td>
                     </tr>
