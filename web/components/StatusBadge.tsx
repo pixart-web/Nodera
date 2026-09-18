@@ -15,6 +15,11 @@ const COLORS: Record<string, string> = {
   failed: "bg-danger/15 text-danger",
   unavailable: "bg-danger/15 text-danger",
   disabled: "bg-danger/15 text-danger",
+  // approval statuses
+  pending: "bg-warn/15 text-warn",
+  approved: "bg-ok/15 text-ok",
+  rejected: "bg-danger/15 text-danger",
+  expired: "bg-base-500/20 text-base-300",
 };
 
 export function StatusBadge({ status }: { status: string }) {

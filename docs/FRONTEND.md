@@ -26,7 +26,10 @@ web/
       infrastructure/page.tsx  node list + register form
       applications/page.tsx    application list + register form
       jobs/page.tsx             job list (status filter), enqueue, cancel
+      tools/page.tsx             tool registry + inline execute form + approvals queue
       secrets/page.tsx          secret metadata list, set, delete — never values
+      access/page.tsx            own API tokens, service accounts + their tokens,
+                                  org-wide token listing (organization.manage only)
       audit/page.tsx            full audit log
   lib/
     api.ts                 fetch wrapper: bearer token + X-Nodera-Org headers, normalized ApiError
@@ -58,16 +61,39 @@ imports. `lib/types.ts` also defines `Page<T>`, the pagination envelope
 `visibleLimit` state and a "Load more" button that re-fetches with a
 larger `?limit=`, rather than accumulating pages client-side.
 
+## Tools & Access pages
+
+`tools/page.tsx` lists the tool registry and lets a user execute one inline
+(resource type/id + a JSON parameters textarea). A `read`/`safe` tool's
+result renders directly; a `privileged`/`critical` tool instead shows its
+new `approval_id` and points at the Approvals table below, which lists by
+status and lets the user Approve/Reject a pending one with an optional
+reason — exercising the real Tool Gateway pipeline end to end (verified
+live: `check_ssl` against `github.com` returns genuine certificate data;
+`deploy_application` correctly creates an approval instead of running).
+
+`access/page.tsx` covers the caller's own API tokens (create/revoke),
+service accounts (create/disable, and issuing a token owned by one instead
+of the caller), and — only rendered if the `GET /organization/api-tokens`
+call doesn't come back `FORBIDDEN` — an org-wide token listing with owner
+attribution. A `FORBIDDEN` there is treated as "this section isn't
+available to me," not an error to display, since a plain member lacking
+`organization.manage` is an expected, not exceptional, case.
+
+Both pages render lists via `.map()` returning more than one element per
+item (a data row plus a conditional inline form row) — that needs
+`<Fragment key={...}>`, not the `<>...</>` shorthand, which can't carry a
+key. A first pass used the shorthand and shipped a real React "missing key"
+warning, caught by checking the browser console during live verification
+rather than trusting the build (`tsc`/`next build` don't catch this class
+of bug) — fixed before commit.
+
 ## What's deliberately not built yet
 
 - Real-time updates (polling/websockets) — every page loads once and offers
   no live refresh beyond a manual reload after a mutating action
 - AI profile / chat UI (the API supports it — `docs/AI_ARCHITECTURE.md` —
   but no page calls it yet)
-- Tools/approvals UI (the API and Tool Gateway backend are real —
-  `docs/AGENTS.md` — no page calls either yet)
-- Service accounts / org-admin API token management UI (real backend —
-  `docs/API.md` — no page yet)
 - Any settings/RBAC management UI (roles are seeded, not yet editable from
   the UI)
 

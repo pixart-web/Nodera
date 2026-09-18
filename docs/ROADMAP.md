@@ -108,6 +108,33 @@ scanning in CI (`govulncheck`, `npm audit`).
       including fixing a stale "no approvals backend" line in `FRONTEND.md`
       left over from before phase 6
 
+**Phase 11** — this pass:
+- [x] `web/app/(org)/tools/page.tsx`: tool registry table + an inline
+      execute form per tool (resource type/id + JSON parameters) and an
+      Approvals table with status filter and Approve/Reject. Verified live:
+      `check_ssl` against `github.com` returns genuine certificate data
+      rendered in the browser (matching the earlier curl test exactly);
+      `deploy_application` correctly creates a pending approval instead of
+      running, approving it flows through to the real Tool Gateway
+- [x] `web/app/(org)/access/page.tsx`: the caller's own API tokens
+      (create/revoke), service accounts (create/disable, issue a token
+      owned by one), and an org-wide token listing that only renders when
+      `GET /organization/api-tokens` doesn't come back `FORBIDDEN` — a
+      member lacking `organization.manage` sees no section, not an error.
+      Verified live end-to-end: created a service account, issued it a
+      token, saw the raw-token-shown-once banner, and saw the new token
+      immediately appear in the org-wide listing with correct owner
+      attribution
+- [x] Both pages added to the sidebar nav
+- [x] Found and fixed a real bug during live verification (not caught by
+      `tsc`/`next build`): both pages used the `<>...</>` Fragment
+      shorthand for a `.map()` returning multiple elements per item, which
+      can't carry a `key` — React's actual "missing key" console warning
+      only surfaces at runtime. Switched to `<Fragment key={...}>`
+- [x] Full frontend typecheck + production build clean; backend test suite
+      unaffected (no Go changes this pass)
+- [x] Docs (`FRONTEND.md`, `README.md`) updated to match
+
 ## Next up
 
 1. **Concrete job types**: the worker dispatcher is real but nothing
@@ -129,10 +156,9 @@ scanning in CI (`govulncheck`, `npm audit`).
    the caller of `tools.Execute`.
 7. **Per-tool/per-org-configurable approval TTL** (today's
    `defaultApprovalTTL` is a single global 24h constant).
-8. **Frontend follow-ups**: service accounts/API tokens UI, tools/approvals
-   UI (real backends now exist for both), AI profile/chat UI,
-   provider/model registry UI, RBAC/settings management UI, real-time
-   updates (polling or websockets) instead of load-once pages.
+8. **Remaining frontend follow-ups**: AI profile/chat UI, provider/model
+   registry UI, RBAC/settings management UI, real-time updates (polling or
+   websockets) instead of load-once pages.
 
 ## Explicitly not started (rule 38 — deferred by design)
 

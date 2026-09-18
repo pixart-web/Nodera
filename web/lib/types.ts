@@ -99,6 +99,63 @@ export interface AuditRecord {
   created_at: string;
 }
 
+export interface APIToken {
+  id: string;
+  name: string;
+  token_prefix: string;
+  scopes: string[];
+  created_at: string;
+  expires_at: string | null;
+  last_used_at: string | null;
+}
+
+export interface AdminAPIToken extends APIToken {
+  owner_type: "user" | "service_account";
+  owner_label: string;
+}
+
+export interface CreatedAPIToken {
+  token: string; // shown exactly once
+  info: APIToken;
+}
+
+export interface ServiceAccount {
+  id: string;
+  name: string;
+  description: string;
+  status: "active" | "disabled";
+  created_at: string;
+}
+
+export interface Tool {
+  key: string;
+  description: string;
+  risk_level: "read" | "safe" | "privileged" | "critical";
+  required_permission: string;
+  implemented: boolean;
+}
+
+export interface ExecuteResult {
+  status: "executed" | "approval_required";
+  result?: unknown;
+  approval_id?: string;
+}
+
+export interface Approval {
+  id: string;
+  requested_action: string;
+  risk_level: "privileged" | "critical";
+  resource_type: string;
+  resource_id: string;
+  parameters: unknown;
+  status: "pending" | "approved" | "rejected" | "expired";
+  created_at: string;
+  expires_at?: string | null;
+  decided_at?: string | null;
+  decision_reason?: string;
+  execution_result?: unknown;
+}
+
 export interface AIProfile {
   id: string;
   key: string;
