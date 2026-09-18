@@ -30,7 +30,7 @@ func TestApplicationsRegisterAndList(t *testing.T) {
 		t.Fatalf("expected default status 'unknown', got %q", a.Status)
 	}
 
-	list, err := appsSvc.List(ctx, ac)
+	list, err := appsSvc.List(ctx, ac, 100, 0)
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}

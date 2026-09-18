@@ -44,6 +44,8 @@ schema/interfaces, no production backend yet) · **PLANNED** (not started).
 | Rate limiting | IMPLEMENTED | In-process: `/auth/login` (5/5min/IP), `/auth/signup` (3/hour/IP), `/ai/chat` (60/min/org); other endpoints and a multi-instance-safe (Redis) limiter are PLANNED |
 | Secure headers | IMPLEMENTED | `nosniff`, `DENY`, `no-referrer`, `no-store` on every response |
 | CI | IMPLEMENTED | `gofmt`/`vet`/`build`/`test -race`/`govulncheck` (API) + `typecheck`/`build`/`npm audit` (web) on every push |
+| OpenAPI spec + Swagger UI | IMPLEMENTED | `GET /openapi.json` (validated against the OpenAPI 3.0 schema in CI) + `GET /docs`; hand-maintained, not yet generated from code |
+| Pagination | IMPLEMENTED (4 endpoints) | `infrastructure/nodes`, `applications`, `jobs`, `audit` — `limit`/`offset` + a `has_more` envelope; other list endpoints stay unpaginated (small at phase-1 scale) |
 | Dashboard / frontend | IMPLEMENTED | Next.js + TypeScript control plane UI (`web/`) — login, org picker, infrastructure, applications, jobs, secrets, audit; every page reads/writes real API data, no fabricated placeholders |
 | Node Agent, AI Gateway, Agent Runtime as separate services | PLANNED | Currently packages inside the one Core API binary (ADR-002) |
 
@@ -75,6 +77,9 @@ curl localhost:8080/health
 curl localhost:8080/ready
 ```
 
+Browse the API at http://localhost:8080/docs (Swagger UI) or fetch the raw
+spec at `/openapi.json`.
+
 ### Frontend (`web/`)
 
 ```bash
@@ -87,7 +92,8 @@ npm run dev
 Open http://localhost:3000. The API must be running and must allow this
 origin — the default `NODERA_CORS_ORIGINS=http://localhost:3000` already
 does. `npm run build` produces a production build; `npm run typecheck`
-runs `tsc --noEmit` on its own.
+runs `tsc --noEmit` on its own; `npm run gen:types` regenerates
+`lib/api-types.generated.ts` from the API's OpenAPI spec.
 
 ### Running tests
 

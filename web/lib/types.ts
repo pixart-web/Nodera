@@ -1,7 +1,18 @@
 // Mirrors the JSON shapes returned by the Nodera Core API (see
 // docs/API.md and the individual internal/<domain> Go packages). Kept
-// hand-written rather than generated for now — see docs/ROADMAP.md
-// (OpenAPI/Swagger generation is not yet implemented).
+// hand-written for the moment even though api-types.generated.ts (run
+// `npm run gen:types`) now exists as a generated alternative — swapping
+// every page over is tracked in docs/ROADMAP.md, not done yet.
+
+// The envelope every paginated list endpoint returns
+// (internal/platform/httpserver.Page) — GET /infrastructure/nodes,
+// /applications, /jobs, and /audit as of this writing.
+export interface Page<T> {
+  items: T[];
+  limit: number;
+  offset: number;
+  has_more: boolean;
+}
 
 export interface User {
   id: string;

@@ -45,12 +45,18 @@ every request. The organization a user is currently acting within is also
 client state (`X-Nodera-Org` header), matching the API's own design (one
 session, many organizations — see `docs/API.md`).
 
-## Why hand-written types instead of generated ones
+## Hand-written types, with a generated alternative now available
 
-There is no OpenAPI spec yet (`docs/API.md` "Not yet implemented" —
-generation is planned). `lib/types.ts` is kept intentionally small and
-mirrors only the fields the UI actually reads, not the full Go struct —
-once OpenAPI generation exists, this file is the one to replace.
+An OpenAPI 3.0 spec exists (`api/openapi/openapi.json`, served at
+`/openapi.json`) and `npm run gen:types` produces
+`lib/api-types.generated.ts` from it. No page has been switched over to it
+yet — `lib/types.ts` (kept intentionally small, mirroring only the fields
+the UI actually reads, not the full Go struct) is still what every page
+imports. `lib/types.ts` also defines `Page<T>`, the pagination envelope
+(`infrastructure/nodes`, `applications`, `jobs`, `audit` — see
+`docs/API.md` Pagination); the pages for those four hold their own
+`visibleLimit` state and a "Load more" button that re-fetches with a
+larger `?limit=`, rather than accumulating pages client-side.
 
 ## What's deliberately not built yet
 
@@ -58,9 +64,11 @@ once OpenAPI generation exists, this file is the one to replace.
   no live refresh beyond a manual reload after a mutating action
 - AI profile / chat UI (the API supports it — `docs/AI_ARCHITECTURE.md` —
   but no page calls it yet)
-- Approvals UI (no backend exists for it yet either — `docs/AGENTS.md`)
+- Tools/approvals UI (the API and Tool Gateway backend are real —
+  `docs/AGENTS.md` — no page calls either yet)
+- Service accounts / org-admin API token management UI (real backend —
+  `docs/API.md` — no page yet)
 - Any settings/RBAC management UI (roles are seeded, not yet editable from
   the UI)
-- Pagination (matches the API's current unpaginated list endpoints)
 
 Tracked in `docs/ROADMAP.md`.

@@ -1,0 +1,688 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Nodera Core API",
+    "version": "0.1.0",
+    "description": "Infrastructure, AI, Agent, and Operations control plane. This spec covers exactly the endpoints implemented today — see docs/ROADMAP.md in the repository for what's planned. Hand-maintained (docs/ROADMAP.md tracks generating it from code instead)."
+  },
+  "servers": [
+    { "url": "http://localhost:8080", "description": "Local development" }
+  ],
+  "security": [{ "bearerAuth": [] }],
+  "tags": [
+    { "name": "platform", "description": "Unauthenticated liveness/readiness" },
+    { "name": "auth", "description": "Signup, login, logout" },
+    { "name": "organizations", "description": "Multi-tenant organizations and membership" },
+    { "name": "infrastructure", "description": "Provider-agnostic node inventory" },
+    { "name": "applications", "description": "Registered applications and services" },
+    { "name": "api-tokens", "description": "Scoped, revocable API credentials" },
+    { "name": "service-accounts", "description": "Non-human actors and their tokens" },
+    { "name": "jobs", "description": "Postgres-backed asynchronous job queue" },
+    { "name": "ai", "description": "AI Gateway: profiles, provider/model registry, chat" },
+    { "name": "secrets", "description": "Encrypted-at-rest secret storage (metadata only over HTTP)" },
+    { "name": "tools", "description": "Tool Gateway: permission-gated tool execution" },
+    { "name": "approvals", "description": "Human approval workflow for privileged/critical tools" },
+    { "name": "audit", "description": "Append-only audit log" }
+  ],
+  "paths": {
+    "/health": {
+      "get": {
+        "tags": ["platform"], "summary": "Process liveness", "security": [],
+        "responses": { "200": { "description": "OK" } }
+      }
+    },
+    "/ready": {
+      "get": {
+        "tags": ["platform"], "summary": "Liveness + database reachability", "security": [],
+        "responses": {
+          "200": { "description": "Ready" },
+          "503": { "description": "Database unreachable" }
+        }
+      }
+    },
+    "/api/v1/auth/signup": {
+      "post": {
+        "tags": ["auth"], "summary": "Create a user (no org membership yet)", "security": [],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": {
+          "type": "object", "required": ["email", "password", "display_name"],
+          "properties": {
+            "email": { "type": "string", "format": "email" },
+            "password": { "type": "string", "minLength": 12, "description": "At least 12 characters, mixing letters with a number or symbol" },
+            "display_name": { "type": "string" }
+          }
+        } } } },
+        "responses": {
+          "201": { "description": "Created", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/User" } } } },
+          "429": { "$ref": "#/components/responses/RateLimited" },
+          "409": { "$ref": "#/components/responses/Conflict" }
+        }
+      }
+    },
+    "/api/v1/auth/login": {
+      "post": {
+        "tags": ["auth"], "summary": "Authenticate and receive a session token", "security": [],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": {
+          "type": "object", "required": ["email", "password"],
+          "properties": { "email": { "type": "string", "format": "email" }, "password": { "type": "string" } }
+        } } } },
+        "responses": {
+          "200": { "description": "OK", "content": { "application/json": { "schema": {
+            "type": "object",
+            "properties": {
+              "session_token": { "type": "string" },
+              "user": { "$ref": "#/components/schemas/User" },
+              "organizations": { "type": "array", "items": { "$ref": "#/components/schemas/Organization" } }
+            }
+          } } } },
+          "401": { "$ref": "#/components/responses/Unauthenticated" },
+          "429": { "$ref": "#/components/responses/RateLimited" }
+        }
+      }
+    },
+    "/api/v1/auth/logout": {
+      "post": {
+        "tags": ["auth"], "summary": "Revoke the current session",
+        "responses": { "204": { "description": "No Content" } }
+      }
+    },
+    "/api/v1/organizations": {
+      "get": {
+        "tags": ["organizations"], "summary": "List organizations the caller belongs to",
+        "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": {
+          "type": "array", "items": { "$ref": "#/components/schemas/Organization" }
+        } } } } }
+      },
+      "post": {
+        "tags": ["organizations"], "summary": "Create an organization; creator becomes owner",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": {
+          "type": "object", "required": ["name", "slug"],
+          "properties": { "name": { "type": "string" }, "slug": { "type": "string", "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$" } }
+        } } } },
+        "responses": {
+          "201": { "description": "Created", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Organization" } } } },
+          "409": { "$ref": "#/components/responses/Conflict" }
+        }
+      }
+    },
+    "/api/v1/organization": {
+      "get": {
+        "tags": ["organizations"], "summary": "Get the current organization",
+        "parameters": [{ "$ref": "#/components/parameters/OrgHeader" }],
+        "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Organization" } } } } }
+      }
+    },
+    "/api/v1/infrastructure/nodes": {
+      "get": {
+        "tags": ["infrastructure"], "summary": "List nodes (infrastructure.read)",
+        "parameters": [{ "$ref": "#/components/parameters/OrgHeader" }, { "$ref": "#/components/parameters/Limit" }, { "$ref": "#/components/parameters/Offset" }],
+        "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/NodePage" } } } } }
+      },
+      "post": {
+        "tags": ["infrastructure"], "summary": "Register a node (infrastructure.manage)",
+        "parameters": [{ "$ref": "#/components/parameters/OrgHeader" }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/RegisterNodeInput" } } } },
+        "responses": {
+          "201": { "description": "Created", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Node" } } } },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "409": { "$ref": "#/components/responses/Conflict" }
+        }
+      }
+    },
+    "/api/v1/infrastructure/nodes/{id}": {
+      "get": {
+        "tags": ["infrastructure"], "summary": "Get a node",
+        "parameters": [{ "$ref": "#/components/parameters/OrgHeader" }, { "$ref": "#/components/parameters/PathId" }],
+        "responses": {
+          "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Node" } } } },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      }
+    },
+    "/api/v1/applications": {
+      "get": {
+        "tags": ["applications"], "summary": "List applications (applications.read)",
+        "parameters": [{ "$ref": "#/components/parameters/OrgHeader" }, { "$ref": "#/components/parameters/Limit" }, { "$ref": "#/components/parameters/Offset" }],
+        "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ApplicationPage" } } } } }
+      },
+      "post": {
+        "tags": ["applications"], "summary": "Register an application (applications.deploy)",
+        "parameters": [{ "$ref": "#/components/parameters/OrgHeader" }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/RegisterApplicationInput" } } } },
+        "responses": {
+          "201": { "description": "Created", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Application" } } } },
+          "403": { "$ref": "#/components/responses/Forbidden" }
+        }
+      }
+    },
+    "/api/v1/applications/{id}": {
+      "get": {
+        "tags": ["applications"], "summary": "Get an application",
+        "parameters": [{ "$ref": "#/components/parameters/OrgHeader" }, { "$ref": "#/components/parameters/PathId" }],
+        "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Application" } } } } }
+      }
+    },
+    "/api/v1/api-tokens": {
+      "get": {
+        "tags": ["api-tokens"], "summary": "List the caller's own API tokens",
+        "parameters": [{ "$ref": "#/components/parameters/OrgHeader" }],
+        "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "type": "array", "items": { "$ref": "#/components/schemas/APIToken" } } } } } }
+      },
+      "post": {
+        "tags": ["api-tokens"], "summary": "Create an API token owned by the caller (organization.manage)",
+        "parameters": [{ "$ref": "#/components/parameters/OrgHeader" }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CreateAPITokenInput" } } } },
+        "responses": {
+          "201": { "description": "Created — raw token returned once", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CreatedAPIToken" } } } },
+          "403": { "$ref": "#/components/responses/Forbidden" }
+        }
+      }
+    },
+    "/api/v1/api-tokens/{id}": {
+      "delete": {
+        "tags": ["api-tokens"], "summary": "Revoke one of the caller's own tokens",
+        "parameters": [{ "$ref": "#/components/parameters/OrgHeader" }, { "$ref": "#/components/parameters/PathId" }],
+        "responses": { "204": { "description": "No Content" }, "404": { "$ref": "#/components/responses/NotFound" } }
+      }
+    },
+    "/api/v1/organization/api-tokens": {
+      "get": {
+        "tags": ["api-tokens"], "summary": "List every non-revoked token in the org, any owner (organization.manage)",
+        "parameters": [{ "$ref": "#/components/parameters/OrgHeader" }],
+        "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "type": "array", "items": { "$ref": "#/components/schemas/AdminAPIToken" } } } } } }
+      }
+    },
+    "/api/v1/organization/api-tokens/{id}": {
+      "delete": {
+        "tags": ["api-tokens"], "summary": "Revoke any token in the org, regardless of owner (organization.manage)",
+        "parameters": [{ "$ref": "#/components/parameters/OrgHeader" }, { "$ref": "#/components/parameters/PathId" }],
+        "responses": { "204": { "description": "No Content" }, "403": { "$ref": "#/components/responses/Forbidden" } }
+      }
+    },
+    "/api/v1/service-accounts": {
+      "get": {
+        "tags": ["service-accounts"], "summary": "List service accounts (organization.manage)",
+        "parameters": [{ "$ref": "#/components/parameters/OrgHeader" }],
+        "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "type": "array", "items": { "$ref": "#/components/schemas/ServiceAccount" } } } } } }
+      },
+      "post": {
+        "tags": ["service-accounts"], "summary": "Create a service account (organization.manage)",
+        "parameters": [{ "$ref": "#/components/parameters/OrgHeader" }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": {
+          "type": "object", "required": ["name"],
+          "properties": { "name": { "type": "string" }, "description": { "type": "string" } }
+        } } } },
+        "responses": { "201": { "description": "Created", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ServiceAccount" } } } } }
+      }
+    },
+    "/api/v1/service-accounts/{id}": {
+      "delete": {
+        "tags": ["service-accounts"], "summary": "Disable a service account and revoke all its outstanding tokens (organization.manage)",
+        "parameters": [{ "$ref": "#/components/parameters/OrgHeader" }, { "$ref": "#/components/parameters/PathId" }],
+        "responses": { "204": { "description": "No Content" }, "404": { "$ref": "#/components/responses/NotFound" } }
+      }
+    },
+    "/api/v1/service-accounts/{id}/api-tokens": {
+      "post": {
+        "tags": ["service-accounts"], "summary": "Mint a token owned by the service account (organization.manage)",
+        "parameters": [{ "$ref": "#/components/parameters/OrgHeader" }, { "$ref": "#/components/parameters/PathId" }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CreateAPITokenInput" } } } },
+        "responses": { "201": { "description": "Created — raw token returned once", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CreatedAPIToken" } } } } }
+      }
+    },
+    "/api/v1/jobs": {
+      "get": {
+        "tags": ["jobs"], "summary": "List jobs (jobs.read)",
+        "parameters": [
+          { "$ref": "#/components/parameters/OrgHeader" }, { "$ref": "#/components/parameters/Limit" }, { "$ref": "#/components/parameters/Offset" },
+          { "name": "status", "in": "query", "schema": { "type": "string", "enum": ["queued", "running", "succeeded", "failed", "cancelled", "retrying"] } }
+        ],
+        "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/JobPage" } } } } }
+      },
+      "post": {
+        "tags": ["jobs"], "summary": "Enqueue a job (jobs.manage)",
+        "parameters": [{ "$ref": "#/components/parameters/OrgHeader" }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": {
+          "type": "object", "required": ["type"],
+          "properties": {
+            "type": { "type": "string", "example": "backup.create" },
+            "payload": { "type": "object" },
+            "priority": { "type": "integer" },
+            "max_attempts": { "type": "integer" },
+            "timeout_seconds": { "type": "integer" },
+            "idempotency_key": { "type": "string" }
+          }
+        } } } },
+        "responses": { "201": { "description": "Created", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Job" } } } } }
+      }
+    },
+    "/api/v1/jobs/{id}": {
+      "get": {
+        "tags": ["jobs"], "summary": "Get a job",
+        "parameters": [{ "$ref": "#/components/parameters/OrgHeader" }, { "$ref": "#/components/parameters/PathId" }],
+        "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Job" } } } } }
+      }
+    },
+    "/api/v1/jobs/{id}/cancel": {
+      "post": {
+        "tags": ["jobs"], "summary": "Cancel a queued job",
+        "parameters": [{ "$ref": "#/components/parameters/OrgHeader" }, { "$ref": "#/components/parameters/PathId" }],
+        "responses": { "204": { "description": "No Content" }, "409": { "$ref": "#/components/responses/Conflict" } }
+      }
+    },
+    "/api/v1/ai/profiles": {
+      "get": {
+        "tags": ["ai"], "summary": "List AI profiles (ai.use)",
+        "parameters": [{ "$ref": "#/components/parameters/OrgHeader" }],
+        "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "type": "array", "items": { "$ref": "#/components/schemas/AIProfile" } } } } } }
+      },
+      "post": {
+        "tags": ["ai"], "summary": "Create an AI profile (ai.manage)",
+        "parameters": [{ "$ref": "#/components/parameters/OrgHeader" }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CreateAIProfileInput" } } } },
+        "responses": { "201": { "description": "Created", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AIProfile" } } } } }
+      }
+    },
+    "/api/v1/ai/chat": {
+      "post": {
+        "tags": ["ai"], "summary": "Call the AI gateway with a profile key + messages (ai.use)",
+        "parameters": [{ "$ref": "#/components/parameters/OrgHeader" }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": {
+          "type": "object", "required": ["profile_key", "messages"],
+          "properties": {
+            "profile_key": { "type": "string" },
+            "messages": { "type": "array", "items": { "$ref": "#/components/schemas/ChatMessage" } }
+          }
+        } } } },
+        "responses": {
+          "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ChatResult" } } } },
+          "429": { "$ref": "#/components/responses/RateLimited" },
+          "503": { "description": "No available, policy-compliant model for this profile" }
+        }
+      }
+    },
+    "/api/v1/ai/providers": {
+      "get": {
+        "tags": ["ai"], "summary": "List the platform-wide provider registry (ai.use)",
+        "parameters": [{ "$ref": "#/components/parameters/OrgHeader" }],
+        "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "type": "array", "items": { "$ref": "#/components/schemas/AIProvider" } } } } } }
+      },
+      "post": {
+        "tags": ["ai"], "summary": "Register/update a provider (ai.manage, platform-wide)",
+        "parameters": [{ "$ref": "#/components/parameters/OrgHeader" }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": {
+          "type": "object", "required": ["key", "kind"],
+          "properties": {
+            "key": { "type": "string" }, "kind": { "type": "string", "enum": ["cloud", "local"] },
+            "display_name": { "type": "string" }, "status": { "type": "string", "enum": ["unconfigured", "active", "disabled", "unavailable"] }
+          }
+        } } } },
+        "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AIProvider" } } } } }
+      }
+    },
+    "/api/v1/ai/models": {
+      "get": {
+        "tags": ["ai"], "summary": "List the platform-wide model registry (ai.use)",
+        "parameters": [{ "$ref": "#/components/parameters/OrgHeader" }],
+        "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "type": "array", "items": { "$ref": "#/components/schemas/AIModel" } } } } } }
+      },
+      "post": {
+        "tags": ["ai"], "summary": "Register/update a model under an existing provider (ai.manage)",
+        "parameters": [{ "$ref": "#/components/parameters/OrgHeader" }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": {
+          "type": "object", "required": ["provider_key", "model_identifier"],
+          "properties": {
+            "provider_key": { "type": "string" }, "model_identifier": { "type": "string" },
+            "display_name": { "type": "string" }, "capabilities": { "type": "array", "items": { "type": "string" } },
+            "context_window": { "type": "integer" }, "status": { "type": "string", "enum": ["available", "unavailable", "deprecated"] }
+          }
+        } } } },
+        "responses": {
+          "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AIModel" } } } },
+          "400": { "description": "Referenced provider_key is not registered" }
+        }
+      }
+    },
+    "/api/v1/secrets": {
+      "get": {
+        "tags": ["secrets"], "summary": "List secret metadata only — never values (secrets.read)",
+        "parameters": [{ "$ref": "#/components/parameters/OrgHeader" }],
+        "responses": {
+          "200": { "description": "OK", "content": { "application/json": { "schema": { "type": "array", "items": { "$ref": "#/components/schemas/SecretMeta" } } } } },
+          "503": { "description": "Secrets module not configured (NODERA_SECRETS_ENCRYPTION_KEY unset)" }
+        }
+      }
+    },
+    "/api/v1/secrets/{key}": {
+      "put": {
+        "tags": ["secrets"], "summary": "Create or rotate a secret (secrets.manage)",
+        "parameters": [{ "$ref": "#/components/parameters/OrgHeader" }, { "name": "key", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": {
+          "type": "object", "required": ["value"],
+          "properties": { "value": { "type": "string" }, "description": { "type": "string" } }
+        } } } },
+        "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SecretMeta" } } } } }
+      },
+      "delete": {
+        "tags": ["secrets"], "summary": "Delete a secret (secrets.manage)",
+        "parameters": [{ "$ref": "#/components/parameters/OrgHeader" }, { "name": "key", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "204": { "description": "No Content" } }
+      }
+    },
+    "/api/v1/tools": {
+      "get": {
+        "tags": ["tools"], "summary": "List the tool registry (tools.read)",
+        "parameters": [{ "$ref": "#/components/parameters/OrgHeader" }],
+        "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "type": "array", "items": { "$ref": "#/components/schemas/Tool" } } } } } }
+      }
+    },
+    "/api/v1/tools/{key}/execute": {
+      "post": {
+        "tags": ["tools"], "summary": "Execute a tool — read/safe run immediately, privileged/critical return an approval instead",
+        "parameters": [{ "$ref": "#/components/parameters/OrgHeader" }, { "name": "key", "in": "path", "required": true, "schema": { "type": "string" }, "example": "check_ssl" }],
+        "requestBody": { "content": { "application/json": { "schema": {
+          "type": "object",
+          "properties": {
+            "resource_type": { "type": "string" }, "resource_id": { "type": "string" },
+            "parameters": { "type": "object" }
+          }
+        } } } },
+        "responses": {
+          "200": { "description": "Executed immediately (read/safe tool)", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ExecuteResult" } } } },
+          "202": { "description": "Approval required (privileged/critical tool)", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ExecuteResult" } } } },
+          "501": { "description": "Tool has no execution backend yet (NOT_IMPLEMENTED)" }
+        }
+      }
+    },
+    "/api/v1/approvals": {
+      "get": {
+        "tags": ["approvals"], "summary": "List approvals (approvals.decide)",
+        "parameters": [{ "$ref": "#/components/parameters/OrgHeader" }, { "name": "status", "in": "query", "schema": { "type": "string", "enum": ["pending", "approved", "rejected", "expired"] } }],
+        "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "type": "array", "items": { "$ref": "#/components/schemas/Approval" } } } } } }
+      }
+    },
+    "/api/v1/approvals/{id}/decide": {
+      "post": {
+        "tags": ["approvals"], "summary": "Approve or reject a pending approval (approvals.decide)",
+        "parameters": [{ "$ref": "#/components/parameters/OrgHeader" }, { "$ref": "#/components/parameters/PathId" }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": {
+          "type": "object", "required": ["approve"],
+          "properties": { "approve": { "type": "boolean" }, "reason": { "type": "string" } }
+        } } } },
+        "responses": {
+          "200": { "description": "OK — approving attempts execution immediately", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Approval" } } } },
+          "409": { "description": "Approval is no longer pending (already decided or expired)" }
+        }
+      }
+    },
+    "/api/v1/audit": {
+      "get": {
+        "tags": ["audit"], "summary": "Query the audit log (audit.read)",
+        "parameters": [
+          { "$ref": "#/components/parameters/OrgHeader" }, { "$ref": "#/components/parameters/Limit" }, { "$ref": "#/components/parameters/Offset" },
+          { "name": "resource_type", "in": "query", "schema": { "type": "string" } },
+          { "name": "action", "in": "query", "schema": { "type": "string" } }
+        ],
+        "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AuditRecordPage" } } } } }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http", "scheme": "bearer",
+        "description": "A session token (POST /auth/login) or an API token (POST /api-tokens / POST /service-accounts/{id}/api-tokens). See docs/API.md Authenticating."
+      }
+    },
+    "parameters": {
+      "OrgHeader": {
+        "name": "X-Nodera-Org", "in": "header", "schema": { "type": "string", "format": "uuid" },
+        "description": "Required for a session token (which org to act within). Optional for an API token, which already embeds one — if present it must match."
+      },
+      "PathId": { "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } },
+      "Limit": { "name": "limit", "in": "query", "schema": { "type": "integer", "default": 50, "maximum": 200 } },
+      "Offset": { "name": "offset", "in": "query", "schema": { "type": "integer", "default": 0, "minimum": 0 } }
+    },
+    "responses": {
+      "Unauthenticated": { "description": "Missing or invalid credentials", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+      "Forbidden": { "description": "Missing required permission", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+      "NotFound": { "description": "Resource not found", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+      "Conflict": { "description": "Conflicting state (e.g. duplicate key)", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+      "RateLimited": { "description": "Too many requests", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+    },
+    "schemas": {
+      "Error": {
+        "type": "object",
+        "properties": { "error": { "type": "object", "properties": {
+          "code": { "type": "string", "example": "FORBIDDEN" },
+          "message": { "type": "string" },
+          "request_id": { "type": "string" }
+        } } }
+      },
+      "User": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "format": "uuid" }, "email": { "type": "string" }, "display_name": { "type": "string" }
+        }
+      },
+      "Organization": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "format": "uuid" }, "name": { "type": "string" }, "slug": { "type": "string" },
+          "created_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "Node": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "format": "uuid" }, "organization_id": { "type": "string", "format": "uuid" },
+          "hostname": { "type": "string" }, "provider": { "type": "string" }, "provider_resource_id": { "type": "string" },
+          "role": { "type": "string" }, "environment": { "type": "string" },
+          "status": { "type": "string", "enum": ["unknown", "online", "offline", "degraded"] },
+          "operating_system": { "type": "string" }, "cpu_cores": { "type": "integer" }, "memory_mb": { "type": "integer" },
+          "storage_gb": { "type": "integer" }, "capabilities": { "type": "array", "items": { "type": "string" } },
+          "last_seen_at": { "type": "string", "format": "date-time", "nullable": true },
+          "created_at": { "type": "string", "format": "date-time" }, "updated_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "RegisterNodeInput": {
+        "type": "object", "required": ["hostname"],
+        "properties": {
+          "hostname": { "type": "string" }, "provider": { "type": "string" }, "role": { "type": "string" },
+          "environment": { "type": "string" }, "capabilities": { "type": "array", "items": { "type": "string" } }
+        }
+      },
+      "NodePage": {
+        "allOf": [
+          { "$ref": "#/components/schemas/Page" },
+          { "type": "object", "properties": { "items": { "type": "array", "items": { "$ref": "#/components/schemas/Node" } } } }
+        ]
+      },
+      "Application": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "format": "uuid" }, "organization_id": { "type": "string", "format": "uuid" },
+          "name": { "type": "string" }, "kind": { "type": "string" }, "node_id": { "type": "string", "format": "uuid", "nullable": true },
+          "environment": { "type": "string" }, "status": { "type": "string" }, "repository_url": { "type": "string" },
+          "created_at": { "type": "string", "format": "date-time" }, "updated_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "RegisterApplicationInput": {
+        "type": "object", "required": ["name"],
+        "properties": {
+          "name": { "type": "string" }, "kind": { "type": "string", "enum": ["service", "web", "worker", "job", "database"] },
+          "node_id": { "type": "string", "format": "uuid" }, "environment": { "type": "string" }, "repository_url": { "type": "string" }
+        }
+      },
+      "ApplicationPage": {
+        "allOf": [
+          { "$ref": "#/components/schemas/Page" },
+          { "type": "object", "properties": { "items": { "type": "array", "items": { "$ref": "#/components/schemas/Application" } } } }
+        ]
+      },
+      "APIToken": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "format": "uuid" }, "name": { "type": "string" }, "token_prefix": { "type": "string" },
+          "scopes": { "type": "array", "items": { "type": "string" } },
+          "created_at": { "type": "string", "format": "date-time" },
+          "expires_at": { "type": "string", "format": "date-time", "nullable": true },
+          "last_used_at": { "type": "string", "format": "date-time", "nullable": true }
+        }
+      },
+      "AdminAPIToken": {
+        "allOf": [{ "$ref": "#/components/schemas/APIToken" }, { "type": "object", "properties": {
+          "owner_type": { "type": "string", "enum": ["user", "service_account"] }, "owner_label": { "type": "string" }
+        } }]
+      },
+      "CreateAPITokenInput": {
+        "type": "object", "required": ["name", "scopes"],
+        "properties": {
+          "name": { "type": "string" }, "scopes": { "type": "array", "items": { "type": "string" }, "description": "Must be a subset of the caller's own permissions" },
+          "expires_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "CreatedAPIToken": {
+        "type": "object",
+        "properties": {
+          "token": { "type": "string", "description": "The raw token — shown exactly once, never retrievable again" },
+          "info": { "$ref": "#/components/schemas/APIToken" }
+        }
+      },
+      "ServiceAccount": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "format": "uuid" }, "name": { "type": "string" }, "description": { "type": "string" },
+          "status": { "type": "string", "enum": ["active", "disabled"] }, "created_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "Job": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "format": "uuid" }, "organization_id": { "type": "string", "format": "uuid" },
+          "type": { "type": "string" }, "status": { "type": "string", "enum": ["queued", "running", "succeeded", "failed", "cancelled", "retrying"] },
+          "priority": { "type": "integer" }, "payload": {}, "result": {}, "error": { "type": "string" },
+          "progress": { "type": "number" }, "attempts": { "type": "integer" }, "max_attempts": { "type": "integer" },
+          "correlation_id": { "type": "string" },
+          "created_at": { "type": "string", "format": "date-time" }, "updated_at": { "type": "string", "format": "date-time" },
+          "started_at": { "type": "string", "format": "date-time", "nullable": true },
+          "finished_at": { "type": "string", "format": "date-time", "nullable": true }
+        }
+      },
+      "JobPage": {
+        "allOf": [
+          { "$ref": "#/components/schemas/Page" },
+          { "type": "object", "properties": { "items": { "type": "array", "items": { "$ref": "#/components/schemas/Job" } } } }
+        ]
+      },
+      "AIProfile": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "format": "uuid" }, "key": { "type": "string" }, "description": { "type": "string" },
+          "required_capabilities": { "type": "array", "items": { "type": "string" } },
+          "privacy_level": { "type": "string", "enum": ["public", "internal", "confidential", "restricted"] },
+          "preferred_model_ids": { "type": "array", "items": { "type": "string" }, "description": "\"<provider_key>/<model_identifier>\" refs" },
+          "fallback_model_ids": { "type": "array", "items": { "type": "string" } },
+          "temperature": { "type": "number" }, "max_tokens": { "type": "integer" }, "timeout_seconds": { "type": "integer" },
+          "created_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "CreateAIProfileInput": {
+        "type": "object", "required": ["key", "preferred_model_ids"],
+        "properties": {
+          "key": { "type": "string" }, "description": { "type": "string" },
+          "required_capabilities": { "type": "array", "items": { "type": "string" } },
+          "privacy_level": { "type": "string", "enum": ["public", "internal", "confidential", "restricted"] },
+          "preferred_model_ids": { "type": "array", "items": { "type": "string" } },
+          "fallback_model_ids": { "type": "array", "items": { "type": "string" } },
+          "temperature": { "type": "number" }, "max_tokens": { "type": "integer" }, "timeout_seconds": { "type": "integer" }
+        }
+      },
+      "ChatMessage": {
+        "type": "object", "required": ["role", "content"],
+        "properties": { "role": { "type": "string", "enum": ["system", "user", "assistant"] }, "content": { "type": "string" } }
+      },
+      "ChatResult": {
+        "type": "object",
+        "properties": {
+          "content": { "type": "string" }, "profile_key": { "type": "string" }, "provider_key": { "type": "string" },
+          "model": { "type": "string" }, "input_tokens": { "type": "integer" }, "output_tokens": { "type": "integer" }
+        }
+      },
+      "AIProvider": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "format": "uuid" }, "key": { "type": "string" }, "kind": { "type": "string", "enum": ["cloud", "local"] },
+          "display_name": { "type": "string" }, "status": { "type": "string", "enum": ["unconfigured", "active", "disabled", "unavailable"] },
+          "created_at": { "type": "string", "format": "date-time" }, "updated_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "AIModel": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "format": "uuid" }, "provider_key": { "type": "string" }, "model_identifier": { "type": "string" },
+          "display_name": { "type": "string" }, "capabilities": { "type": "array", "items": { "type": "string" } },
+          "context_window": { "type": "integer" }, "status": { "type": "string", "enum": ["available", "unavailable", "deprecated"] },
+          "created_at": { "type": "string", "format": "date-time" }, "updated_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "SecretMeta": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "format": "uuid" }, "key": { "type": "string" }, "description": { "type": "string" },
+          "created_at": { "type": "string", "format": "date-time" }, "updated_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "Tool": {
+        "type": "object",
+        "properties": {
+          "key": { "type": "string" }, "description": { "type": "string" },
+          "risk_level": { "type": "string", "enum": ["read", "safe", "privileged", "critical"] },
+          "required_permission": { "type": "string" }, "implemented": { "type": "boolean" }
+        }
+      },
+      "ExecuteResult": {
+        "type": "object",
+        "properties": {
+          "status": { "type": "string", "enum": ["executed", "approval_required"] },
+          "result": {}, "approval_id": { "type": "string", "format": "uuid", "nullable": true }
+        }
+      },
+      "Approval": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "format": "uuid" }, "requested_action": { "type": "string" },
+          "risk_level": { "type": "string", "enum": ["privileged", "critical"] },
+          "resource_type": { "type": "string" }, "resource_id": { "type": "string" }, "parameters": {},
+          "status": { "type": "string", "enum": ["pending", "approved", "rejected", "expired"] },
+          "created_at": { "type": "string", "format": "date-time" },
+          "expires_at": { "type": "string", "format": "date-time", "nullable": true },
+          "decided_at": { "type": "string", "format": "date-time", "nullable": true },
+          "decision_reason": { "type": "string" }, "execution_result": {}
+        }
+      },
+      "AuditRecord": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "format": "uuid" }, "organization_id": { "type": "string", "format": "uuid", "nullable": true },
+          "actor_label": { "type": "string" }, "action": { "type": "string" }, "resource_type": { "type": "string" },
+          "resource_id": { "type": "string" }, "source": { "type": "string" }, "correlation_id": { "type": "string" },
+          "success": { "type": "boolean" }, "created_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "AuditRecordPage": {
+        "allOf": [
+          { "$ref": "#/components/schemas/Page" },
+          { "type": "object", "properties": { "items": { "type": "array", "items": { "$ref": "#/components/schemas/AuditRecord" } } } }
+        ]
+      },
+      "Page": {
+        "type": "object",
+        "description": "The standard pagination envelope every paginated list endpoint returns (internal/platform/httpserver.Page). Concrete endpoints narrow `items`'s element type via allOf — see NodePage, ApplicationPage, JobPage, AuditRecordPage.",
+        "properties": {
+          "items": { "type": "array", "items": {} },
+          "limit": { "type": "integer" }, "offset": { "type": "integer" }, "has_more": { "type": "boolean" }
+        }
+      }
+    }
+  }
+}

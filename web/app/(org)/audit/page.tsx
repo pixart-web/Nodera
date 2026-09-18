@@ -1,13 +1,15 @@
 "use client";
 
+import { useState } from "react";
 import { api } from "@/lib/api";
 import { useApi } from "@/lib/useApi";
 import { PageHeader } from "@/components/PageHeader";
 import { ErrorBanner } from "@/components/ErrorBanner";
-import type { AuditRecord } from "@/lib/types";
+import type { AuditRecord, Page } from "@/lib/types";
 
 export default function AuditPage() {
-  const audit = useApi(() => api.get<AuditRecord[]>("/api/v1/audit"), []);
+  const [visibleLimit, setVisibleLimit] = useState(50);
+  const audit = useApi(() => api.get<Page<AuditRecord>>(`/api/v1/audit?limit=${visibleLimit}`), [visibleLimit]);
 
   return (
     <div>
@@ -18,7 +20,7 @@ export default function AuditPage() {
       <div className="card">
         {audit.loading ? (
           <div className="p-4 text-sm text-base-400">Loading…</div>
-        ) : (audit.data ?? []).length === 0 ? (
+        ) : (audit.data?.items ?? []).length === 0 ? (
           <div className="p-4 text-sm text-base-400">No audit records yet.</div>
         ) : (
           <table className="data-table">
@@ -33,7 +35,7 @@ export default function AuditPage() {
               </tr>
             </thead>
             <tbody>
-              {audit.data!.map((a) => (
+              {audit.data!.items.map((a) => (
                 <tr key={a.id}>
                   <td className="font-mono text-xs">{a.action}</td>
                   <td className="text-xs text-base-300">
@@ -52,6 +54,12 @@ export default function AuditPage() {
           </table>
         )}
       </div>
+
+      {audit.data?.has_more && (
+        <button className="btn-secondary mt-3" onClick={() => setVisibleLimit((n) => n + 50)}>
+          Load more
+        </button>
+      )}
     </div>
   );
 }

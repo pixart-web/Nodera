@@ -6,10 +6,11 @@ import { useApi } from "@/lib/useApi";
 import { PageHeader } from "@/components/PageHeader";
 import { ErrorBanner } from "@/components/ErrorBanner";
 import { StatusBadge } from "@/components/StatusBadge";
-import type { Application } from "@/lib/types";
+import type { Application, Page } from "@/lib/types";
 
 export default function ApplicationsPage() {
-  const apps = useApi(() => api.get<Application[]>("/api/v1/applications"), []);
+  const [visibleLimit, setVisibleLimit] = useState(50);
+  const apps = useApi(() => api.get<Page<Application>>(`/api/v1/applications?limit=${visibleLimit}`), [visibleLimit]);
   const [showForm, setShowForm] = useState(false);
   const [name, setName] = useState("");
   const [kind, setKind] = useState("service");
@@ -81,7 +82,7 @@ export default function ApplicationsPage() {
       <div className="card">
         {apps.loading ? (
           <div className="p-4 text-sm text-base-400">Loading…</div>
-        ) : (apps.data ?? []).length === 0 ? (
+        ) : (apps.data?.items ?? []).length === 0 ? (
           <div className="p-4 text-sm text-base-400">No applications registered yet.</div>
         ) : (
           <table className="data-table">
@@ -94,7 +95,7 @@ export default function ApplicationsPage() {
               </tr>
             </thead>
             <tbody>
-              {apps.data!.map((a) => (
+              {apps.data!.items.map((a) => (
                 <tr key={a.id}>
                   <td className="font-mono">{a.name}</td>
                   <td>{a.kind}</td>
@@ -108,6 +109,12 @@ export default function ApplicationsPage() {
           </table>
         )}
       </div>
+
+      {apps.data?.has_more && (
+        <button className="btn-secondary mt-3" onClick={() => setVisibleLimit((n) => n + 50)}>
+          Load more
+        </button>
+      )}
     </div>
   );
 }

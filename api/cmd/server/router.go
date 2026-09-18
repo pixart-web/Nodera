@@ -55,6 +55,8 @@ func newRouter(d apiDeps) http.Handler {
 	// Unauthenticated platform endpoints (rule 27).
 	r.Get("/health", d.handleHealth)
 	r.Get("/ready", d.handleReady)
+	r.Get("/openapi.json", d.handleOpenAPISpec)
+	r.Get("/docs", d.handleAPIDocs)
 
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Post("/auth/signup", d.handleSignUp)
@@ -249,12 +251,13 @@ func (d apiDeps) handleGetOrganization(w http.ResponseWriter, r *http.Request) {
 // --- infrastructure ---
 
 func (d apiDeps) handleListNodes(w http.ResponseWriter, r *http.Request) {
-	nodes, err := d.infra.List(r.Context(), mustAuthContext(r))
+	p := httpserver.ParsePagination(r)
+	nodes, err := d.infra.List(r.Context(), mustAuthContext(r), p.Limit+1, p.Offset)
 	if err != nil {
 		httpserver.WriteError(w, r, err)
 		return
 	}
-	httpserver.WriteJSON(w, http.StatusOK, nodes)
+	httpserver.WriteJSON(w, http.StatusOK, httpserver.NewPage(nodes, p))
 }
 
 func (d apiDeps) handleRegisterNode(w http.ResponseWriter, r *http.Request) {
@@ -287,12 +290,13 @@ func (d apiDeps) handleGetNode(w http.ResponseWriter, r *http.Request) {
 // --- applications ---
 
 func (d apiDeps) handleListApplications(w http.ResponseWriter, r *http.Request) {
-	apps, err := d.apps.List(r.Context(), mustAuthContext(r))
+	p := httpserver.ParsePagination(r)
+	apps, err := d.apps.List(r.Context(), mustAuthContext(r), p.Limit+1, p.Offset)
 	if err != nil {
 		httpserver.WriteError(w, r, err)
 		return
 	}
-	httpserver.WriteJSON(w, http.StatusOK, apps)
+	httpserver.WriteJSON(w, http.StatusOK, httpserver.NewPage(apps, p))
 }
 
 func (d apiDeps) handleRegisterApplication(w http.ResponseWriter, r *http.Request) {
@@ -463,12 +467,13 @@ func (d apiDeps) handleCreateServiceAccountAPIToken(w http.ResponseWriter, r *ht
 
 func (d apiDeps) handleListJobs(w http.ResponseWriter, r *http.Request) {
 	status := jobs.Status(r.URL.Query().Get("status"))
-	list, err := d.jobs.List(r.Context(), mustAuthContext(r), status)
+	p := httpserver.ParsePagination(r)
+	list, err := d.jobs.List(r.Context(), mustAuthContext(r), status, p.Limit+1, p.Offset)
 	if err != nil {
 		httpserver.WriteError(w, r, err)
 		return
 	}
-	httpserver.WriteJSON(w, http.StatusOK, list)
+	httpserver.WriteJSON(w, http.StatusOK, httpserver.NewPage(list, p))
 }
 
 func (d apiDeps) handleEnqueueJob(w http.ResponseWriter, r *http.Request) {
@@ -739,16 +744,19 @@ func (d apiDeps) handleDecideApproval(w http.ResponseWriter, r *http.Request) {
 
 func (d apiDeps) handleListAudit(w http.ResponseWriter, r *http.Request) {
 	ac := mustAuthContext(r)
+	p := httpserver.ParsePagination(r)
 	records, err := d.audit.Query(r.Context(), ac, audit.QueryFilter{
 		OrganizationID: ac.OrganizationID,
 		ResourceType:   r.URL.Query().Get("resource_type"),
 		Action:         r.URL.Query().Get("action"),
+		Limit:          p.Limit + 1,
+		Offset:         p.Offset,
 	})
 	if err != nil {
 		httpserver.WriteError(w, r, err)
 		return
 	}
-	httpserver.WriteJSON(w, http.StatusOK, records)
+	httpserver.WriteJSON(w, http.StatusOK, httpserver.NewPage(records, p))
 }
 
 // --- helpers ---

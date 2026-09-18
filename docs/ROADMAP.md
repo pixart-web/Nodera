@@ -79,6 +79,35 @@ scanning in CI (`govulncheck`, `npm audit`).
       under `-race`
 - [x] Docs (`AGENTS.md`, `API.md`, `SECURITY.md`, `README.md`) updated
 
+**Phase 10** — this pass:
+- [x] OpenAPI 3.0 spec (`api/openapi/openapi.json`, hand-maintained,
+      validated against the real OpenAPI schema — not just hand-checked)
+      covering all 32 implemented paths, embedded in the binary and served
+      at `GET /openapi.json`; `GET /docs` serves Swagger UI against it
+      (verified live in a browser, renders correctly, zero console errors)
+- [x] `web/` can generate TypeScript types from the spec
+      (`npm run gen:types` → `lib/api-types.generated.ts`, via
+      `openapi-typescript`) — generated and committed as a foundation, not
+      yet swapped in for the hand-written types
+- [x] Pagination on the four list endpoints most likely to grow:
+      `infrastructure/nodes`, `applications`, `jobs`, `audit`. A shared
+      `internal/platform/httpserver.Page[T]`/`ParsePagination` — `?limit=`
+      (default 50, capped 200) and `?offset=`, with `has_more` computed via
+      a limit+1 over-fetch rather than a separate `COUNT` query. Each
+      domain `List`/`Query` method got its own independent, higher safety
+      ceiling so it stays safe to call directly from Go code that doesn't
+      go through the HTTP layer
+- [x] Updated `web/`'s 4 affected pages (plus the dashboard's stat cards,
+      which now show "50+" rather than a count that looks precise but
+      understates the true total once `has_more` is true — rule 36) and
+      added a "Load more" button per page — verified live end-to-end in a
+      browser against the real API with zero console errors
+- [x] Tests: 7 new unit tests for the pagination helper — all passing
+      under `-race`; full frontend typecheck + production build clean
+- [x] Docs (`API.md`, `README.md`, `FRONTEND.md`) updated to match,
+      including fixing a stale "no approvals backend" line in `FRONTEND.md`
+      left over from before phase 6
+
 ## Next up
 
 1. **Concrete job types**: the worker dispatcher is real but nothing
@@ -89,8 +118,9 @@ scanning in CI (`govulncheck`, `npm audit`).
    system wired to an actual backup mechanism.
 3. **Rate limiting beyond `/auth/login`, `/auth/signup`, and `/ai/chat`**,
    and a Redis-backed limiter for multi-instance deployments.
-4. **OpenAPI/Swagger generation** and list-endpoint pagination — `web/`'s
-   hand-written `lib/types.ts` is the thing to replace once this lands.
+4. **Generate the OpenAPI spec from code** instead of hand-maintaining it,
+   and swap `web/`'s hand-written `lib/types.ts` over to the generated
+   `lib/api-types.generated.ts`.
 5. **A cloud AI provider adapter** (OpenAI or Anthropic) now that the
    provider/adapter separation pattern is proven with Ollama — will need
    the secrets module for credential storage.
@@ -99,10 +129,10 @@ scanning in CI (`govulncheck`, `npm audit`).
    the caller of `tools.Execute`.
 7. **Per-tool/per-org-configurable approval TTL** (today's
    `defaultApprovalTTL` is a single global 24h constant).
-8. **Frontend follow-ups**: service accounts/API tokens UI (real backend
-   now exists for this), AI profile/chat UI, provider/model registry UI, a
-   tools/approvals UI, RBAC/settings management UI, real-time updates
-   (polling or websockets) instead of load-once pages.
+8. **Frontend follow-ups**: service accounts/API tokens UI, tools/approvals
+   UI (real backends now exist for both), AI profile/chat UI,
+   provider/model registry UI, RBAC/settings management UI, real-time
+   updates (polling or websockets) instead of load-once pages.
 
 ## Explicitly not started (rule 38 — deferred by design)
 

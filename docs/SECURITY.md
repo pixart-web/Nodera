@@ -139,10 +139,12 @@ to restrict yet; one will be added if/when the API ever serves any HTML.
 
 `.github/workflows/ci.yml` runs on every push/PR:
 - **API**: `gofmt -l` (must be empty), `go vet`, `go build`,
-  `go test ./... -race` against a real Postgres service container, and
+  `go test ./... -race` against a real Postgres service container,
   `govulncheck` (fails the build on a known-exploitable vulnerability
   reachable from Nodera's own code — not merely present in a dependency
-  tree, which is a much noisier signal).
+  tree, which is a much noisier signal), and `@redocly/cli lint` against
+  `api/openapi/openapi.json` (fails only on structural OpenAPI errors, not
+  style warnings).
 - **Web**: `tsc --noEmit`, `next build`, and `npm audit --audit-level=critical`
   (fails only on `critical` — the known high-severity PostCSS finding below
   stays visible in the log without blocking every PR on an issue that

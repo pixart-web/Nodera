@@ -89,7 +89,7 @@ func TestSignupLoginOrgAndNodeFlow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AuthContextForSession (other): %v", err)
 	}
-	nodesInOtherOrg, err := infraSvc.List(ctx, otherAC)
+	nodesInOtherOrg, err := infraSvc.List(ctx, otherAC, 100, 0)
 	if err != nil {
 		t.Fatalf("List (other org): %v", err)
 	}

@@ -5,7 +5,7 @@ import { api } from "@/lib/api";
 import { useApi } from "@/lib/useApi";
 import { PageHeader } from "@/components/PageHeader";
 import { ErrorBanner } from "@/components/ErrorBanner";
-import type { Application, AuditRecord, Job, Node as NoderaNode, Organization } from "@/lib/types";
+import type { Application, AuditRecord, Job, Node as NoderaNode, Organization, Page } from "@/lib/types";
 
 function StatCard({ label, value, href }: { label: string; value: string | number; href: string }) {
   return (
@@ -16,15 +16,23 @@ function StatCard({ label, value, href }: { label: string; value: string | numbe
   );
 }
 
+// A page's own item count understates the true total once has_more is
+// true — "50+" is the honest thing to show rather than a number that
+// looks precise but isn't (rule 36).
+function countLabel(page: Page<unknown> | null, loading: boolean): string {
+  if (loading || !page) return "…";
+  return page.has_more ? `${page.items.length}+` : String(page.items.length);
+}
+
 export default function DashboardPage() {
   const org = useApi(() => api.get<Organization>("/api/v1/organization"), []);
-  const nodes = useApi(() => api.get<NoderaNode[]>("/api/v1/infrastructure/nodes"), []);
-  const apps = useApi(() => api.get<Application[]>("/api/v1/applications"), []);
-  const jobs = useApi(() => api.get<Job[]>("/api/v1/jobs"), []);
-  const audit = useApi(() => api.get<AuditRecord[]>("/api/v1/audit"), []);
+  const nodes = useApi(() => api.get<Page<NoderaNode>>("/api/v1/infrastructure/nodes"), []);
+  const apps = useApi(() => api.get<Page<Application>>("/api/v1/applications"), []);
+  const jobs = useApi(() => api.get<Page<Job>>("/api/v1/jobs"), []);
+  const audit = useApi(() => api.get<Page<AuditRecord>>("/api/v1/audit"), []);
 
-  const failedJobs = (jobs.data ?? []).filter((j) => j.status === "failed").length;
-  const recentAudit = (audit.data ?? []).slice(0, 8);
+  const failedJobs = (jobs.data?.items ?? []).filter((j) => j.status === "failed").length;
+  const recentAudit = (audit.data?.items ?? []).slice(0, 8);
 
   return (
     <div>
@@ -38,9 +46,9 @@ export default function DashboardPage() {
       )}
 
       <div className="mb-8 grid grid-cols-2 gap-4 md:grid-cols-4">
-        <StatCard label="Nodes" value={nodes.loading ? "…" : (nodes.data?.length ?? 0)} href="/infrastructure" />
-        <StatCard label="Applications" value={apps.loading ? "…" : (apps.data?.length ?? 0)} href="/applications" />
-        <StatCard label="Jobs" value={jobs.loading ? "…" : (jobs.data?.length ?? 0)} href="/jobs" />
+        <StatCard label="Nodes" value={countLabel(nodes.data, nodes.loading)} href="/infrastructure" />
+        <StatCard label="Applications" value={countLabel(apps.data, apps.loading)} href="/applications" />
+        <StatCard label="Jobs" value={countLabel(jobs.data, jobs.loading)} href="/jobs" />
         <StatCard label="Failed jobs" value={jobs.loading ? "…" : failedJobs} href="/jobs?status=failed" />
       </div>
 

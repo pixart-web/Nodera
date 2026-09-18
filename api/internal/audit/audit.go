@@ -133,8 +133,14 @@ func (s *Service) Query(ctx context.Context, ac authctx.AuthContext, f QueryFilt
 	if err := requirePermission(ac); err != nil {
 		return nil, err
 	}
-	if f.Limit <= 0 || f.Limit > 200 {
+	// See infrastructure.Service.List's doc comment for why this cap (1000)
+	// is independent of, and higher than, the HTTP layer's own cap
+	// (internal/platform/httpserver.MaxPageLimit) — it must not interfere
+	// with that layer's limit+1 over-fetch-to-detect-more-pages trick.
+	if f.Limit <= 0 {
 		f.Limit = 50
+	} else if f.Limit > 1000 {
+		f.Limit = 1000
 	}
 
 	rows, err := s.pool.Query(ctx, `

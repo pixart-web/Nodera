@@ -116,13 +116,18 @@ func (s *Service) RegisterNode(ctx context.Context, ac authctx.AuthContext, in R
 	return n, nil
 }
 
-// List returns every node in the caller's organization. Tenant scoping comes
-// entirely from ac.OrganizationID (ADR-004) — there is no filter parameter
-// that could widen the query.
-func (s *Service) List(ctx context.Context, ac authctx.AuthContext) ([]Node, error) {
+// List returns up to limit nodes in the caller's organization, starting at
+// offset (ordered by hostname). Tenant scoping comes entirely from
+// ac.OrganizationID (ADR-004) — there is no filter parameter that could
+// widen the query. limit<=0 defaults to 50; the method also enforces its
+// own hard ceiling independent of whatever cap the HTTP layer applies
+// (internal/platform/httpserver.MaxPageLimit), so it stays safe to call
+// directly from Go code that doesn't go through that layer.
+func (s *Service) List(ctx context.Context, ac authctx.AuthContext, limit, offset int) ([]Node, error) {
 	if err := rbac.Require(ac, "infrastructure.read"); err != nil {
 		return nil, err
 	}
+	limit = normalizeLimit(limit)
 
 	rows, err := s.pool.Query(ctx, `
 		SELECT id, organization_id, hostname, provider, COALESCE(provider_resource_id, ''),
@@ -132,7 +137,8 @@ func (s *Service) List(ctx context.Context, ac authctx.AuthContext) ([]Node, err
 		FROM nodes
 		WHERE organization_id = $1
 		ORDER BY hostname ASC
-	`, ac.OrganizationID)
+		LIMIT $2 OFFSET $3
+	`, ac.OrganizationID, limit, offset)
 	if err != nil {
 		return nil, apierr.Wrap(apierr.CodeInternal, "failed to list nodes", err)
 	}
@@ -178,6 +184,20 @@ func (s *Service) Get(ctx context.Context, ac authctx.AuthContext, id uuid.UUID)
 		return Node{}, apierr.Wrap(apierr.CodeInternal, "failed to load node", err)
 	}
 	return n, nil
+}
+
+// normalizeLimit applies List's default/ceiling independent of whatever
+// cap the HTTP layer enforces (internal/platform/httpserver.MaxPageLimit)
+// — 1000 is a hard safety ceiling, well above any HTTP-layer request, so it
+// never interferes with that layer's own (lower) capping.
+func normalizeLimit(limit int) int {
+	if limit <= 0 {
+		return 50
+	}
+	if limit > 1000 {
+		return 1000
+	}
+	return limit
 }
 
 func isUniqueViolation(err error) bool {

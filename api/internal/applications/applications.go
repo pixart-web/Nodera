@@ -111,10 +111,15 @@ func (s *Service) Register(ctx context.Context, ac authctx.AuthContext, in Regis
 	return a, nil
 }
 
-func (s *Service) List(ctx context.Context, ac authctx.AuthContext) ([]Application, error) {
+// List returns up to limit applications in the caller's organization,
+// starting at offset. See infrastructure.Service.List's doc comment for
+// why this method enforces its own limit ceiling independent of the HTTP
+// layer's.
+func (s *Service) List(ctx context.Context, ac authctx.AuthContext, limit, offset int) ([]Application, error) {
 	if err := rbac.Require(ac, permRead); err != nil {
 		return nil, err
 	}
+	limit = normalizeLimit(limit)
 
 	rows, err := s.pool.Query(ctx, `
 		SELECT id, organization_id, name, kind, node_id, environment, status,
@@ -122,7 +127,8 @@ func (s *Service) List(ctx context.Context, ac authctx.AuthContext) ([]Applicati
 		FROM applications
 		WHERE organization_id = $1
 		ORDER BY name ASC
-	`, ac.OrganizationID)
+		LIMIT $2 OFFSET $3
+	`, ac.OrganizationID, limit, offset)
 	if err != nil {
 		return nil, apierr.Wrap(apierr.CodeInternal, "failed to list applications", err)
 	}
@@ -160,6 +166,16 @@ func (s *Service) Get(ctx context.Context, ac authctx.AuthContext, id uuid.UUID)
 		return Application{}, apierr.Wrap(apierr.CodeInternal, "failed to load application", err)
 	}
 	return a, nil
+}
+
+func normalizeLimit(limit int) int {
+	if limit <= 0 {
+		return 50
+	}
+	if limit > 1000 {
+		return 1000
+	}
+	return limit
 }
 
 func isUniqueViolation(err error) bool {

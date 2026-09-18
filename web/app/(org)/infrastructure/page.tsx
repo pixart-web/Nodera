@@ -6,10 +6,14 @@ import { useApi } from "@/lib/useApi";
 import { PageHeader } from "@/components/PageHeader";
 import { ErrorBanner } from "@/components/ErrorBanner";
 import { StatusBadge } from "@/components/StatusBadge";
-import type { Node as NoderaNode } from "@/lib/types";
+import type { Node as NoderaNode, Page } from "@/lib/types";
 
 export default function InfrastructurePage() {
-  const nodes = useApi(() => api.get<NoderaNode[]>("/api/v1/infrastructure/nodes"), []);
+  const [visibleLimit, setVisibleLimit] = useState(50);
+  const nodes = useApi(
+    () => api.get<Page<NoderaNode>>(`/api/v1/infrastructure/nodes?limit=${visibleLimit}`),
+    [visibleLimit],
+  );
   const [showForm, setShowForm] = useState(false);
   const [hostname, setHostname] = useState("");
   const [provider, setProvider] = useState("");
@@ -97,7 +101,7 @@ export default function InfrastructurePage() {
       <div className="card">
         {nodes.loading ? (
           <div className="p-4 text-sm text-base-400">Loading…</div>
-        ) : (nodes.data ?? []).length === 0 ? (
+        ) : (nodes.data?.items ?? []).length === 0 ? (
           <div className="p-4 text-sm text-base-400">
             No nodes registered yet. This is real inventory, not a placeholder — register your first node above.
           </div>
@@ -114,7 +118,7 @@ export default function InfrastructurePage() {
               </tr>
             </thead>
             <tbody>
-              {nodes.data!.map((n) => (
+              {nodes.data!.items.map((n) => (
                 <tr key={n.id}>
                   <td className="font-mono">{n.hostname}</td>
                   <td>{n.provider}</td>
@@ -130,6 +134,12 @@ export default function InfrastructurePage() {
           </table>
         )}
       </div>
+
+      {nodes.data?.has_more && (
+        <button className="btn-secondary mt-3" onClick={() => setVisibleLimit((n) => n + 50)}>
+          Load more
+        </button>
+      )}
     </div>
   );
 }

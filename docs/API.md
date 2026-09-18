@@ -9,6 +9,14 @@ see `internal/platform/httpserver.CORS`. Non-browser callers (curl, server-
 to-server, the future Node Agent) are unaffected either way, since CORS is
 a browser-enforced mechanism, not a server-side access control.
 
+**Machine-readable spec**: `GET /openapi.json` serves a hand-maintained
+OpenAPI 3.0 document (`api/openapi/openapi.json`, embedded in the binary —
+`api/openapi/openapi.go`), validated against the OpenAPI schema in CI.
+`GET /docs` serves a Swagger UI page against it. Both are unauthenticated,
+like `/health`. `web/` can generate TypeScript types from it via
+`npm run gen:types` (`web/lib/api-types.generated.ts`) — not yet swapped in
+for the hand-written `web/lib/types.ts` (`docs/ROADMAP.md`).
+
 ## Conventions
 
 - JSON in, JSON out. Response bodies use `snake_case` field names.
@@ -44,22 +52,43 @@ Two bearer token types are accepted on `Authorization: Bearer <token>`, and
    rejected. Permissions come directly from the token's granted scopes, not
    a live role lookup.
 
+## Pagination
+
+Four list endpoints are paginated: `GET /infrastructure/nodes`,
+`GET /applications`, `GET /jobs`, `GET /audit`. Each accepts `?limit=`
+(default 50, capped at 200) and `?offset=`, and returns the standard
+envelope (`internal/platform/httpserver.Page`) instead of a bare array:
+
+```json
+{ "items": [...], "limit": 50, "offset": 0, "has_more": true }
+```
+
+`has_more` is computed by fetching `limit+1` rows server-side and trimming
+the extra one — no separate `COUNT` query, so it's cheap even on a large
+table. Every other list endpoint (`ai/profiles`, `ai/providers`,
+`ai/models`, `secrets`, `tools`, `approvals`, `api-tokens`,
+`service-accounts`, `organizations`) still returns a bare array —
+these are expected to stay small at phase-1 scale; paginating them is
+tracked in `docs/ROADMAP.md` if that stops being true.
+
 ## Endpoints implemented today
 
 | Method | Path | Auth | Description |
 |---|---|---|---|
 | GET | `/health` | none | Process liveness |
 | GET | `/ready` | none | Liveness + database reachability |
+| GET | `/openapi.json` | none | OpenAPI 3.0 spec |
+| GET | `/docs` | none | Swagger UI |
 | POST | `/api/v1/auth/signup` | none | Create a user (no org membership yet) |
 | POST | `/api/v1/auth/login` | none | Returns a session token + the caller's organizations |
 | POST | `/api/v1/auth/logout` | session | Revokes the current session |
 | GET | `/api/v1/organizations` | session or token | List organizations the caller belongs to |
 | POST | `/api/v1/organizations` | session or token | Create an organization; creator becomes `owner` |
 | GET | `/api/v1/organization` | session or token + org | Get the current organization |
-| GET | `/api/v1/infrastructure/nodes` | session or token + org | List nodes (`infrastructure.read`) |
+| GET | `/api/v1/infrastructure/nodes` | session or token + org | List nodes, paginated (`infrastructure.read`) |
 | POST | `/api/v1/infrastructure/nodes` | session or token + org | Register a node (`infrastructure.manage`) |
 | GET | `/api/v1/infrastructure/nodes/{id}` | session or token + org | Get a node |
-| GET | `/api/v1/applications` | session or token + org | List applications (`applications.read`) |
+| GET | `/api/v1/applications` | session or token + org | List applications, paginated (`applications.read`) |
 | POST | `/api/v1/applications` | session or token + org | Register an application (`applications.deploy` — see docs/API.md note below) |
 | GET | `/api/v1/applications/{id}` | session or token + org | Get an application |
 | GET | `/api/v1/api-tokens` | session or token + org | List the caller's own API tokens |
@@ -71,7 +100,7 @@ Two bearer token types are accepted on `Authorization: Bearer <token>`, and
 | POST | `/api/v1/service-accounts` | session or token + org | Create a service account (`organization.manage`) |
 | DELETE | `/api/v1/service-accounts/{id}` | session or token + org | Disable a service account and immediately revoke all its outstanding tokens (`organization.manage`) — does not delete the account or its history |
 | POST | `/api/v1/service-accounts/{id}/api-tokens` | session or token + org | Mint a token owned by the service account (`organization.manage`); returns the raw token once |
-| GET | `/api/v1/jobs` | session or token + org | List jobs, optional `?status=` filter (`jobs.read`) |
+| GET | `/api/v1/jobs` | session or token + org | List jobs, paginated, optional `?status=` filter (`jobs.read`) |
 | POST | `/api/v1/jobs` | session or token + org | Enqueue a job (`jobs.manage`) |
 | GET | `/api/v1/jobs/{id}` | session or token + org | Get a job |
 | POST | `/api/v1/jobs/{id}/cancel` | session or token + org | Cancel a queued job |
@@ -89,7 +118,7 @@ Two bearer token types are accepted on `Authorization: Bearer <token>`, and
 | POST | `/api/v1/tools/{key}/execute` | session or token + org | Execute a tool. `read`/`safe` run immediately (`200`); `privileged`/`critical` return `202` with an `approval_id` instead of running |
 | GET | `/api/v1/approvals` | session or token + org | List approvals, optional `?status=` filter (`approvals.decide`) |
 | POST | `/api/v1/approvals/{id}/decide` | session or token + org | Approve or reject a pending approval (`approvals.decide`) — approving attempts execution immediately |
-| GET | `/api/v1/audit` | session or token + org | Query the audit log (`audit.read`) |
+| GET | `/api/v1/audit` | session or token + org | Query the audit log, paginated, optional `?resource_type=`/`?action=` filters (`audit.read`) |
 
 `applications.deploy` is used for registering an application record because
 the current permission catalog has no separate `applications.manage` key —
@@ -118,8 +147,9 @@ surface exists for them yet (PLANNED, tracked in `docs/ROADMAP.md`).
 
 ## Not yet implemented
 
-- OpenAPI/Swagger generation
-- Pagination on list endpoints (today `GET /infrastructure/nodes` and
-  `GET /audit` return unpaginated/simple-limit results — fine at current
-  scale, will need `limit`/`cursor` params before this matters in production)
-- Rate limiting on endpoints other than `POST /auth/login` and `POST /auth/signup`
+- Generating the OpenAPI spec from code instead of hand-maintaining it
+- Swapping `web/`'s hand-written types over to the generated ones
+- Pagination on the remaining list endpoints, if they stop being small at
+  phase-1 scale (see Pagination above)
+- Rate limiting on endpoints other than `POST /auth/login`,
+  `POST /auth/signup`, and `POST /api/v1/ai/chat`

@@ -7,7 +7,7 @@ import { useApi } from "@/lib/useApi";
 import { PageHeader } from "@/components/PageHeader";
 import { ErrorBanner } from "@/components/ErrorBanner";
 import { StatusBadge } from "@/components/StatusBadge";
-import type { Job } from "@/lib/types";
+import type { Job, Page } from "@/lib/types";
 
 export default function JobsPage() {
   return (
@@ -20,10 +20,14 @@ export default function JobsPage() {
 function JobsPageInner() {
   const searchParams = useSearchParams();
   const statusFilter = searchParams.get("status") ?? "";
+  const [visibleLimit, setVisibleLimit] = useState(50);
 
   const jobs = useApi(
-    () => api.get<Job[]>(`/api/v1/jobs${statusFilter ? `?status=${statusFilter}` : ""}`),
-    [statusFilter],
+    () =>
+      api.get<Page<Job>>(
+        `/api/v1/jobs?limit=${visibleLimit}${statusFilter ? `&status=${statusFilter}` : ""}`,
+      ),
+    [statusFilter, visibleLimit],
   );
 
   const [showForm, setShowForm] = useState(false);
@@ -118,7 +122,7 @@ function JobsPageInner() {
       <div className="card">
         {jobs.loading ? (
           <div className="p-4 text-sm text-base-400">Loading…</div>
-        ) : (jobs.data ?? []).length === 0 ? (
+        ) : (jobs.data?.items ?? []).length === 0 ? (
           <div className="p-4 text-sm text-base-400">No jobs{statusFilter ? ` with status "${statusFilter}"` : ""}.</div>
         ) : (
           <table className="data-table">
@@ -133,7 +137,7 @@ function JobsPageInner() {
               </tr>
             </thead>
             <tbody>
-              {jobs.data!.map((j) => (
+              {jobs.data!.items.map((j) => (
                 <tr key={j.id}>
                   <td className="font-mono text-xs">{j.type}</td>
                   <td>
@@ -157,6 +161,12 @@ function JobsPageInner() {
           </table>
         )}
       </div>
+
+      {jobs.data?.has_more && (
+        <button className="btn-secondary mt-3" onClick={() => setVisibleLimit((n) => n + 50)}>
+          Load more
+        </button>
+      )}
     </div>
   );
 }

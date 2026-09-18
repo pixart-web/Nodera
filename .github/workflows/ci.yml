@@ -57,6 +57,13 @@ jobs:
         working-directory: api
         run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: validate OpenAPI spec
+        run: npx --yes @redocly/cli@latest lint api/openapi/openapi.json
+
   web:
     name: Web (typecheck, build, audit)
     runs-on: ubuntu-latest

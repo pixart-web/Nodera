@@ -164,10 +164,15 @@ func (s *Service) Get(ctx context.Context, ac authctx.AuthContext, id uuid.UUID)
 	return j, nil
 }
 
-func (s *Service) List(ctx context.Context, ac authctx.AuthContext, status Status) ([]Job, error) {
+// List returns up to limit jobs in the caller's organization, starting at
+// offset, most recent first. See infrastructure.Service.List's doc comment
+// for why this method enforces its own limit ceiling independent of the
+// HTTP layer's.
+func (s *Service) List(ctx context.Context, ac authctx.AuthContext, status Status, limit, offset int) ([]Job, error) {
 	if err := rbac.Require(ac, permRead); err != nil {
 		return nil, err
 	}
+	limit = normalizeLimit(limit)
 
 	rows, err := s.pool.Query(ctx, `
 		SELECT id, organization_id, type, status, priority, payload, COALESCE(result, 'null'),
@@ -176,8 +181,8 @@ func (s *Service) List(ctx context.Context, ac authctx.AuthContext, status Statu
 		FROM jobs
 		WHERE organization_id = $1 AND ($2 = '' OR status = $2)
 		ORDER BY created_at DESC
-		LIMIT 100
-	`, ac.OrganizationID, string(status))
+		LIMIT $3 OFFSET $4
+	`, ac.OrganizationID, string(status), limit, offset)
 	if err != nil {
 		return nil, apierr.Wrap(apierr.CodeInternal, "failed to list jobs", err)
 	}
@@ -213,4 +218,14 @@ func (s *Service) Cancel(ctx context.Context, ac authctx.AuthContext, id uuid.UU
 		return apierr.Conflict("job is not in a cancellable (queued) state, or does not exist")
 	}
 	return nil
+}
+
+func normalizeLimit(limit int) int {
+	if limit <= 0 {
+		return 50
+	}
+	if limit > 1000 {
+		return 1000
+	}
+	return limit
 }
