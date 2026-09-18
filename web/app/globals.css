@@ -1,0 +1,65 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+body {
+  background-color: theme("colors.base.950");
+  color: theme("colors.base.100");
+}
+
+::selection {
+  background-color: theme("colors.accent.600");
+  color: white;
+}
+
+.card {
+  @apply rounded-lg border border-base-700 bg-base-900;
+}
+
+.btn {
+  @apply inline-flex items-center justify-center rounded-md px-3 py-1.5 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50;
+}
+
+.btn-primary {
+  @apply btn bg-accent-600 text-white hover:bg-accent-500;
+}
+
+.btn-secondary {
+  @apply btn border border-base-600 bg-base-800 text-base-100 hover:bg-base-700;
+}
+
+.btn-danger {
+  @apply btn bg-danger/10 text-danger border border-danger/30 hover:bg-danger/20;
+}
+
+.input {
+  @apply w-full rounded-md border border-base-600 bg-base-800 px-3 py-1.5 text-sm text-base-100 placeholder:text-base-400 focus:border-accent-500 focus:outline-none focus:ring-1 focus:ring-accent-500;
+}
+
+.label {
+  @apply mb-1 block text-xs font-medium uppercase tracking-wide text-base-300;
+}
+
+.badge {
+  @apply inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium;
+}
+
+table.data-table {
+  @apply w-full border-collapse text-sm;
+}
+
+table.data-table th {
+  @apply border-b border-base-700 px-3 py-2 text-left text-xs font-medium uppercase tracking-wide text-base-300;
+}
+
+table.data-table td {
+  @apply border-b border-base-800 px-3 py-2 text-base-100;
+}
+
+table.data-table tbody tr:hover {
+  @apply bg-base-800/50;
+}

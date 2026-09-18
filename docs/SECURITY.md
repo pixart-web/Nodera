@@ -124,6 +124,25 @@ Postgres service container. Dependency vulnerability scanning
 (`govulncheck` or similar) is not yet wired in — tracked in
 `docs/ROADMAP.md`.
 
+## CORS — IMPLEMENTED
+
+`internal/platform/httpserver.CORS` reflects back only an allow-listed
+origin (`NODERA_CORS_ORIGINS`, default `http://localhost:3000` for the
+`web/` dev server) — never `*`, since `Authorization` headers are in play.
+Production deployments must set this explicitly to their real frontend
+origin(s) (`docs/DEPLOYMENT.md`).
+
+## Known dependency finding: `web/` transitive PostCSS advisories
+
+`npm audit` flags PostCSS (bundled inside Next.js's own build pipeline,
+not a direct dependency) for XSS/path-traversal issues in its CSS
+stringifier and sourcemap loader. These apply to processing *untrusted*
+CSS at build time — `web/`'s build only ever processes its own
+repository's CSS, so the practical exposure here is effectively nil. The
+fix requires a Next.js 16 major upgrade (breaking change), deliberately
+not taken during this foundation-building pass; tracked in
+`docs/ROADMAP.md`.
+
 ## Not yet implemented / deliberately deferred
 
 - CSRF protection (not yet relevant — no cookie-based auth flow exists; the

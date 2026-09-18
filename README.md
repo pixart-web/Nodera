@@ -41,7 +41,7 @@ schema/interfaces, no production backend yet) · **PLANNED** (not started).
 | Rate limiting | IMPLEMENTED | In-process, `/auth/login` only (5/5min per IP); other endpoints and a multi-instance-safe (Redis) limiter are PLANNED |
 | Secure headers | IMPLEMENTED | `nosniff`, `DENY`, `no-referrer`, `no-store` on every response |
 | CI | IMPLEMENTED | `gofmt`/`vet`/`build`/`test -race` on every push, via GitHub Actions |
-| Dashboard / frontend | PLANNED | `web/` not yet started |
+| Dashboard / frontend | IMPLEMENTED | Next.js + TypeScript control plane UI (`web/`) — login, org picker, infrastructure, applications, jobs, secrets, audit; every page reads/writes real API data, no fabricated placeholders |
 | Node Agent, AI Gateway, Agent Runtime as separate services | PLANNED | Currently packages inside the one Core API binary (ADR-002) |
 
 ## Repository layout
@@ -50,8 +50,7 @@ See `docs/ARCHITECTURE.md` §2.
 
 ## Local development
 
-Requirements: Go 1.27+, Docker (for Postgres/Redis), Node.js 20+ (for the
-future frontend).
+Requirements: Go 1.27+, Docker (for Postgres/Redis), Node.js 20+.
 
 ```bash
 cp .env.example .env
@@ -73,6 +72,20 @@ curl localhost:8080/health
 curl localhost:8080/ready
 ```
 
+### Frontend (`web/`)
+
+```bash
+cd web
+cp .env.local.example .env.local   # points at http://localhost:8080 by default
+npm install
+npm run dev
+```
+
+Open http://localhost:3000. The API must be running and must allow this
+origin — the default `NODERA_CORS_ORIGINS=http://localhost:3000` already
+does. `npm run build` produces a production build; `npm run typecheck`
+runs `tsc --noEmit` on its own.
+
 ### Running tests
 
 ```bash
@@ -92,6 +105,7 @@ go test ./...
 ## Documentation
 
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — system shape, module boundaries, request flow
+- [docs/FRONTEND.md](docs/FRONTEND.md) — web/ structure, auth model
 - [docs/DECISIONS.md](docs/DECISIONS.md) — ADRs
 - [docs/SECURITY.md](docs/SECURITY.md) — auth, RBAC, tenant isolation, secrets handling
 - [docs/DATABASE.md](docs/DATABASE.md) — schema overview, migration workflow

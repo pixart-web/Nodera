@@ -3,6 +3,12 @@
 Base path: `/api/v1`. Unversioned `/health` and `/ready` exist outside it for
 platform/orchestrator use (rule 27).
 
+Cross-origin browser access (the `web/` frontend) is allowed only from
+origins listed in `NODERA_CORS_ORIGINS` (default `http://localhost:3000`) —
+see `internal/platform/httpserver.CORS`. Non-browser callers (curl, server-
+to-server, the future Node Agent) are unaffected either way, since CORS is
+a browser-enforced mechanism, not a server-side access control.
+
 ## Conventions
 
 - JSON in, JSON out. Response bodies use `snake_case` field names.

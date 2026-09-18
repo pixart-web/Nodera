@@ -18,14 +18,22 @@ filled in yet (rule 30).
 3. **A production DB role with `UPDATE`/`DELETE` revoked on `audit_log`**
    (see `docs/SECURITY.md`) — depends on how the production role/schema
    layout is finalized.
-4. **Redis** (optional at the config level today, but required once the Job
-   system's worker/queue is implemented).
+4. **Redis** — still optional. The jobs worker (`internal/jobs`) polls
+   Postgres directly (`FOR UPDATE SKIP LOCKED`); Redis becomes relevant only
+   if/when a shared, multi-instance-safe queue or rate limiter is added
+   (today's rate limiter is in-process only — `docs/SECURITY.md`).
 5. **TLS termination** — not decided (reverse proxy vs. Go's own TLS); no
    assumption made yet.
-6. **Secrets delivery mechanism** for `NODERA_DATABASE_URL`,
-   any AI provider credentials, etc. — environment variables today at the
-   process level; a dedicated secrets manager integration is `docs/SECURITY.md`
-   PLANNED work, not yet chosen.
+6. **`NODERA_SECRETS_ENCRYPTION_KEY`** — a real, securely-generated
+   (`openssl rand -base64 32`) production key, delivered via whatever
+   secrets-injection mechanism the deployment platform provides (not this
+   repo's `.env`). The application-level encryption itself is implemented
+   (`docs/SECURITY.md` Secrets); only the production key-delivery mechanism
+   is undecided.
+7. **A build and hosting target for `web/`** (`npm run build` output —
+   static export or a Node server via `next start`; not decided yet) and
+   its `NEXT_PUBLIC_NODERA_API_URL` pointed at the production API origin,
+   which must also appear in the API's `NODERA_CORS_ORIGINS`.
 
 ## Required environment variables
 

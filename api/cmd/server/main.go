@@ -95,17 +95,18 @@ func run() error {
 	log.Info("job worker started")
 
 	deps := apiDeps{
-		log:       log,
-		identity:  identitySvc,
-		tenancy:   tenancySvc,
-		audit:     auditSvc,
-		infra:     infraSvc,
-		apps:      appsSvc,
-		jobs:      jobsSvc,
-		ai:        aiSvc,
-		secrets:   secretsSvc,
-		pool:      pool,
-		loginRate: ratelimit.New(5, 5*time.Minute),
+		log:         log,
+		identity:    identitySvc,
+		tenancy:     tenancySvc,
+		audit:       auditSvc,
+		infra:       infraSvc,
+		apps:        appsSvc,
+		jobs:        jobsSvc,
+		ai:          aiSvc,
+		secrets:     secretsSvc,
+		pool:        pool,
+		loginRate:   ratelimit.New(5, 5*time.Minute),
+		corsOrigins: cfg.HTTP.CORSOrigins,
 	}
 
 	handler := newRouter(deps)

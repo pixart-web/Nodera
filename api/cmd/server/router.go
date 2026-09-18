@@ -26,21 +26,23 @@ import (
 )
 
 type apiDeps struct {
-	log       *slog.Logger
-	identity  *identity.Service
-	tenancy   *tenancy.Service
-	audit     *audit.Service
-	infra     *infrastructure.Service
-	apps      *applications.Service
-	jobs      *jobs.Service
-	ai        *ai.Service
-	secrets   *secrets.Service // nil if NODERA_SECRETS_ENCRYPTION_KEY is not configured — see main.go
-	pool      *pgxpool.Pool
-	loginRate *ratelimit.Limiter
+	log         *slog.Logger
+	identity    *identity.Service
+	tenancy     *tenancy.Service
+	audit       *audit.Service
+	infra       *infrastructure.Service
+	apps        *applications.Service
+	jobs        *jobs.Service
+	ai          *ai.Service
+	secrets     *secrets.Service // nil if NODERA_SECRETS_ENCRYPTION_KEY is not configured — see main.go
+	pool        *pgxpool.Pool
+	loginRate   *ratelimit.Limiter
+	corsOrigins []string
 }
 
 func newRouter(d apiDeps) http.Handler {
 	r := chi.NewRouter()
+	r.Use(httpserver.CORS(d.corsOrigins))
 	r.Use(httpserver.WithRequestID(d.log))
 	r.Use(httpserver.Recover)
 	r.Use(httpserver.SecurityHeaders)

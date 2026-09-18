@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -21,6 +22,12 @@ type Config struct {
 
 type HTTPConfig struct {
 	Addr string
+	// CORSOrigins is the allow-list of origins permitted to call this API
+	// from a browser (the web/ frontend, in dev and eventually production).
+	// Empty means no cross-origin browser access is permitted — same-origin
+	// and non-browser (curl, server-to-server) callers are unaffected, since
+	// CORS is a browser-enforced mechanism, not a server-side access check.
+	CORSOrigins []string
 }
 
 type DBConfig struct {
@@ -66,7 +73,8 @@ func Load() (Config, error) {
 	cfg := Config{
 		Env: env,
 		HTTP: HTTPConfig{
-			Addr: getEnvDefault("NODERA_HTTP_ADDR", ":8080"),
+			Addr:        getEnvDefault("NODERA_HTTP_ADDR", ":8080"),
+			CORSOrigins: getEnvList("NODERA_CORS_ORIGINS", []string{"http://localhost:3000"}),
 		},
 		DB: DBConfig{
 			URL:             dbURL,
@@ -93,6 +101,26 @@ func getEnvDefault(key, def string) string {
 		return v
 	}
 	return def
+}
+
+// getEnvList reads a comma-separated env var into a trimmed string slice,
+// or returns def if the var is unset. Production deployments must set
+// NODERA_CORS_ORIGINS explicitly to their real frontend origin(s) — the
+// localhost:3000 default only matters to a browser already running on the
+// developer's own machine.
+func getEnvList(key string, def []string) []string {
+	v := os.Getenv(key)
+	if v == "" {
+		return def
+	}
+	parts := strings.Split(v, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 func getEnvInt32Default(key string, def int32) (int32, error) {
