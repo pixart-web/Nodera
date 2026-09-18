@@ -156,6 +156,29 @@ export interface Approval {
   execution_result?: unknown;
 }
 
+export interface Agent {
+  id: string;
+  name: string;
+  description: string;
+  system_instructions: string;
+  ai_profile_key: string;
+  allowed_tool_keys: string[];
+  permission_scope: string[];
+  status: "active" | "disabled";
+  timeout_seconds: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ChatResult {
+  content: string;
+  profile_key: string;
+  provider_key: string;
+  model: string;
+  input_tokens: number;
+  output_tokens: number;
+}
+
 export interface AIProfile {
   id: string;
   key: string;

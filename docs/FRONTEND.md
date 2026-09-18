@@ -27,6 +27,8 @@ web/
       applications/page.tsx    application list + register form
       jobs/page.tsx             job list (status filter), enqueue, cancel
       tools/page.tsx             tool registry + inline execute form + approvals queue
+      agents/page.tsx             agent definitions: create/enable/disable, scoped
+                                  chat (Run), scoped tool execution (ExecuteTool)
       secrets/page.tsx          secret metadata list, set, delete — never values
       access/page.tsx            own API tokens, service accounts + their tokens,
                                   org-wide token listing (organization.manage only)
@@ -88,12 +90,35 @@ warning, caught by checking the browser console during live verification
 rather than trusting the build (`tsc`/`next build` don't catch this class
 of bug) — fixed before commit.
 
+## Agents page
+
+`agents/page.tsx` lists agent definitions and lets a user create one (name,
+AI profile key, system instructions, `allowed_tool_keys`, `permission_scope`
+— all comma-separated inputs for the two list fields), enable/disable it,
+and, once active, either Run it (a scoped chat message) or Execute a tool
+through it (same resource type/id + JSON parameters shape as the Tools
+page, restricted to a `<select>` of that agent's own `allowed_tool_keys`).
+A new agent starts disabled, matching the API (`docs/AGENTS.md`); Run and
+Execute are both disabled in the UI until enabled, rather than left to fail
+server-side.
+
+Verified live end to end: created an agent scoped to only `ai.use` +
+`tools.read`, confirmed executing `check_ssl` through it correctly failed
+with `FORBIDDEN` (`missing required permission: infrastructure.read` —
+the agent's own scope, not the caller's, gates the call), then created a
+second agent whose scope also included `infrastructure.read` and confirmed
+`check_ssl` against `github.com` returned genuine certificate data through
+it. Also verified `Run` against the `local-echo` provider returns real
+`echo: <message>` content.
+
 ## What's deliberately not built yet
 
 - Real-time updates (polling/websockets) — every page loads once and offers
   no live refresh beyond a manual reload after a mutating action
 - AI profile / chat UI (the API supports it — `docs/AI_ARCHITECTURE.md` —
   but no page calls it yet)
+- A tool-approval-TTL settings UI (`docs/AGENTS.md` — the API supports
+  per-org per-tool overrides, but no page manages them yet)
 - Any settings/RBAC management UI (roles are seeded, not yet editable from
   the UI)
 

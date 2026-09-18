@@ -299,6 +299,35 @@ scanning in CI (`govulncheck`, `npm audit`).
       unknown-tool-key validation paths return `400`/`404` over real HTTP
 - [x] Docs (`AGENTS.md`, `API.md`, `README.md`) updated to match
 
+**Phase 16** — this pass:
+- [x] `web/app/(org)/agents/page.tsx`: an agents management UI — list agent
+      definitions, create one (name, AI profile key, system instructions,
+      `allowed_tool_keys`/`permission_scope` as comma-separated inputs),
+      enable/disable, and — once active — Run it (scoped chat) or Execute
+      a tool through it (same resource type/id + JSON parameters shape as
+      the Tools page, restricted to a `<select>` of that agent's own
+      `allowed_tool_keys`). A new agent starts disabled, matching the API;
+      Run/Execute are disabled in the UI rather than left to fail
+      server-side. Added to the sidebar nav
+- [x] `lib/types.ts`: `Agent` and `ChatResult` types, matching
+      `internal/agents.Agent`/`internal/ai.ChatResult`'s real JSON tags
+      (caught and fixed a first-draft mismatch: `preferred_model_ids` vs.
+      a guessed `preferred_model_refs` field name, found live rather than
+      assumed correct)
+- [x] Verified live end to end: created an agent scoped to only `ai.use` +
+      `tools.read`, confirmed executing `check_ssl` through it correctly
+      failed with `FORBIDDEN` (`missing required permission:
+      infrastructure.read`) — the agent's own scope, not the caller's,
+      gates the call; created a second agent whose scope also included
+      `infrastructure.read` and confirmed `check_ssl` against `github.com`
+      returned genuine certificate data through it; confirmed `Run`
+      against the `local-echo` provider returns real `echo: <message>`
+      content. Checked the browser console on a fresh tab afterward —
+      zero errors
+- [x] Full frontend typecheck + production build clean; backend
+      unaffected (no Go changes this pass, sanity-checked anyway)
+- [x] Docs (`FRONTEND.md`, `README.md`) updated to match
+
 ## Next up
 
 1. **Concrete job types**: the worker dispatcher is real but nothing
@@ -317,9 +346,9 @@ scanning in CI (`govulncheck`, `npm audit`).
    (`docs/AI_ARCHITECTURE.md` Credential handling), or a further cloud
    adapter (OpenAI) if that mismatch is deferred again.
 6. **Remaining frontend follow-ups**: AI profile/chat UI, provider/model
-   registry UI, RBAC/settings management UI, an agents management UI, a
-   tool-approval-TTL settings UI, real-time updates (polling or
-   websockets) instead of load-once pages.
+   registry UI, RBAC/settings management UI, a tool-approval-TTL settings
+   UI, real-time updates (polling or websockets) instead of load-once
+   pages.
 
 ## Explicitly not started (rule 38 — deferred by design)
 
