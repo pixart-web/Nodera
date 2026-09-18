@@ -667,6 +667,149 @@
         }
       }
     },
+    "/api/v1/roles": {
+      "get": {
+        "tags": [
+          "organizations"
+        ],
+        "summary": "List every role available to the calling organization (system roles + any custom org roles) (organization.manage)",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OrgHeader"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Roles with their full permission sets",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Role"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/organization/members": {
+      "get": {
+        "tags": [
+          "organizations"
+        ],
+        "summary": "List every member of the calling organization with their currently-assigned roles (organization.manage)",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OrgHeader"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Members with their roles",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Member"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/organization/members/{userID}/roles": {
+      "post": {
+        "tags": [
+          "organizations"
+        ],
+        "summary": "Grant a member an additional role within the calling organization (organization.manage)",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OrgHeader"
+          },
+          {
+            "name": "userID",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "role_id"
+                ],
+                "properties": {
+                  "role_id": {
+                    "type": "string",
+                    "format": "uuid"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Role assigned (idempotent \u2014 already holding it is not an error)"
+          },
+          "404": {
+            "description": "The user isn't a member of this organization, or the role doesn't exist / isn't available to it"
+          }
+        }
+      }
+    },
+    "/api/v1/organization/members/{userID}/roles/{roleID}": {
+      "delete": {
+        "tags": [
+          "organizations"
+        ],
+        "summary": "Revoke a role from a member within the calling organization (organization.manage)",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OrgHeader"
+          },
+          {
+            "name": "userID",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "roleID",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Role revoked"
+          },
+          "404": {
+            "description": "The member did not hold this role"
+          }
+        }
+      }
+    },
     "/api/v1/service-accounts": {
       "get": {
         "tags": [
@@ -3072,6 +3215,63 @@
           "updated_at": {
             "type": "string",
             "format": "date-time"
+          }
+        }
+      },
+      "Role": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "is_system": {
+            "type": "boolean"
+          },
+          "permissions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "MemberRole": {
+        "type": "object",
+        "properties": {
+          "role_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          }
+        }
+      },
+      "Member": {
+        "type": "object",
+        "properties": {
+          "user_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "email": {
+            "type": "string"
+          },
+          "display_name": {
+            "type": "string"
+          },
+          "roles": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MemberRole"
+            }
           }
         }
       }

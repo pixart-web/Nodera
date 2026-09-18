@@ -373,6 +373,50 @@ scanning in CI (`govulncheck`, `npm audit`).
 - [x] Docs (`FRONTEND.md`) updated; removed the now-stale
       "tool-approval-TTL settings UI" bullet from its not-built-yet list
 
+**Phase 19** — this pass:
+- [x] RBAC/settings management: new backend surface in `internal/rbac`
+      (`ListRoles`, `ListMembers`, `AssignRole`, `RevokeRole`), all gated by
+      `organization.manage`, plus 4 new HTTP routes (`GET /roles`,
+      `GET /organization/members`, `POST`/`DELETE
+      /organization/members/{userID}/roles[/{roleID}]`) and
+      `web/app/(org)/settings/page.tsx` to drive them — a Roles table
+      (name, description, permission set) and a Members table showing each
+      member's current roles as removable badges, with an "Assign role"
+      control offering only roles they don't already hold
+- [x] `rbac.New` now takes an `AuditRecorder` (role assign/revoke are
+      audited — `rbac.role.assigned`/`rbac.role.revoked`), so every call
+      site (`cmd/server/main.go`, `harness_test.go`,
+      `internal/integration_test.go`) was reordered to construct `audit`
+      before `rbac`
+- [x] `AssignRole` validates both the target user is actually a member of
+      the calling org and the role is actually available to it (system
+      role or that org's own) before writing anything — `NOT_FOUND` on
+      either, not a silent no-op or a raw FK constraint error
+- [x] 5 new integration tests, all passing under `-race`: system roles are
+      returned with full permission sets, a plain member is forbidden from
+      listing roles (`organization.manage` gate), member listing reflects
+      real assigned roles including a freshly-added member with none yet,
+      assign+revoke round-trips correctly (assigning an already-held role
+      is a no-op; revoking a non-held one is `NOT_FOUND`), and both
+      invalid-target cases (non-member user, unknown role) are rejected
+- [x] OpenAPI additions (`Role`/`Member`/`MemberRole` schemas, 4 paths
+      under the existing `organizations` tag — not a new "organization"
+      tag, corrected after an initial mismatch caught by `@redocly/cli
+      lint`'s tag-reference check before commit); `lib/api-types.generated.ts`
+      regenerated
+- [x] Verified live end to end: assigned the `admin` role to a real member
+      alongside their existing `owner` role, watched both badges appear;
+      revoked `admin`, watched it disappear; separately signed up a second
+      real user, added them as a plain `member` via direct DB insert (no
+      "add member" endpoint exists yet — see Not yet implemented below),
+      logged in as them, and confirmed the Settings page renders two
+      graceful `FORBIDDEN` error banners rather than a blank or crashed
+      page. Checked the browser console on a fresh tab afterward — zero
+      errors
+- [x] Full backend (`gofmt`/`vet`/`build`/`test -race`) and frontend
+      (`tsc`/`next build`) clean
+- [x] Docs (`API.md`, `FRONTEND.md`, `README.md`) updated to match
+
 ## Next up
 
 1. **Concrete job types**: the worker dispatcher is real but nothing
@@ -390,8 +434,14 @@ scanning in CI (`govulncheck`, `npm audit`).
 5. **A "platform secrets" mechanism** for cloud provider credentials
    (`docs/AI_ARCHITECTURE.md` Credential handling), or a further cloud
    adapter (OpenAI) if that mismatch is deferred again.
-6. **Remaining frontend follow-ups**: RBAC/settings management UI,
-   real-time updates (polling or websockets) instead of load-once pages.
+6. **An "invite/add member" endpoint** — today there is no API path from
+   "user exists" to "user is a member of this organization" at all; the
+   Settings page's role assignment assumes membership already exists.
+7. **Custom role creation/editing** — the schema supports org-scoped
+   custom roles (`roles.organization_id`), but no endpoint creates one;
+   only the 3 seeded system roles exist anywhere.
+8. **Remaining frontend follow-ups**: real-time updates (polling or
+   websockets) instead of load-once pages.
 
 ## Explicitly not started (rule 38 — deferred by design)
 

@@ -75,8 +75,8 @@ func run() error {
 	}
 	log.Info("migrations applied", "count", len(migs))
 
-	rbacSvc := rbac.New(pool)
 	auditSvc := audit.New(pool)
+	rbacSvc := rbac.New(pool, auditSvc)
 	identitySvc := identity.New(pool, rbacSvc, cfg.Auth.SessionTTL)
 	tenancySvc := tenancy.New(pool)
 	infraSvc := infrastructure.New(pool, auditSvc)
@@ -154,6 +154,7 @@ func run() error {
 		secrets:     secretsSvc,
 		tools:       toolsSvc,
 		agents:      agentsSvc,
+		rbac:        rbacSvc,
 		pool:        pool,
 		loginRate:   loginRate,
 		signupRate:  signupRate,

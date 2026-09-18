@@ -724,6 +724,184 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/roles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List every role available to the calling organization (system roles + any custom org roles) (organization.manage) */
+        get: {
+            parameters: {
+                query?: never;
+                header?: {
+                    /** @description Required for a session token (which org to act within). Optional for an API token, which already embeds one — if present it must match. */
+                    "X-Nodera-Org"?: components["parameters"]["OrgHeader"];
+                };
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Roles with their full permission sets */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Role"][];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/organization/members": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List every member of the calling organization with their currently-assigned roles (organization.manage) */
+        get: {
+            parameters: {
+                query?: never;
+                header?: {
+                    /** @description Required for a session token (which org to act within). Optional for an API token, which already embeds one — if present it must match. */
+                    "X-Nodera-Org"?: components["parameters"]["OrgHeader"];
+                };
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Members with their roles */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Member"][];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/organization/members/{userID}/roles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Grant a member an additional role within the calling organization (organization.manage) */
+        post: {
+            parameters: {
+                query?: never;
+                header?: {
+                    /** @description Required for a session token (which org to act within). Optional for an API token, which already embeds one — if present it must match. */
+                    "X-Nodera-Org"?: components["parameters"]["OrgHeader"];
+                };
+                path: {
+                    userID: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        /** Format: uuid */
+                        role_id: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Role assigned (idempotent — already holding it is not an error) */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description The user isn't a member of this organization, or the role doesn't exist / isn't available to it */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/organization/members/{userID}/roles/{roleID}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Revoke a role from a member within the calling organization (organization.manage) */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: {
+                    /** @description Required for a session token (which org to act within). Optional for an API token, which already embeds one — if present it must match. */
+                    "X-Nodera-Org"?: components["parameters"]["OrgHeader"];
+                };
+                path: {
+                    userID: string;
+                    roleID: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Role revoked */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description The member did not hold this role */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/service-accounts": {
         parameters: {
             query?: never;
@@ -2453,6 +2631,26 @@ export interface components {
             approval_ttl_seconds?: number;
             /** Format: date-time */
             updated_at?: string;
+        };
+        Role: {
+            /** Format: uuid */
+            id?: string;
+            name?: string;
+            description?: string;
+            is_system?: boolean;
+            permissions?: string[];
+        };
+        MemberRole: {
+            /** Format: uuid */
+            role_id?: string;
+            name?: string;
+        };
+        Member: {
+            /** Format: uuid */
+            user_id?: string;
+            email?: string;
+            display_name?: string;
+            roles?: components["schemas"]["MemberRole"][];
         };
     };
     responses: {

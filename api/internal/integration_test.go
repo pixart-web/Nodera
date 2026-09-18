@@ -24,8 +24,8 @@ func TestSignupLoginOrgAndNodeFlow(t *testing.T) {
 	pool := testhelpers.RequirePool(t)
 	ctx := context.Background()
 
-	rbacSvc := rbac.New(pool)
 	auditSvc := audit.New(pool)
+	rbacSvc := rbac.New(pool, auditSvc)
 	identitySvc := identity.New(pool, rbacSvc, 24*time.Hour)
 	tenancySvc := tenancy.New(pool)
 	infraSvc := infrastructure.New(pool, auditSvc)

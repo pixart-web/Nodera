@@ -22,6 +22,7 @@ import (
 	"github.com/nodera/nodera/internal/platform/apierr"
 	"github.com/nodera/nodera/internal/platform/httpserver"
 	"github.com/nodera/nodera/internal/platform/ratelimit"
+	"github.com/nodera/nodera/internal/rbac"
 	"github.com/nodera/nodera/internal/secrets"
 	"github.com/nodera/nodera/internal/tenancy"
 	"github.com/nodera/nodera/internal/tools"
@@ -39,6 +40,7 @@ type apiDeps struct {
 	secrets     *secrets.Service // nil if NODERA_SECRETS_ENCRYPTION_KEY is not configured — see main.go
 	tools       *tools.Registry
 	agents      *agents.Service
+	rbac        *rbac.Service
 	pool        *pgxpool.Pool
 	loginRate   ratelimit.Allower
 	signupRate  ratelimit.Allower
@@ -89,6 +91,11 @@ func newRouter(d apiDeps) http.Handler {
 				r.Delete("/api-tokens/{id}", d.handleRevokeAPIToken)
 				r.Get("/organization/api-tokens", d.handleAdminListAPITokens)
 				r.Delete("/organization/api-tokens/{id}", d.handleAdminRevokeAPIToken)
+
+				r.Get("/roles", d.handleListRoles)
+				r.Get("/organization/members", d.handleListMembers)
+				r.Post("/organization/members/{userID}/roles", d.handleAssignRole)
+				r.Delete("/organization/members/{userID}/roles/{roleID}", d.handleRevokeRole)
 
 				r.Get("/service-accounts", d.handleListServiceAccounts)
 				r.Post("/service-accounts", d.handleCreateServiceAccount)
@@ -405,6 +412,68 @@ func (d apiDeps) handleAdminRevokeAPIToken(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	if err := d.identity.AdminRevokeAPIToken(r.Context(), mustAuthContext(r), id); err != nil {
+		httpserver.WriteError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// --- RBAC: roles and organization membership ---
+
+func (d apiDeps) handleListRoles(w http.ResponseWriter, r *http.Request) {
+	list, err := d.rbac.ListRoles(r.Context(), mustAuthContext(r))
+	if err != nil {
+		httpserver.WriteError(w, r, err)
+		return
+	}
+	httpserver.WriteJSON(w, http.StatusOK, list)
+}
+
+func (d apiDeps) handleListMembers(w http.ResponseWriter, r *http.Request) {
+	list, err := d.rbac.ListMembers(r.Context(), mustAuthContext(r))
+	if err != nil {
+		httpserver.WriteError(w, r, err)
+		return
+	}
+	httpserver.WriteJSON(w, http.StatusOK, list)
+}
+
+func (d apiDeps) handleAssignRole(w http.ResponseWriter, r *http.Request) {
+	userID, err := uuid.Parse(chi.URLParam(r, "userID"))
+	if err != nil {
+		httpserver.WriteError(w, r, apierr.Validation("invalid user id"))
+		return
+	}
+	var body struct {
+		RoleID string `json:"role_id"`
+	}
+	if !decodeJSON(w, r, &body) {
+		return
+	}
+	roleID, err := uuid.Parse(body.RoleID)
+	if err != nil {
+		httpserver.WriteError(w, r, apierr.Validation("invalid role_id"))
+		return
+	}
+	if err := d.rbac.AssignRole(r.Context(), mustAuthContext(r), userID, roleID); err != nil {
+		httpserver.WriteError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (d apiDeps) handleRevokeRole(w http.ResponseWriter, r *http.Request) {
+	userID, err := uuid.Parse(chi.URLParam(r, "userID"))
+	if err != nil {
+		httpserver.WriteError(w, r, apierr.Validation("invalid user id"))
+		return
+	}
+	roleID, err := uuid.Parse(chi.URLParam(r, "roleID"))
+	if err != nil {
+		httpserver.WriteError(w, r, apierr.Validation("invalid role id"))
+		return
+	}
+	if err := d.rbac.RevokeRole(r.Context(), mustAuthContext(r), userID, roleID); err != nil {
 		httpserver.WriteError(w, r, err)
 		return
 	}

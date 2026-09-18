@@ -15,6 +15,7 @@ const NAV = [
   { href: "/ai", label: "AI Gateway" },
   { href: "/secrets", label: "Secrets" },
   { href: "/access", label: "Access" },
+  { href: "/settings", label: "Settings" },
   { href: "/audit", label: "Audit" },
 ];
 

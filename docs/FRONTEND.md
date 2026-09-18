@@ -33,6 +33,8 @@ web/
       secrets/page.tsx          secret metadata list, set, delete — never values
       access/page.tsx            own API tokens, service accounts + their tokens,
                                   org-wide token listing (organization.manage only)
+      settings/page.tsx           roles catalog + member role assignment
+                                  (organization.manage only)
       audit/page.tsx            full audit log
   lib/
     api.ts                 fetch wrapper: bearer token + X-Nodera-Org headers, normalized ApiError
@@ -149,11 +151,33 @@ and got a real `echo: <message>` response with real token counts,
 registered a new model (`ollama/llama3.1`) and saw it appear in the table
 immediately.
 
+## Settings page
+
+`settings/page.tsx` covers RBAC: a Roles table (name, description, and
+permission count/list from `GET /api/v1/roles`) and a Members table
+(`GET /api/v1/organization/members`) showing each member's currently
+assigned roles as removable badges, with an "Assign role" control that
+only offers roles the member doesn't already hold. Both sections are
+`organization.manage`-gated server-side; a plain member sees the same page
+render an `ErrorBanner` with the real `FORBIDDEN` message for each section
+rather than a blank or crashed page — verified live by logging in as an
+actual member-role user and confirming the graceful degradation, then as
+an owner and confirming role assign/revoke actually changes what's stored
+(assigned `admin` to a member alongside their existing `owner` role, then
+revoked it, watching the badges update each time).
+
+This required new backend surface that didn't exist before this pass:
+`internal/rbac.ListRoles`/`ListMembers`/`AssignRole`/`RevokeRole`, all
+gated by `organization.manage` — roles themselves remain seeded
+(owner/admin/member) and not creatable from the UI or API yet; this page
+manages who holds which of the existing ones, not the role catalog itself.
+
 ## What's deliberately not built yet
 
 - Real-time updates (polling/websockets) — every page loads once and offers
   no live refresh beyond a manual reload after a mutating action
-- Any settings/RBAC management UI (roles are seeded, not yet editable from
-  the UI)
+- Creating/editing custom roles, or editing a system role's permission set
+  (the schema supports org-scoped custom roles — `organization_id` on
+  `roles` — but no endpoint creates one yet)
 
 Tracked in `docs/ROADMAP.md`.

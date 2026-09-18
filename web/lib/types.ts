@@ -27,6 +27,26 @@ export interface Organization {
   created_at: string;
 }
 
+export interface Role {
+  id: string;
+  name: string;
+  description: string;
+  is_system: boolean;
+  permissions: string[];
+}
+
+export interface MemberRole {
+  role_id: string;
+  name: string;
+}
+
+export interface Member {
+  user_id: string;
+  email: string;
+  display_name: string;
+  roles: MemberRole[];
+}
+
 export interface Node {
   id: string;
   organization_id: string;
