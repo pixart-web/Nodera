@@ -48,11 +48,60 @@ function AssignRoleForm({ member, roles, onDone }: { member: Member; roles: Role
   );
 }
 
+function AddMemberForm({ onDone }: { onDone: () => void }) {
+  const [email, setEmail] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    setBusy(true);
+    try {
+      await api.post("/api/v1/organization/members", { email });
+      setEmail("");
+      onDone();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Failed to add member");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form onSubmit={submit} className="card mb-4 space-y-3 p-4">
+      {error && <ErrorBanner message={error} />}
+      <div>
+        <label className="label" htmlFor="add-member-email">
+          Email
+        </label>
+        <input
+          id="add-member-email"
+          className="input"
+          type="email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          placeholder="user must already have an account"
+          required
+        />
+      </div>
+      <p className="text-xs text-base-400">
+        Adds an existing Nodera account as a member of this organization (starting with the `member` role) — this
+        does not create an account or send an invite email.
+      </p>
+      <button type="submit" className="btn-primary" disabled={busy}>
+        {busy ? "Adding…" : "Add member"}
+      </button>
+    </form>
+  );
+}
+
 export default function SettingsPage() {
   const roles = useApi(() => api.get<Role[]>("/api/v1/roles"), []);
   const members = useApi(() => api.get<Member[]>("/api/v1/organization/members"), []);
   const [error, setError] = useState<string | null>(null);
   const [assigningFor, setAssigningFor] = useState<string | null>(null);
+  const [showAddMember, setShowAddMember] = useState(false);
 
   async function revoke(userID: string, roleID: string) {
     setError(null);
@@ -105,7 +154,20 @@ export default function SettingsPage() {
       </div>
 
       <div>
-        <h2 className="mb-3 text-sm font-medium text-base-100">Members</h2>
+        <div className="mb-3 flex items-center justify-between">
+          <h2 className="text-sm font-medium text-base-100">Members</h2>
+          <button className="btn-primary" onClick={() => setShowAddMember((v) => !v)}>
+            {showAddMember ? "Cancel" : "Add member"}
+          </button>
+        </div>
+        {showAddMember && (
+          <AddMemberForm
+            onDone={() => {
+              setShowAddMember(false);
+              members.reload();
+            }}
+          />
+        )}
         {members.error && <ErrorBanner message={members.error} />}
         {error && <ErrorBanner message={error} />}
         <div className="card">

@@ -98,6 +98,7 @@ tracked in `docs/ROADMAP.md` if that stops being true.
 | DELETE | `/api/v1/organization/api-tokens/{id}` | session or token + org | Revoke any token in the org, regardless of owner (`organization.manage`) |
 | GET | `/api/v1/roles` | session or token + org | List every role available to the org — system roles plus any custom org roles (`organization.manage`) |
 | GET | `/api/v1/organization/members` | session or token + org | List org members with their currently-assigned roles (`organization.manage`) |
+| POST | `/api/v1/organization/members` | session or token + org | Add an existing user (by email) as a member, granted the system `member` role (`organization.manage`) — does not create an account or send an invite email |
 | POST | `/api/v1/organization/members/{userID}/roles` | session or token + org | Grant a member a role (`organization.manage`); idempotent — already holding it is not an error |
 | DELETE | `/api/v1/organization/members/{userID}/roles/{roleID}` | session or token + org | Revoke a role from a member (`organization.manage`) |
 | GET | `/api/v1/service-accounts` | session or token + org | List service accounts (`organization.manage`) |

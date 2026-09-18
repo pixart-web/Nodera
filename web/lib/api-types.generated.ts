@@ -795,7 +795,51 @@ export interface paths {
             };
         };
         put?: never;
-        post?: never;
+        /** Add an existing user (by email) to the calling organization as a member (organization.manage) — does not create an account */
+        post: {
+            parameters: {
+                query?: never;
+                header?: {
+                    /** @description Required for a session token (which org to act within). Optional for an API token, which already embeds one — if present it must match. */
+                    "X-Nodera-Org"?: components["parameters"]["OrgHeader"];
+                };
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        /** Format: email */
+                        email: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Member added, granted the system 'member' role */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AddedMember"];
+                    };
+                };
+                /** @description No account exists with this email */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description User is already a member of this organization */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
         delete?: never;
         options?: never;
         head?: never;
@@ -2651,6 +2695,12 @@ export interface components {
             email?: string;
             display_name?: string;
             roles?: components["schemas"]["MemberRole"][];
+        };
+        AddedMember: {
+            /** Format: uuid */
+            user_id?: string;
+            email?: string;
+            display_name?: string;
         };
     };
     responses: {

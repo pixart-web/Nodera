@@ -172,6 +172,19 @@ gated by `organization.manage` — roles themselves remain seeded
 (owner/admin/member) and not creatable from the UI or API yet; this page
 manages who holds which of the existing ones, not the role catalog itself.
 
+The Members section also has an "Add member" form (email in, `POST
+/api/v1/organization/members`) — added in a later pass once the gap it
+fills (there was previously no path from "user has an account" to "user
+is a member of this org" at all) surfaced from actually using the page.
+It adds an *existing* Nodera account (`internal/identity.FindByEmail`) to
+the org with the `member` role; it does not create an account or send an
+invite email, and the form's own copy says so. Verified live: added a
+real second account through the form and watched it appear with the
+`member` role; resubmitting the same email surfaced the real `CONFLICT`
+("user is already a member of this organization"); an email with no
+account surfaced the real `NOT_FOUND` ("user not found") — both as
+`ErrorBanner`s inside the form, not silent failures.
+
 ## What's deliberately not built yet
 
 - Real-time updates (polling/websockets) — every page loads once and offers

@@ -28,7 +28,7 @@ schema/interfaces, no production backend yet) · **PLANNED** (not started).
 |---|---|---|
 | Identity (signup/login/sessions) | IMPLEMENTED | Argon2id passwords, opaque revocable sessions |
 | Tenancy (organizations, membership) | IMPLEMENTED | |
-| RBAC | IMPLEMENTED | Seeded owner/admin/member roles, granular permission catalog; list roles/members and assign/revoke a member's role via API + UI (`organization.manage`) — custom role creation not yet supported |
+| RBAC | IMPLEMENTED | Seeded owner/admin/member roles, granular permission catalog; list roles/members, add an existing account as a member, and assign/revoke a member's role via API + UI (`organization.manage`) — custom role creation not yet supported |
 | Audit log | IMPLEMENTED | Append-only, tenant-scoped query |
 | Infrastructure (nodes) | IMPLEMENTED | Provider-agnostic node inventory (register/list/get) |
 | Applications/services | IMPLEMENTED | Registration/inventory only — no deployment execution yet |

@@ -94,6 +94,7 @@ func newRouter(d apiDeps) http.Handler {
 
 				r.Get("/roles", d.handleListRoles)
 				r.Get("/organization/members", d.handleListMembers)
+				r.Post("/organization/members", d.handleAddMember)
 				r.Post("/organization/members/{userID}/roles", d.handleAssignRole)
 				r.Delete("/organization/members/{userID}/roles/{roleID}", d.handleRevokeRole)
 
@@ -436,6 +437,21 @@ func (d apiDeps) handleListMembers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpserver.WriteJSON(w, http.StatusOK, list)
+}
+
+func (d apiDeps) handleAddMember(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Email string `json:"email"`
+	}
+	if !decodeJSON(w, r, &body) {
+		return
+	}
+	added, err := d.tenancy.AddMember(r.Context(), mustAuthContext(r), body.Email)
+	if err != nil {
+		httpserver.WriteError(w, r, err)
+		return
+	}
+	httpserver.WriteJSON(w, http.StatusCreated, added)
 }
 
 func (d apiDeps) handleAssignRole(w http.ResponseWriter, r *http.Request) {

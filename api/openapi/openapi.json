@@ -721,6 +721,53 @@
             }
           }
         }
+      },
+      "post": {
+        "tags": [
+          "organizations"
+        ],
+        "summary": "Add an existing user (by email) to the calling organization as a member (organization.manage) \u2014 does not create an account",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OrgHeader"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "email"
+                ],
+                "properties": {
+                  "email": {
+                    "type": "string",
+                    "format": "email"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Member added, granted the system 'member' role",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AddedMember"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No account exists with this email"
+          },
+          "409": {
+            "description": "User is already a member of this organization"
+          }
+        }
       }
     },
     "/api/v1/organization/members/{userID}/roles": {
@@ -3272,6 +3319,21 @@
             "items": {
               "$ref": "#/components/schemas/MemberRole"
             }
+          }
+        }
+      },
+      "AddedMember": {
+        "type": "object",
+        "properties": {
+          "user_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "email": {
+            "type": "string"
+          },
+          "display_name": {
+            "type": "string"
           }
         }
       }

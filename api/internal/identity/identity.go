@@ -53,6 +53,24 @@ var ErrEmailTaken = apierr.Conflict("an account with this email already exists")
 var ErrInvalidCredentials = apierr.Unauthenticated("invalid email or password")
 var ErrSessionInvalid = apierr.Unauthenticated("session is invalid or expired")
 
+// FindByEmail looks up an existing user by email. It never creates an
+// account — that's SignUp's job — so it's safe to expose to other domains
+// (internal/tenancy.AddMember uses it to resolve who's being added to an
+// organization) without letting them provision users of their own.
+func (s *Service) FindByEmail(ctx context.Context, email string) (User, error) {
+	var u User
+	err := s.pool.QueryRow(ctx, `
+		SELECT id, email, display_name, status, created_at FROM users WHERE email = LOWER($1)
+	`, email).Scan(&u.ID, &u.Email, &u.DisplayName, &u.Status, &u.CreatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return User{}, apierr.NotFound("user")
+	}
+	if err != nil {
+		return User{}, apierr.Wrap(apierr.CodeInternal, "failed to look up user", err)
+	}
+	return u, nil
+}
+
 // SignUp creates a new user with a password credential. It does not create
 // or join any organization — see internal/tenancy.CreateOrganization.
 func (s *Service) SignUp(ctx context.Context, email, password, displayName string) (User, error) {

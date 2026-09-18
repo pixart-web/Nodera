@@ -13,20 +13,33 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/nodera/nodera/internal/audit"
+	"github.com/nodera/nodera/internal/identity"
 	"github.com/nodera/nodera/internal/platform/apierr"
 	"github.com/nodera/nodera/internal/platform/authctx"
+	"github.com/nodera/nodera/internal/platform/logger"
+	"github.com/nodera/nodera/internal/rbac"
 )
 
-// systemOwnerRoleID is the seeded 'owner' role from migration 0002 — every
-// new organization's creator is granted it directly.
+// systemOwnerRoleID / systemMemberRoleID are the seeded system roles from
+// migration 0002. The creator of an organization is granted owner directly;
+// AddMember grants member (the caller can use rbac.AssignRole afterward to
+// grant anything broader — no privilege escalation happens here).
 var systemOwnerRoleID = uuid.MustParse("00000000-0000-0000-0000-000000000001")
+var systemMemberRoleID = uuid.MustParse("00000000-0000-0000-0000-000000000003")
 
-type Service struct {
-	pool *pgxpool.Pool
+type AuditRecorder interface {
+	Record(ctx context.Context, ac authctx.AuthContext, e audit.Entry) error
 }
 
-func New(pool *pgxpool.Pool) *Service {
-	return &Service{pool: pool}
+type Service struct {
+	pool     *pgxpool.Pool
+	identity *identity.Service
+	audit    AuditRecorder
+}
+
+func New(pool *pgxpool.Pool, identitySvc *identity.Service, auditRecorder AuditRecorder) *Service {
+	return &Service{pool: pool, identity: identitySvc, audit: auditRecorder}
 }
 
 type Organization struct {
@@ -129,6 +142,69 @@ func (s *Service) Get(ctx context.Context, ac authctx.AuthContext) (Organization
 		return Organization{}, apierr.Wrap(apierr.CodeInternal, "failed to load organization", err)
 	}
 	return o, nil
+}
+
+// AddMember adds an existing user (looked up by email) to the calling
+// organization and grants them the system 'member' role — the same
+// starting point CreateOrganization gives itself no special treatment
+// beyond, except the creator also gets 'owner'. It does not create a user
+// account: the email must belong to someone who already signed up
+// (internal/identity.SignUp is the only place accounts are created), so
+// this is "join an existing user to this org," not "invite by email" in
+// the send-a-link sense — there is no email delivery in this phase
+// (docs/ROADMAP.md).
+func (s *Service) AddMember(ctx context.Context, ac authctx.AuthContext, email string) (AddedMember, error) {
+	if err := rbac.Require(ac, "organization.manage"); err != nil {
+		return AddedMember{}, err
+	}
+
+	u, err := s.identity.FindByEmail(ctx, email)
+	if err != nil {
+		return AddedMember{}, err
+	}
+
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return AddedMember{}, apierr.Wrap(apierr.CodeInternal, "failed to begin transaction", err)
+	}
+	defer tx.Rollback(ctx)
+
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO organization_members (organization_id, user_id) VALUES ($1, $2)
+	`, ac.OrganizationID, u.ID); err != nil {
+		if isUniqueViolation(err) {
+			return AddedMember{}, apierr.Conflict("user is already a member of this organization")
+		}
+		return AddedMember{}, apierr.Wrap(apierr.CodeInternal, "failed to add member", err)
+	}
+
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO organization_member_roles (organization_id, user_id, role_id) VALUES ($1, $2, $3)
+	`, ac.OrganizationID, u.ID, systemMemberRoleID); err != nil {
+		return AddedMember{}, apierr.Wrap(apierr.CodeInternal, "failed to grant member role", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return AddedMember{}, apierr.Wrap(apierr.CodeInternal, "failed to commit transaction", err)
+	}
+
+	if err := s.audit.Record(ctx, ac, audit.Entry{
+		Action: "tenancy.member.added", ResourceType: "organization_member", ResourceID: u.ID.String(),
+		Success: true, ResultingState: u,
+	}); err != nil {
+		logger.FromContext(ctx).Error("failed to write audit entry", "error", err)
+	}
+
+	return AddedMember{UserID: u.ID, Email: u.Email, DisplayName: u.DisplayName}, nil
+}
+
+// AddedMember is the minimal shape AddMember returns — deliberately not
+// identity.User verbatim (this package doesn't own user records, ADR-002;
+// it only reports who was just added, not the full user record).
+type AddedMember struct {
+	UserID      uuid.UUID `json:"user_id"`
+	Email       string    `json:"email"`
+	DisplayName string    `json:"display_name"`
 }
 
 func isUniqueViolation(err error) bool {

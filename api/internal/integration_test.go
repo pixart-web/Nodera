@@ -27,7 +27,7 @@ func TestSignupLoginOrgAndNodeFlow(t *testing.T) {
 	auditSvc := audit.New(pool)
 	rbacSvc := rbac.New(pool, auditSvc)
 	identitySvc := identity.New(pool, rbacSvc, 24*time.Hour)
-	tenancySvc := tenancy.New(pool)
+	tenancySvc := tenancy.New(pool, identitySvc, auditSvc)
 	infraSvc := infrastructure.New(pool, auditSvc)
 
 	// Sign up creates a user with no organizations yet.

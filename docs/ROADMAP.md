@@ -417,6 +417,48 @@ scanning in CI (`govulncheck`, `npm audit`).
       (`tsc`/`next build`) clean
 - [x] Docs (`API.md`, `FRONTEND.md`, `README.md`) updated to match
 
+**Phase 20** — this pass:
+- [x] The "add member" gap Phase 19 surfaced (no API path from "user has
+      an account" to "user is a member of this org") — `POST
+      /api/v1/organization/members` (`internal/tenancy.AddMember`), gated
+      by `organization.manage`. Adds an *existing* account to the calling
+      org with the system `member` role; never creates an account (that
+      stays `identity.SignUp`'s job) and sends no invite email — there's
+      no email delivery in this phase at all, so this is "join an
+      existing user," not an invite-by-email flow
+- [x] `internal/identity.FindByEmail`: new exported lookup, the first
+      thing `internal/tenancy` has ever needed from `internal/identity` —
+      added as a narrow method on the concrete `*identity.Service` (same
+      pattern `internal/agents` already uses for `*ai.Service`/
+      `*tools.Registry`, per ADR-002) rather than giving `tenancy` any
+      broader access to user records
+- [x] `tenancy.New` and `rbac.New` both now take an `AuditRecorder`
+      (member-added and role-assign/revoke are all audited), so every
+      call site (`cmd/server/main.go`, `harness_test.go`,
+      `internal/integration_test.go`) was reordered to construct `audit`
+      and `identity` before `tenancy`
+- [x] `AddMember` validates the email resolves to a real account
+      (`NOT_FOUND` if not) and that they aren't already a member
+      (`CONFLICT` if so) before writing anything
+- [x] 4 new integration tests, all passing under `-race`: a real add
+      grants exactly the `member` role and shows up in `ListMembers`, a
+      plain member is forbidden from adding anyone, an unknown email is
+      rejected, and adding an already-added member is rejected
+- [x] `web/app/(org)/settings/page.tsx`: an "Add member" form (email in)
+      above the Members table. OpenAPI additions (`AddedMember` schema, 1
+      path) validated with `@redocly/cli lint`; `lib/api-types.generated.ts`
+      regenerated
+- [x] Verified live end to end: signed up a fresh real account, added it
+      to the org through the actual UI form, watched it appear in the
+      Members table with the `member` role; resubmitted the same email
+      and saw the real `CONFLICT` ("user is already a member of this
+      organization") render inline; submitted an email with no account
+      and saw the real `NOT_FOUND` ("user not found") render inline.
+      Checked the browser console on a fresh tab afterward — zero errors
+- [x] Full backend and frontend verification clean
+- [x] Docs (`API.md`, `FRONTEND.md`, `README.md`) updated; removed the
+      now-fulfilled "add member endpoint" bullet from Next up
+
 ## Next up
 
 1. **Concrete job types**: the worker dispatcher is real but nothing
@@ -434,12 +476,12 @@ scanning in CI (`govulncheck`, `npm audit`).
 5. **A "platform secrets" mechanism** for cloud provider credentials
    (`docs/AI_ARCHITECTURE.md` Credential handling), or a further cloud
    adapter (OpenAI) if that mismatch is deferred again.
-6. **An "invite/add member" endpoint** — today there is no API path from
-   "user exists" to "user is a member of this organization" at all; the
-   Settings page's role assignment assumes membership already exists.
-7. **Custom role creation/editing** — the schema supports org-scoped
+6. **Custom role creation/editing** — the schema supports org-scoped
    custom roles (`roles.organization_id`), but no endpoint creates one;
    only the 3 seeded system roles exist anywhere.
+7. **Actual invite-by-email** (as opposed to Phase 20's "add an existing
+   account") — needs outbound email delivery, which doesn't exist in this
+   phase at all.
 8. **Remaining frontend follow-ups**: real-time updates (polling or
    websockets) instead of load-once pages.
 
