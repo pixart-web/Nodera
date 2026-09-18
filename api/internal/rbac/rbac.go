@@ -357,6 +357,71 @@ func (s *Service) getCustomRole(ctx context.Context, orgID, roleID uuid.UUID) (R
 	return r, nil
 }
 
+// loadRolePermissions returns a role's current permission set, used by
+// UpdateRoleDetails to fill in the Permissions field of its response (the
+// UPDATE itself only touches name/description, so the permission set has
+// to be read back separately rather than assumed from the request).
+func (s *Service) loadRolePermissions(ctx context.Context, roleID uuid.UUID) ([]string, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT permission_key FROM role_permissions WHERE role_id = $1 ORDER BY permission_key ASC
+	`, roleID)
+	if err != nil {
+		return nil, apierr.Wrap(apierr.CodeInternal, "failed to load role permissions", err)
+	}
+	defer rows.Close()
+
+	perms := []string{}
+	for rows.Next() {
+		var p string
+		if err := rows.Scan(&p); err != nil {
+			return nil, apierr.Wrap(apierr.CodeInternal, "failed to scan role permission", err)
+		}
+		perms = append(perms, p)
+	}
+	return perms, rows.Err()
+}
+
+// UpdateRoleDetails renames a custom role and/or changes its description.
+// Its permission set is untouched — see UpdateRolePermissions for that.
+func (s *Service) UpdateRoleDetails(ctx context.Context, ac authctx.AuthContext, roleID uuid.UUID, name, description string) (Role, error) {
+	if err := Require(ac, "organization.manage"); err != nil {
+		return Role{}, err
+	}
+	if name == "" {
+		return Role{}, apierr.Validation("role name is required")
+	}
+	if _, err := s.getCustomRole(ctx, ac.OrganizationID, roleID); err != nil {
+		return Role{}, err
+	}
+
+	var r Role
+	err := s.pool.QueryRow(ctx, `
+		UPDATE roles SET name = $2, description = $3 WHERE id = $1
+		RETURNING id, name, description, is_system
+	`, roleID, name, description).Scan(&r.ID, &r.Name, &r.Description, &r.IsSystem)
+	if err != nil {
+		if isUniqueViolation(err) {
+			return Role{}, apierr.Conflict("a role with this name already exists in this organization")
+		}
+		return Role{}, apierr.Wrap(apierr.CodeInternal, "failed to update role", err)
+	}
+
+	perms, err := s.loadRolePermissions(ctx, roleID)
+	if err != nil {
+		return Role{}, err
+	}
+	r.Permissions = perms
+
+	if err := s.audit.Record(ctx, ac, audit.Entry{
+		Action: "rbac.role.details_updated", ResourceType: "role", ResourceID: r.ID.String(),
+		Success: true, ResultingState: r,
+	}); err != nil {
+		logger.FromContext(ctx).Error("failed to write audit entry", "error", err)
+	}
+
+	return r, nil
+}
+
 // UpdateRolePermissions replaces a custom role's entire permission set.
 // The new set, like CreateRole's, must be a subset of the caller's own
 // held permissions.

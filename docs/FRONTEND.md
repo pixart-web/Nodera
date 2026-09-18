@@ -198,13 +198,20 @@ real second account through the form and watched it appear with the
 account surfaced the real `NOT_FOUND` ("user not found") — both as
 `ErrorBanner`s inside the form, not silent failures.
 
+The Roles table also has an "Edit" control per custom role, alongside
+"Delete" — an inline form (pre-filled with the role's current name and
+description) that calls `PUT /api/v1/roles/{id}`, leaving the permission
+set untouched (that's still `PUT /roles/{id}/permissions`, a separate
+call). System roles show `system` instead of either control, same as
+before. Verified live: renamed a custom role and changed its description
+through the form, confirmed the table updated and the permission set
+(`audit.read`) was unaffected by a details-only edit.
+
 ## What's deliberately not built yet
 
 - Real-time updates (polling/websockets) — every page loads once and offers
   no live refresh beyond a manual reload after a mutating action
-- Editing a custom role's name/description after creation (only its
-  permission set can be replaced, via `PUT /roles/{id}/permissions` — no
-  UI or API path renames one) or editing a system role's fixed permission
-  set at all
+- Editing a system role's fixed permission set at all (only custom roles
+  can be renamed or have their permissions replaced)
 
 Tracked in `docs/ROADMAP.md`.

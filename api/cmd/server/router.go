@@ -95,6 +95,7 @@ func newRouter(d apiDeps) http.Handler {
 
 				r.Get("/roles", d.handleListRoles)
 				r.Post("/roles", d.handleCreateRole)
+				r.Put("/roles/{id}", d.handleUpdateRoleDetails)
 				r.Put("/roles/{id}/permissions", d.handleUpdateRolePermissions)
 				r.Delete("/roles/{id}", d.handleDeleteRole)
 				r.Get("/organization/members", d.handleListMembers)
@@ -460,6 +461,27 @@ func (d apiDeps) handleCreateRole(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpserver.WriteJSON(w, http.StatusCreated, role)
+}
+
+func (d apiDeps) handleUpdateRoleDetails(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		httpserver.WriteError(w, r, apierr.Validation("invalid role id"))
+		return
+	}
+	var body struct {
+		Name        string `json:"name"`
+		Description string `json:"description"`
+	}
+	if !decodeJSON(w, r, &body) {
+		return
+	}
+	role, err := d.rbac.UpdateRoleDetails(r.Context(), mustAuthContext(r), id, body.Name, body.Description)
+	if err != nil {
+		httpserver.WriteError(w, r, err)
+		return
+	}
+	httpserver.WriteJSON(w, http.StatusOK, role)
 }
 
 func (d apiDeps) handleUpdateRolePermissions(w http.ResponseWriter, r *http.Request) {

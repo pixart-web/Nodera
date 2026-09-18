@@ -124,6 +124,51 @@ function CreateRoleForm({ onDone }: { onDone: () => void }) {
   );
 }
 
+function EditRoleForm({ role, onDone }: { role: Role; onDone: () => void }) {
+  const [name, setName] = useState(role.name);
+  const [description, setDescription] = useState(role.description);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    setBusy(true);
+    try {
+      await api.put(`/api/v1/roles/${role.id}`, { name, description });
+      onDone();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Failed to update role");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form onSubmit={submit} className="flex items-center gap-2">
+      {error && <span className="text-xs text-danger">{error}</span>}
+      <input
+        className="input w-28 py-1 text-xs"
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+        required
+      />
+      <input
+        className="input w-40 py-1 text-xs"
+        value={description}
+        onChange={(e) => setDescription(e.target.value)}
+        placeholder="description"
+      />
+      <button type="submit" className="text-xs text-ok hover:underline" disabled={busy}>
+        {busy ? "Saving…" : "Save"}
+      </button>
+      <button type="button" className="text-xs text-base-500 hover:text-base-300" onClick={onDone}>
+        Cancel
+      </button>
+    </form>
+  );
+}
+
 function AddMemberForm({ onDone }: { onDone: () => void }) {
   const [email, setEmail] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -180,6 +225,7 @@ export default function SettingsPage() {
   const [showAddMember, setShowAddMember] = useState(false);
   const [showCreateRole, setShowCreateRole] = useState(false);
   const [roleError, setRoleError] = useState<string | null>(null);
+  const [editingRole, setEditingRole] = useState<string | null>(null);
 
   async function revoke(userID: string, roleID: string) {
     setError(null);
@@ -241,24 +287,46 @@ export default function SettingsPage() {
                 </tr>
               </thead>
               <tbody>
-                {roles.data!.map((r) => (
-                  <tr key={r.id}>
-                    <td className="font-mono text-xs">{r.name}</td>
-                    <td className="text-xs text-base-300">{r.description}</td>
-                    <td className="text-xs text-base-400">
-                      {r.permissions.length > 8 ? `${r.permissions.length} permissions` : r.permissions.join(", ") || "—"}
-                    </td>
-                    <td>
-                      {r.is_system ? (
-                        <span className="text-xs text-base-500">system</span>
-                      ) : (
-                        <button className="text-xs text-base-400 hover:text-danger" onClick={() => deleteRole(r.id)}>
-                          Delete
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                ))}
+                {roles.data!.map((r) =>
+                  editingRole === r.id ? (
+                    <tr key={r.id}>
+                      <td colSpan={4}>
+                        <EditRoleForm
+                          role={r}
+                          onDone={() => {
+                            setEditingRole(null);
+                            roles.reload();
+                          }}
+                        />
+                      </td>
+                    </tr>
+                  ) : (
+                    <tr key={r.id}>
+                      <td className="font-mono text-xs">{r.name}</td>
+                      <td className="text-xs text-base-300">{r.description}</td>
+                      <td className="text-xs text-base-400">
+                        {r.permissions.length > 8 ? `${r.permissions.length} permissions` : r.permissions.join(", ") || "—"}
+                      </td>
+                      <td>
+                        {r.is_system ? (
+                          <span className="text-xs text-base-500">system</span>
+                        ) : (
+                          <span className="space-x-3">
+                            <button
+                              className="text-xs text-accent-400 hover:text-accent-300"
+                              onClick={() => setEditingRole(r.id)}
+                            >
+                              Edit
+                            </button>
+                            <button className="text-xs text-base-400 hover:text-danger" onClick={() => deleteRole(r.id)}>
+                              Delete
+                            </button>
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                  ),
+                )}
               </tbody>
             </table>
           )}

@@ -2314,6 +2314,64 @@
             "description": "Role is still assigned to one or more members"
           }
         }
+      },
+      "put": {
+        "tags": [
+          "organizations"
+        ],
+        "summary": "Rename a custom role and/or change its description (organization.manage) \u2014 permission set is untouched; refuses system roles",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OrgHeader"
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "name"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "description": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Role updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Role"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not a custom role of this organization (includes every system role)"
+          },
+          "409": {
+            "description": "A role with this name already exists in this organization"
+          }
+        }
       }
     }
   },

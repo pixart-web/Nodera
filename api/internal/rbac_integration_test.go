@@ -334,3 +334,36 @@ func TestRBAC_DeleteRoleRequiresNoAssignments(t *testing.T) {
 		}
 	}
 }
+
+// UpdateRoleDetails renames a custom role and/or changes its description
+// without touching its permission set, and refuses a system role with the
+// same NOT_FOUND getCustomRole already produces elsewhere.
+func TestRBAC_UpdateRoleDetails(t *testing.T) {
+	pool := testhelpers.RequirePool(t)
+	ctx := context.Background()
+	h := newHarness(pool)
+	ac, _ := h.newOwnerContext(t, ctx, "rbac-updatedetails-owner@nodera.dev")
+
+	role, err := h.rbac.CreateRole(ctx, ac, "old-name", "old description", []string{"audit.read"})
+	if err != nil {
+		t.Fatalf("CreateRole: %v", err)
+	}
+
+	updated, err := h.rbac.UpdateRoleDetails(ctx, ac, role.ID, "new-name", "new description")
+	if err != nil {
+		t.Fatalf("UpdateRoleDetails: %v", err)
+	}
+	if updated.Name != "new-name" || updated.Description != "new description" {
+		t.Fatalf("expected name/description to be updated, got %+v", updated)
+	}
+	if len(updated.Permissions) != 1 || updated.Permissions[0] != "audit.read" {
+		t.Fatalf("expected the permission set to be untouched by a details-only update, got %+v", updated.Permissions)
+	}
+
+	systemAdminRoleID := mustParseUUID(t, systemAdminRoleIDStr)
+	if _, err := h.rbac.UpdateRoleDetails(ctx, ac, systemAdminRoleID, "hijacked", ""); err == nil {
+		t.Fatal("expected renaming a system role to fail")
+	} else if ae, ok := err.(*apierr.Error); !ok || ae.Code != apierr.CodeNotFound {
+		t.Fatalf("expected NOT_FOUND for a system role, got %v", err)
+	}
+}

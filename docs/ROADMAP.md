@@ -560,6 +560,35 @@ scanning in CI (`govulncheck`, `npm audit`).
       agent execution loop and cloud AI provider adapters had "no HTTP
       surface yet" — both have had one for many phases)
 
+**Phase 24** — this pass:
+- [x] Renaming/editing a custom role's name or description, resolving the
+      last remaining bullet from the RBAC/custom-roles work.
+      `internal/rbac.UpdateRoleDetails` — name/description only, the
+      permission set is untouched (that stays `UpdateRolePermissions`'s
+      job, a deliberately separate call so a details-only edit can never
+      accidentally change what a role grants)
+- [x] Reuses `getCustomRole` (refuses any system role or another org's
+      role with `NOT_FOUND`) and a new `loadRolePermissions` helper to
+      fill in the response's `Permissions` field after the `UPDATE`,
+      since that statement only touches `name`/`description`
+- [x] 1 new integration test, passing under `-race`: a details update
+      changes name/description while leaving the permission set intact,
+      and renaming a system role is refused with `NOT_FOUND`
+- [x] 1 new HTTP route (`PUT /roles/{id}`, distinct from the existing
+      `PUT /roles/{id}/permissions`) and an OpenAPI addition, validated
+      with `@redocly/cli lint`; `lib/api-types.generated.ts` regenerated
+- [x] `web/app/(org)/settings/page.tsx`: an "Edit" control per custom role
+      (alongside "Delete") opening an inline form pre-filled with the
+      role's current name/description
+- [x] Verified live end to end through the real UI: created a custom
+      role, edited its name and description through the form, confirmed
+      the table updated and its permission set (`audit.read`) was
+      unaffected by the details-only edit, then deleted it. Checked the
+      browser console on a fresh tab afterward — zero errors
+- [x] Full backend and frontend verification clean
+- [x] Docs (`API.md`, `FRONTEND.md`) updated; removed the now-fulfilled
+      bullet from Next up
+
 ## Next up
 
 1. **Concrete job types**: the worker dispatcher is real but nothing
@@ -578,13 +607,11 @@ scanning in CI (`govulncheck`, `npm audit`).
 5. **Actual invite-by-email** (as opposed to Phase 20's "add an existing
    account") — needs outbound email delivery, which doesn't exist in this
    phase at all.
-6. **Renaming/editing a custom role's name or description** after
-   creation — only its permission set can be replaced today.
-7. **Rate limiting on further endpoints** beyond the four covered now, if
+6. **Rate limiting on further endpoints** beyond the four covered now, if
    a concrete abuse case surfaces (most mutations remain unlimited but are
    `organization.manage`-gated, which is a meaningfully different risk
    profile than the four already covered).
-8. **Remaining frontend follow-ups**: real-time updates (polling or
+7. **Remaining frontend follow-ups**: real-time updates (polling or
    websockets) instead of load-once pages.
 
 ## Explicitly not started (rule 38 — deferred by design)

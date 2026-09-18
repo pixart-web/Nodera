@@ -2447,7 +2447,53 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        put?: never;
+        /** Rename a custom role and/or change its description (organization.manage) — permission set is untouched; refuses system roles */
+        put: {
+            parameters: {
+                query?: never;
+                header?: {
+                    /** @description Required for a session token (which org to act within). Optional for an API token, which already embeds one — if present it must match. */
+                    "X-Nodera-Org"?: components["parameters"]["OrgHeader"];
+                };
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        name: string;
+                        description?: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Role updated */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Role"];
+                    };
+                };
+                /** @description Not a custom role of this organization (includes every system role) */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description A role with this name already exists in this organization */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
         post?: never;
         /** Delete a custom role (organization.manage) — refuses if any member still holds it */
         delete: {
