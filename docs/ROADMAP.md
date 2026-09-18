@@ -58,6 +58,27 @@ scanning in CI (`govulncheck`, `npm audit`).
       passing under `-race`
 - [x] Docs (`API.md`, `README.md`) updated to match
 
+**Phase 9** — this pass:
+- [x] Background approval-expiry sweep (`tools.Registry.RunExpirySweep`,
+      run every 5 minutes across every organization by a goroutine in
+      `cmd/server/main.go`) — an idle organization's stale approvals now
+      flip to `expired` on schedule, not only when someone happens to call
+      `ListApprovals`/`DecideApproval` for that org
+- [x] Disabling a service account now atomically revokes all its
+      outstanding tokens (previously it only blocked minting new ones,
+      a narrower guarantee that was explicitly documented at the time and
+      is now closed) — verified live (token works, `DELETE`, token
+      immediately returns `401`)
+- [x] AI chat rate limiting (60 requests/minute per organization) —
+      protects against runaway provider cost or one tenant crowding out
+      others on a shared local model, deliberately keyed by organization
+      rather than IP since that's the actual risk boundary for this
+      endpoint
+- [x] Tests: 1 new integration test for the cross-org sweep, an existing
+      test strengthened to prove token revocation on disable — all passing
+      under `-race`
+- [x] Docs (`AGENTS.md`, `API.md`, `SECURITY.md`, `README.md`) updated
+
 ## Next up
 
 1. **Concrete job types**: the worker dispatcher is real but nothing
@@ -66,27 +87,19 @@ scanning in CI (`govulncheck`, `npm audit`).
 2. **More tool handlers**: `get_container_logs` needs a container domain
    that doesn't exist yet; `create_backup`/`verify_backup` need the jobs
    system wired to an actual backup mechanism.
-3. **A background approval-expiry sweep** independent of `ListApprovals`/
-   `DecideApproval` being called (today's lazy-check approach is
-   sufficient for a human-facing queue, but a truly idle organization's
-   stale approvals won't flip to `expired` until someone looks).
-4. **Disabling a service account should invalidate its outstanding
-   tokens**, not just block minting new ones — today `DisableServiceAccount`
-   only prevents future `CreateAPITokenForServiceAccount` calls; an
-   already-issued token keeps working until it's separately revoked or
-   expires (documented, not silently assumed — see the test for this
-   narrower guarantee).
-5. **Rate limiting beyond `/auth/login` and `/auth/signup`**, and a
-   Redis-backed limiter for multi-instance deployments.
-6. **OpenAPI/Swagger generation** and list-endpoint pagination — `web/`'s
+3. **Rate limiting beyond `/auth/login`, `/auth/signup`, and `/ai/chat`**,
+   and a Redis-backed limiter for multi-instance deployments.
+4. **OpenAPI/Swagger generation** and list-endpoint pagination — `web/`'s
    hand-written `lib/types.ts` is the thing to replace once this lands.
-7. **A cloud AI provider adapter** (OpenAI or Anthropic) now that the
+5. **A cloud AI provider adapter** (OpenAI or Anthropic) now that the
    provider/adapter separation pattern is proven with Ollama — will need
    the secrets module for credential storage.
-8. **Agent execution loop**: read `agents.system_instructions`, drive the
+6. **Agent execution loop**: read `agents.system_instructions`, drive the
    AI gateway, enforce `allowed_tool_keys` when an agent (not a human) is
    the caller of `tools.Execute`.
-9. **Frontend follow-ups**: service accounts/API tokens UI (real backend
+7. **Per-tool/per-org-configurable approval TTL** (today's
+   `defaultApprovalTTL` is a single global 24h constant).
+8. **Frontend follow-ups**: service accounts/API tokens UI (real backend
    now exists for this), AI profile/chat UI, provider/model registry UI, a
    tools/approvals UI, RBAC/settings management UI, real-time updates
    (polling or websockets) instead of load-once pages.

@@ -255,12 +255,10 @@ func (r *Registry) createApproval(ctx context.Context, ac authctx.AuthContext, t
 }
 
 // expirePending marks any pending approval past its expires_at as
-// 'expired'. There is no background sweep (no worker/cron) — it runs
-// lazily at the start of ListApprovals and DecideApproval, the two places
-// that actually need an up-to-date status, which is sufficient for a
-// human-facing approval queue at phase-1 scale and needs no new
-// infrastructure (a scheduled jobs.Enqueue-driven sweep is the natural
-// upgrade if this ever needs to run without anyone calling those methods).
+// 'expired', scoped to one organization. It runs lazily at the start of
+// ListApprovals and DecideApproval, the two request-driven places that
+// actually need an up-to-date status for the org making the call. See
+// RunExpirySweep for the organization-independent background version.
 func (r *Registry) expirePending(ctx context.Context, orgID uuid.UUID) error {
 	_, err := r.pool.Exec(ctx, `
 		UPDATE approvals SET status = 'expired'
@@ -270,6 +268,24 @@ func (r *Registry) expirePending(ctx context.Context, orgID uuid.UUID) error {
 		return apierr.Wrap(apierr.CodeInternal, "failed to expire stale approvals", err)
 	}
 	return nil
+}
+
+// RunExpirySweep expires every organization's stale pending approvals in
+// one statement, independent of any request — so an idle organization's
+// approvals still flip to 'expired' on schedule rather than staying
+// (incorrectly) 'pending' forever if nobody happens to call
+// ListApprovals/DecideApproval for it. Call it periodically (see
+// cmd/server/main.go); it is idempotent and safe to run concurrently with
+// itself or with the per-request expirePending calls.
+func (r *Registry) RunExpirySweep(ctx context.Context) (int64, error) {
+	tag, err := r.pool.Exec(ctx, `
+		UPDATE approvals SET status = 'expired'
+		WHERE status = 'pending' AND expires_at IS NOT NULL AND expires_at < now()
+	`)
+	if err != nil {
+		return 0, apierr.Wrap(apierr.CodeInternal, "failed to run approval expiry sweep", err)
+	}
+	return tag.RowsAffected(), nil
 }
 
 func (r *Registry) ListApprovals(ctx context.Context, ac authctx.AuthContext, status string) ([]Approval, error) {

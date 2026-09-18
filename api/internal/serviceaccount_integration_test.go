@@ -74,16 +74,16 @@ func TestServiceAccountAPITokenAuthenticatesAsServiceAccount(t *testing.T) {
 		t.Fatalf("token permissions should exactly equal its granted scopes, got %+v", tokenAC.Permissions)
 	}
 
-	// A disabled service account's outstanding token must stop working —
-	// but the token schema alone doesn't enforce that today (only
-	// revoked_at/expires_at gate AuthContextForAPIToken). This documents
-	// the current, narrower guarantee rather than claiming a behavior that
-	// doesn't exist yet.
+	// Disabling the service account must immediately cut off its
+	// outstanding token, not just block minting new ones.
 	if err := h.identity.DisableServiceAccount(ctx, ac, sa.ID); err != nil {
 		t.Fatalf("DisableServiceAccount: %v", err)
 	}
 	if _, _, err := h.identity.CreateAPITokenForServiceAccount(ctx, ac, sa.ID, "another-key", []string{"applications.read"}, nil); err == nil {
 		t.Fatal("expected minting a new token for a disabled service account to fail")
+	}
+	if _, err := h.identity.AuthContextForAPIToken(ctx, raw, "test-correlation"); err == nil {
+		t.Fatal("expected the already-issued token to stop working once its service account is disabled")
 	}
 }
 

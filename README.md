@@ -41,7 +41,7 @@ schema/interfaces, no production backend yet) · **PLANNED** (not started).
 | Secrets | IMPLEMENTED | AES-256-GCM encrypted at rest; values never exposed over HTTP, only `Reveal`-able in-process; optional at config level |
 | Tool Gateway + approvals | IMPLEMENTED | Permission → risk-tier → approval → execution → audit pipeline is real, with expiration; `get_server_metrics` and `check_ssl` (a genuine live TLS check) have real handlers, every other seeded tool honestly reports `NOT_IMPLEMENTED` |
 | Agent execution loop | PLANNED | `agents` table exists; nothing drives `system_instructions` through the AI gateway or enforces `allowed_tool_keys` yet |
-| Rate limiting | IMPLEMENTED | In-process, per client IP: `/auth/login` (5/5min), `/auth/signup` (3/hour); other endpoints and a multi-instance-safe (Redis) limiter are PLANNED |
+| Rate limiting | IMPLEMENTED | In-process: `/auth/login` (5/5min/IP), `/auth/signup` (3/hour/IP), `/ai/chat` (60/min/org); other endpoints and a multi-instance-safe (Redis) limiter are PLANNED |
 | Secure headers | IMPLEMENTED | `nosniff`, `DENY`, `no-referrer`, `no-store` on every response |
 | CI | IMPLEMENTED | `gofmt`/`vet`/`build`/`test -race`/`govulncheck` (API) + `typecheck`/`build`/`npm audit` (web) on every push |
 | Dashboard / frontend | IMPLEMENTED | Next.js + TypeScript control plane UI (`web/`) — login, org picker, infrastructure, applications, jobs, secrets, audit; every page reads/writes real API data, no fabricated placeholders |

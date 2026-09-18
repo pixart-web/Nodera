@@ -117,6 +117,7 @@ func run() error {
 	toolsSvc := tools.New(pool, auditSvc)
 	toolsSvc.RegisterHandler("get_server_metrics", newGetServerMetricsHandler(infraSvc))
 	toolsSvc.RegisterHandler("check_ssl", handlers.CheckSSL)
+	go runApprovalExpirySweep(ctx, log, toolsSvc)
 
 	worker := jobs.NewWorker(pool)
 	// No handlers are registered yet (docs/ROADMAP.md: "jobs worker" ships
@@ -140,6 +141,7 @@ func run() error {
 		pool:        pool,
 		loginRate:   ratelimit.New(5, 5*time.Minute),
 		signupRate:  ratelimit.New(3, time.Hour),
+		aiChatRate:  ratelimit.New(60, time.Minute),
 		corsOrigins: cfg.HTTP.CORSOrigins,
 	}
 
@@ -169,6 +171,37 @@ func run() error {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	return srv.Shutdown(shutdownCtx)
+}
+
+// approvalExpirySweepInterval is how often RunExpirySweep runs
+// organization-independently. Not yet configurable — a deliberate
+// phase-1 simplification (docs/AGENTS.md).
+const approvalExpirySweepInterval = 5 * time.Minute
+
+// runApprovalExpirySweep periodically expires stale pending approvals
+// across every organization, so an idle org's approvals still flip to
+// 'expired' on schedule rather than staying 'pending' forever if nobody
+// happens to call ListApprovals/DecideApproval for it (those also sweep,
+// but only for the org making that particular call — see
+// tools.Registry.expirePending). Runs until ctx is cancelled.
+func runApprovalExpirySweep(ctx context.Context, log *slog.Logger, toolsSvc *tools.Registry) {
+	ticker := time.NewTicker(approvalExpirySweepInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			n, err := toolsSvc.RunExpirySweep(ctx)
+			if err != nil {
+				log.Error("approval expiry sweep failed", "error", err)
+				continue
+			}
+			if n > 0 {
+				log.Info("approval expiry sweep", "expired", n)
+			}
+		}
+	}
 }
 
 // newGetServerMetricsHandler wraps infrastructure.Service.Get rather than

@@ -106,17 +106,26 @@ self-contained implementation.
 - Sensitive operations (e.g. node registration) call `audit.Record` with
   actor, action, resource, and resulting state.
 
-## Rate limiting — IMPLEMENTED (login and signup only)
+## Rate limiting — IMPLEMENTED (login, signup, AI chat)
 
-`internal/platform/ratelimit` is a simple in-process fixed-window limiter,
-applied to `POST /auth/login` (5 attempts / 5 minutes per client IP) and
-`POST /auth/signup` (3 attempts / hour per client IP) — `cmd/server/router.go`.
-It is deliberately in-process, not Redis-backed — adequate for a single API
-instance; a multi-instance deployment will need a shared limiter (tracked
-in `docs/ROADMAP.md`). Keyed by IP rather than the submitted email, so an
+`internal/platform/ratelimit` is a simple in-process fixed-window limiter
+(`cmd/server/router.go`), applied to:
+- `POST /auth/login` — 5 attempts / 5 minutes per client IP
+- `POST /auth/signup` — 3 attempts / hour per client IP
+- `POST /api/v1/ai/chat` — 60 requests / minute **per organization**
+
+Login/signup are keyed by IP rather than the submitted email, so an
 attacker can't use either endpoint to lock out a victim account/address by
 exhausting *their* budget (a form of denial-of-service the naive per-email
-design would enable).
+design would enable). AI chat is keyed by organization instead — the real
+risk there isn't login lockout, it's one tenant (a careless or compromised
+integration) running up real provider cost or crowding out other tenants
+on a shared local model; an IP-keyed limiter wouldn't even bound that
+(many legitimate calls can share an IP behind NAT).
+
+It is deliberately in-process, not Redis-backed, for all three — adequate
+for a single API instance; a multi-instance deployment will need a shared
+limiter (tracked in `docs/ROADMAP.md`).
 
 ## Secure headers — IMPLEMENTED
 

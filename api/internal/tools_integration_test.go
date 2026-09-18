@@ -272,7 +272,8 @@ func TestTools_RejectingApprovalNeverExecutes(t *testing.T) {
 
 // A pending approval past its expires_at is lazily marked 'expired' the
 // next time it's touched (ListApprovals or DecideApproval), and can no
-// longer be decided (docs/AGENTS.md — no background sweep exists yet).
+// longer be decided. See TestTools_RunExpirySweepExpiresAcrossOrganizations
+// for the organization-independent background sweep.
 func TestTools_ExpiredApprovalCannotBeDecided(t *testing.T) {
 	pool := testhelpers.RequirePool(t)
 	ctx := context.Background()
@@ -301,5 +302,59 @@ func TestTools_ExpiredApprovalCannotBeDecided(t *testing.T) {
 
 	if _, err := toolsSvc.DecideApproval(ctx, ac, *result.ApprovalID, true, "too late"); err == nil {
 		t.Fatal("expected deciding an expired approval to fail")
+	}
+}
+
+// RunExpirySweep expires stale pending approvals across every
+// organization in one call — proving an idle org's approvals don't need
+// anyone to call ListApprovals/DecideApproval for that specific org to get
+// flipped to 'expired' (what cmd/server/main.go's periodic goroutine
+// relies on).
+func TestTools_RunExpirySweepExpiresAcrossOrganizations(t *testing.T) {
+	pool := testhelpers.RequirePool(t)
+	ctx := context.Background()
+	h := newHarness(pool)
+	acA, _ := h.newOwnerContext(t, ctx, "sweep-org-a@nodera.dev")
+	acB, _ := h.newOwnerContext(t, ctx, "sweep-org-b@nodera.dev")
+
+	toolsSvc := tools.New(pool, h.audit)
+
+	resultA, err := toolsSvc.Execute(ctx, acA, "restart_container", tools.ExecuteInput{ResourceType: "container", ResourceID: "a"})
+	if err != nil {
+		t.Fatalf("Execute (org A): %v", err)
+	}
+	resultB, err := toolsSvc.Execute(ctx, acB, "restart_container", tools.ExecuteInput{ResourceType: "container", ResourceID: "b"})
+	if err != nil {
+		t.Fatalf("Execute (org B): %v", err)
+	}
+
+	// Backdate org A's approval only — org B's should be untouched by the
+	// sweep since it isn't actually expired.
+	if _, err := pool.Exec(ctx, `UPDATE approvals SET expires_at = now() - interval '1 minute' WHERE id = $1`, *resultA.ApprovalID); err != nil {
+		t.Fatalf("failed to backdate approval expiry: %v", err)
+	}
+
+	n, err := toolsSvc.RunExpirySweep(ctx)
+	if err != nil {
+		t.Fatalf("RunExpirySweep: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("expected the sweep to report exactly 1 expired approval, got %d", n)
+	}
+
+	approvalsA, err := toolsSvc.ListApprovals(ctx, acA, "expired")
+	if err != nil {
+		t.Fatalf("ListApprovals (org A): %v", err)
+	}
+	if len(approvalsA) != 1 || approvalsA[0].ID != *resultA.ApprovalID {
+		t.Fatalf("expected org A's approval to be expired by the sweep, got %+v", approvalsA)
+	}
+
+	approvalsB, err := toolsSvc.ListApprovals(ctx, acB, "pending")
+	if err != nil {
+		t.Fatalf("ListApprovals (org B): %v", err)
+	}
+	if len(approvalsB) != 1 || approvalsB[0].ID != *resultB.ApprovalID {
+		t.Fatalf("expected org B's approval to remain pending, got %+v", approvalsB)
 	}
 }

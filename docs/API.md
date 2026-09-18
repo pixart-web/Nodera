@@ -69,7 +69,7 @@ Two bearer token types are accepted on `Authorization: Bearer <token>`, and
 | DELETE | `/api/v1/organization/api-tokens/{id}` | session or token + org | Revoke any token in the org, regardless of owner (`organization.manage`) |
 | GET | `/api/v1/service-accounts` | session or token + org | List service accounts (`organization.manage`) |
 | POST | `/api/v1/service-accounts` | session or token + org | Create a service account (`organization.manage`) |
-| DELETE | `/api/v1/service-accounts/{id}` | session or token + org | Disable a service account (`organization.manage`) — does not delete it or its history |
+| DELETE | `/api/v1/service-accounts/{id}` | session or token + org | Disable a service account and immediately revoke all its outstanding tokens (`organization.manage`) — does not delete the account or its history |
 | POST | `/api/v1/service-accounts/{id}/api-tokens` | session or token + org | Mint a token owned by the service account (`organization.manage`); returns the raw token once |
 | GET | `/api/v1/jobs` | session or token + org | List jobs, optional `?status=` filter (`jobs.read`) |
 | POST | `/api/v1/jobs` | session or token + org | Enqueue a job (`jobs.manage`) |
@@ -108,8 +108,9 @@ phase-1 simplification for a single-administrating-org deployment, not an
 oversight — see `internal/ai/registry.go`.
 
 `POST /auth/login` (5 attempts / 5 minutes) and `POST /auth/signup`
-(3 attempts / hour) are rate limited per client IP; exceeding either
-returns `429` with code `RATE_LIMITED`.
+(3 attempts / hour) are rate limited per client IP; `POST /api/v1/ai/chat`
+is rate limited per organization (60 requests / minute). Exceeding any of
+them returns `429` with code `RATE_LIMITED` — see `docs/SECURITY.md`.
 
 Everything else described in `docs/ARCHITECTURE.md` (the agent execution
 loop, cloud AI provider adapters) is schema/interfaces only — no HTTP

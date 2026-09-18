@@ -40,6 +40,7 @@ type apiDeps struct {
 	pool        *pgxpool.Pool
 	loginRate   *ratelimit.Limiter
 	signupRate  *ratelimit.Limiter
+	aiChatRate  *ratelimit.Limiter
 	corsOrigins []string
 }
 
@@ -535,6 +536,19 @@ func (d apiDeps) handleCreateAIProfile(w http.ResponseWriter, r *http.Request) {
 }
 
 func (d apiDeps) handleAIChat(w http.ResponseWriter, r *http.Request) {
+	ac := mustAuthContext(r)
+
+	// Rate limit by organization rather than by IP — the AI gateway's real
+	// abuse/cost concern is runaway spend against one tenant's usage,
+	// which an IP-keyed limiter wouldn't bound (many legitimate calls can
+	// share an IP behind NAT; a single compromised or careless integration
+	// racking up provider cost is the actual risk here — see
+	// docs/SECURITY.md).
+	if d.aiChatRate != nil && !d.aiChatRate.Allow(ac.OrganizationID.String()) {
+		httpserver.WriteError(w, r, apierr.New(apierr.CodeRateLimited, "too many AI requests for this organization, try again shortly"))
+		return
+	}
+
 	var body struct {
 		ProfileKey string              `json:"profile_key"`
 		Messages   []providers.Message `json:"messages"`
@@ -542,7 +556,7 @@ func (d apiDeps) handleAIChat(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &body) {
 		return
 	}
-	result, err := d.ai.Chat(r.Context(), mustAuthContext(r), body.ProfileKey, body.Messages)
+	result, err := d.ai.Chat(r.Context(), ac, body.ProfileKey, body.Messages)
 	if err != nil {
 		httpserver.WriteError(w, r, err)
 		return

@@ -71,14 +71,24 @@ func (s *Service) ListServiceAccounts(ctx context.Context, ac authctx.AuthContex
 }
 
 // DisableServiceAccount does not delete the row (CASCADE would silently
-// revoke its tokens without an audit-visible reason) — it flips status so
-// AuthContextForAPIToken's own checks continue to work unchanged, and a
-// disabled service account's history stays inspectable.
+// revoke its tokens without an audit-visible reason) — it flips status,
+// and, in the same transaction, revokes every one of its outstanding
+// tokens. Disabling is meant to actually cut off access immediately, not
+// merely block minting new tokens while old ones keep working — so both
+// happen atomically: a caller never observes a disabled service account
+// whose tokens still authenticate.
 func (s *Service) DisableServiceAccount(ctx context.Context, ac authctx.AuthContext, id uuid.UUID) error {
 	if err := rbac.Require(ac, creatingAPITokensRequires); err != nil {
 		return err
 	}
-	tag, err := s.pool.Exec(ctx, `
+
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return apierr.Wrap(apierr.CodeInternal, "failed to begin transaction", err)
+	}
+	defer tx.Rollback(ctx)
+
+	tag, err := tx.Exec(ctx, `
 		UPDATE service_accounts SET status = 'disabled' WHERE id = $1 AND organization_id = $2
 	`, id, ac.OrganizationID)
 	if err != nil {
@@ -86,6 +96,17 @@ func (s *Service) DisableServiceAccount(ctx context.Context, ac authctx.AuthCont
 	}
 	if tag.RowsAffected() == 0 {
 		return apierr.NotFound("service account")
+	}
+
+	if _, err := tx.Exec(ctx, `
+		UPDATE api_tokens SET revoked_at = now()
+		WHERE service_account_id = $1 AND organization_id = $2 AND revoked_at IS NULL
+	`, id, ac.OrganizationID); err != nil {
+		return apierr.Wrap(apierr.CodeInternal, "failed to revoke service account's tokens", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return apierr.Wrap(apierr.CodeInternal, "failed to commit transaction", err)
 	}
 	return nil
 }

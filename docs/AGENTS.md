@@ -31,12 +31,15 @@ Rejecting never executes anything, proven by
 `TestTools_RejectingApprovalNeverExecutes`.
 
 A pending approval also expires (`defaultApprovalTTL`, 24h, not yet
-configurable). There is no background sweep — expiry is checked lazily at
-the top of `ListApprovals` and `DecideApproval`, which is sufficient for a
-human-facing queue and needs no new worker infrastructure; a scheduled
-`jobs.Enqueue`-driven sweep is the natural upgrade if this ever needs to
-run without anyone calling those methods. Verified by
-`TestTools_ExpiredApprovalCannotBeDecided`.
+configurable). Expiry is checked two ways: lazily, at the top of
+`ListApprovals` and `DecideApproval` (scoped to the calling org — instant,
+no waiting on the background sweep), and by `Registry.RunExpirySweep`, run
+every 5 minutes across every organization by a goroutine started in
+`cmd/server/main.go` (`runApprovalExpirySweep`) — so an idle organization's
+stale approvals still flip to `expired` on schedule even if nobody calls
+`ListApprovals`/`DecideApproval` for that org. Verified by
+`TestTools_ExpiredApprovalCannotBeDecided` and
+`TestTools_RunExpirySweepExpiresAcrossOrganizations`.
 
 ## What's actually implemented vs. not, per tool
 
@@ -104,6 +107,6 @@ agent-specific behavior.
 - Agent execution loop / scheduling, and enforcing an agent's
   `allowed_tool_keys` (only human callers hit `tools.Execute` today, via
   the HTTP API, not an autonomous agent)
-- A background approval-expiry sweep independent of `ListApprovals`/
-  `DecideApproval` being called, and a per-tool/per-org-configurable TTL
+- A per-tool/per-org-configurable approval TTL (today's `defaultApprovalTTL`
+  is a single global 24h constant)
 - Handlers for tools besides `get_server_metrics` and `check_ssl`
