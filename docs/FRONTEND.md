@@ -27,7 +27,7 @@ web/
                                   report/decommission controls
       applications/page.tsx    application list + register form + per-app
                                   status report/deregister controls
-      jobs/page.tsx             job list (status filter), enqueue, cancel
+      jobs/page.tsx             job list (status filter), enqueue, cancel, retry
       tools/page.tsx             tool registry + inline execute form + approvals queue
       agents/page.tsx             agent definitions: create/enable/disable, scoped
                                   chat (Run), scoped tool execution (ExecuteTool)
@@ -284,6 +284,25 @@ time via a direct API call (simulating another device) without touching
 the page, reloaded, and saw both sessions listed with exactly one
 correctly marked "this session"; clicked "Log out" on the other and
 watched it disappear from the table.
+
+## Jobs page: retry
+
+`jobs/page.tsx` gained a "Retry" button next to "Cancel," shown only on a
+`failed` job (`POST /jobs/{id}/retry`) — the counterpart to "Cancel"
+appearing only on a `queued` one. Retrying resets attempts/progress/error
+and returns the same job (same ID) to `queued`, where the real worker
+picks it up again on its normal poll; the page doesn't do anything special
+to wait for that — the existing 5s background polling (below) picks up
+the eventual re-failure or success on its own.
+
+Verified live using a genuinely failed job left over from an earlier
+phase's polling verification (not a fresh mock): clicked Retry, watched
+it reset to `queued` with `0/1` attempts and no error, then — without any
+reload — watched the background poll pick up the real worker re-failing
+it the same honest way (`no handler registered for job type`, since none
+is registered for that test job type) a few seconds later. Separately
+confirmed via a direct API call that retrying a `queued` (not `failed`)
+job correctly returns a real `409 CONFLICT`.
 
 ## Real-time updates (polling)
 

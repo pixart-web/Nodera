@@ -220,6 +220,42 @@ func (s *Service) Cancel(ctx context.Context, ac authctx.AuthContext, id uuid.UU
 	return nil
 }
 
+// Retry re-queues a failed job for another full attempt cycle — attempts
+// and progress reset to zero, any recorded error/result cleared, and
+// started_at/finished_at cleared, then status returns to 'queued' where
+// the worker will claim it again on its regular poll (same row, same ID
+// and payload — not a new job, so history/idempotency_key stay linked to
+// the original request). Only a job in the terminal 'failed' state can be
+// retried; a 'queued'/'running' job needs no retry (it hasn't finished
+// failing), and a 'succeeded'/'cancelled' outcome was not a failure to
+// recover from.
+func (s *Service) Retry(ctx context.Context, ac authctx.AuthContext, id uuid.UUID) (Job, error) {
+	if err := rbac.Require(ac, permManage); err != nil {
+		return Job{}, err
+	}
+
+	var j Job
+	err := s.pool.QueryRow(ctx, `
+		UPDATE jobs SET status = 'queued', attempts = 0, progress = 0, error = NULL,
+		                result = NULL, started_at = NULL, finished_at = NULL, updated_at = now()
+		WHERE id = $1 AND organization_id = $2 AND status = 'failed'
+		RETURNING id, organization_id, type, status, priority, payload, COALESCE(result, 'null'),
+		          COALESCE(error, ''), progress, attempts, max_attempts, COALESCE(correlation_id, ''),
+		          created_at, updated_at, started_at, finished_at
+	`, id, ac.OrganizationID).Scan(
+		&j.ID, &j.OrganizationID, &j.Type, &j.Status, &j.Priority, &j.Payload, &j.Result,
+		&j.Error, &j.Progress, &j.Attempts, &j.MaxAttempts, &j.CorrelationID,
+		&j.CreatedAt, &j.UpdatedAt, &j.StartedAt, &j.FinishedAt,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Job{}, apierr.Conflict("job is not in a retryable (failed) state, or does not exist")
+	}
+	if err != nil {
+		return Job{}, apierr.Wrap(apierr.CodeInternal, "failed to retry job", err)
+	}
+	return j, nil
+}
+
 func normalizeLimit(limit int) int {
 	if limit <= 0 {
 		return 50

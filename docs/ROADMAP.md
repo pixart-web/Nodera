@@ -798,6 +798,49 @@ scanning in CI (`govulncheck`, `npm audit`).
       `internal/applications`'s own package doc comment, which had gone
       stale the moment this phase's methods were added
 
+**Phase 30** — this pass:
+- [x] `jobs.Retry` — found by auditing `internal/jobs` for gaps: a job
+      that exhausts `max_attempts` reaches the terminal `failed` state
+      with no way back except manually enqueuing a brand-new job with the
+      same payload, losing the history linkage to the original request.
+      `Retry` resets `attempts`/`progress`/`error`/`result`/
+      `started_at`/`finished_at` and returns the *same row* (same ID) to
+      `queued`, where the real worker claims it again on its normal poll
+      — not a new job, so `idempotency_key` and any external reference to
+      the original job ID stay valid
+- [x] Only a `failed` job can be retried — `queued`/`running` hasn't
+      finished failing yet, and `succeeded`/`cancelled` weren't failures
+      to recover from. Mirrors `Cancel`'s existing convention of
+      collapsing "wrong state" and "doesn't exist" into one `CONFLICT`
+      message rather than leaking which case applies
+- [x] 1 new integration test, passing under `-race`, that goes further
+      than a status-flag check: enqueues a real job with no handler
+      registered (genuinely fails, same mechanism as the existing
+      unregistered-handler test), confirms `Cancel` is correctly refused
+      post-failure, retries it, confirms the reset fields, confirms a
+      second `Retry` call is refused (no longer `failed`), then registers
+      the handler and lets a second real worker pass pick up the *same*
+      job and succeed — proving `Retry` puts the job back somewhere a
+      real worker will find it, not just that the row's status column
+      changed
+- [x] 1 new HTTP route (`POST /jobs/{id}/retry`) and an OpenAPI addition,
+      validated with `@redocly/cli lint`; `lib/api-types.generated.ts`
+      regenerated
+- [x] `web/app/(org)/jobs/page.tsx`: a "Retry" button next to "Cancel,"
+      shown only on a `failed` job (the counterpart to "Cancel" appearing
+      only on `queued`)
+- [x] Verified live using a genuinely failed job left over from an
+      earlier phase's polling verification (not a fresh mock): clicked
+      Retry, watched it reset to `queued` with `0/1` attempts and no
+      error, then — without any reload — watched the existing 5s
+      background polling pick up the real worker re-failing it the same
+      honest way a few seconds later. Separately confirmed via a direct
+      API call that retrying a `queued` job correctly returns a real
+      `409 CONFLICT`. Checked the browser console on a fresh tab
+      afterward — zero errors
+- [x] Full backend and frontend verification clean
+- [x] Docs (`API.md`, `FRONTEND.md`, `README.md`) updated
+
 ## Next up
 
 1. **Concrete job types**: the worker dispatcher is real but nothing

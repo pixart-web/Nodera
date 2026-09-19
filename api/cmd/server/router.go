@@ -123,6 +123,7 @@ func newRouter(d apiDeps) http.Handler {
 				r.Post("/jobs", d.handleEnqueueJob)
 				r.Get("/jobs/{id}", d.handleGetJob)
 				r.Post("/jobs/{id}/cancel", d.handleCancelJob)
+				r.Post("/jobs/{id}/retry", d.handleRetryJob)
 
 				r.Get("/ai/profiles", d.handleListAIProfiles)
 				r.Post("/ai/profiles", d.handleCreateAIProfile)
@@ -870,6 +871,20 @@ func (d apiDeps) handleCancelJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (d apiDeps) handleRetryJob(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		httpserver.WriteError(w, r, apierr.Validation("invalid job id"))
+		return
+	}
+	j, err := d.jobs.Retry(r.Context(), mustAuthContext(r), id)
+	if err != nil {
+		httpserver.WriteError(w, r, err)
+		return
+	}
+	httpserver.WriteJSON(w, http.StatusOK, j)
 }
 
 // --- AI gateway ---

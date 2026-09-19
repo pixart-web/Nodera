@@ -123,6 +123,7 @@ tracked in `docs/ROADMAP.md` if that stops being true.
 | POST | `/api/v1/jobs` | session or token + org | Enqueue a job (`jobs.manage`) |
 | GET | `/api/v1/jobs/{id}` | session or token + org | Get a job |
 | POST | `/api/v1/jobs/{id}/cancel` | session or token + org | Cancel a queued job |
+| POST | `/api/v1/jobs/{id}/retry` | session or token + org | Re-queue a failed job for another full attempt cycle (`jobs.manage`) — attempts/progress/error reset, same job ID |
 | GET | `/api/v1/ai/profiles` | session or token + org | List AI profiles (`ai.use`) |
 | POST | `/api/v1/ai/profiles` | session or token + org | Create an AI profile (`ai.manage`) |
 | POST | `/api/v1/ai/chat` | session or token + org | Call the AI gateway with a profile key + messages (`ai.use`) |

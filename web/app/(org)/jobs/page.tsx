@@ -72,6 +72,17 @@ function JobsPageInner() {
     }
   }
 
+  async function retryJob(id: string) {
+    try {
+      await api.post(`/api/v1/jobs/${id}/retry`);
+      jobs.reload();
+    } catch {
+      // Same reasoning as cancelJob — reload shows the true state rather
+      // than assuming the retry request succeeded.
+      jobs.reload();
+    }
+  }
+
   return (
     <div>
       <div className="mb-6 flex items-center justify-between">
@@ -153,6 +164,11 @@ function JobsPageInner() {
                     {j.status === "queued" && (
                       <button className="text-xs text-base-400 hover:text-danger" onClick={() => cancelJob(j.id)}>
                         Cancel
+                      </button>
+                    )}
+                    {j.status === "failed" && (
+                      <button className="text-xs text-accent-400 hover:text-accent-300" onClick={() => retryJob(j.id)}>
+                        Retry
                       </button>
                     )}
                   </td>

@@ -34,7 +34,7 @@ schema/interfaces, no production backend yet) · **PLANNED** (not started).
 | Applications/services | IMPLEMENTED | Registration/inventory, editable fields, status reporting, deregistration (terminal, row kept for history) — no deployment execution yet |
 | API tokens | IMPLEMENTED | User-owned or service-account-owned, scope-limited (cannot exceed creator's own permissions); org-admin can list/revoke any token in the org |
 | Service accounts | IMPLEMENTED | Create/list/disable, gated by `organization.manage`; hold their own scoped API tokens |
-| Jobs | IMPLEMENTED | Postgres-backed queue + `FOR UPDATE SKIP LOCKED` worker; no job types registered yet beyond what callers enqueue |
+| Jobs | IMPLEMENTED | Postgres-backed queue + `FOR UPDATE SKIP LOCKED` worker; cancel (queued) and retry (failed, resets for another full attempt cycle); no job types registered yet beyond what callers enqueue |
 | AI provider/model registry | IMPLEMENTED | Platform-wide (not org-scoped by design), managed via API (`ai.manage`); seeded `local-echo` test provider + auto-registered `ollama` when configured |
 | AI profiles/routing/usage | IMPLEMENTED | Deterministic router with enforced privacy-level policy, real usage tracking; a registry row with no registered Go adapter correctly fails closed rather than fabricating a response |
 | AI provider adapters | IMPLEMENTED (Ollama + Anthropic + OpenAI) | `local-echo` (test) + real Ollama (`NODERA_OLLAMA_BASE_URL`), Anthropic (`NODERA_ANTHROPIC_API_KEY`), and OpenAI (`NODERA_OPENAI_API_KEY`) adapters |
