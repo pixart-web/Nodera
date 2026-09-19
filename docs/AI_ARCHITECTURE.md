@@ -111,17 +111,24 @@ never a fabricated call (rule 36; see
 
 ## Credential handling for cloud providers
 
-`NODERA_ANTHROPIC_API_KEY`/`NODERA_OPENAI_API_KEY` are sourced from
-environment variables, not `internal/secrets`, even though the secrets
-module already exists and is exactly the kind of thing it's for. The
-reason is a real, not-yet-resolved architectural mismatch:
-`ai_providers`/`ai_models` are platform-wide (no `organization_id` — see
-`internal/ai/registry.go`), while `internal/secrets` is org-scoped by
-design (every secret belongs to one organization, `docs/SECURITY.md`).
-There's no organization to scope a platform-wide provider's credential
-to. Resolving this — likely a small "platform secrets" concept distinct
-from org secrets — is tracked in `docs/ROADMAP.md` rather than worked
-around silently.
+`NODERA_ANTHROPIC_API_KEY`/`NODERA_OPENAI_API_KEY` are still sourced from
+environment variables, not `internal/secrets`, as of the platform-secrets
+hardening pass. The org-scoped-secrets-vs-platform-wide-provider mismatch
+this section used to describe as unresolved is now half-resolved: a
+"platform secrets" primitive exists (`internal/secrets.Service`'s
+`Platform*` methods, over a separate `platform_secrets` table with no
+`organization_id`, gated by `internal/platformauth` — see
+`docs/SECURITY.md` "Platform secrets") and is real, tested infrastructure
+a caller can `SetPlatform`/`RevealPlatform` today. What's deliberately
+**not** done yet: the Anthropic/OpenAI adapters themselves still aren't
+wired to resolve their API key from a platform secret at call time — they
+remain constructed once at process startup from the env var. Hot-swapping
+a running adapter's credential when a platform secret changes is a real
+architectural change (the adapter would need to re-resolve its credential
+per call, or the process would need a live-reload path) that risks
+destabilizing the AI Gateway if rushed; shipping the storage primitive
+now and wiring the adapters to it is a dedicated follow-up, not silently
+worked around or left unresolved without a plan.
 
 ## What's deliberately not built yet
 
@@ -137,7 +144,9 @@ around silently.
   see the Usage tracking section above)
 - Auto-discovery of models an Ollama instance actually has pulled, or
   models an Anthropic/OpenAI API key has access to
-- A "platform secrets" mechanism for cloud provider credentials, resolving
-  the org-scoped-secrets-vs-platform-wide-provider mismatch noted above
+- Wiring the Anthropic/OpenAI adapters to actually resolve their API key
+  from the platform-secrets primitive (see "Credential handling" above)
+  instead of an environment variable at startup — the storage primitive
+  itself now exists and is tested; the adapters don't consume it yet
 
 These are prioritized in `docs/ROADMAP.md`.

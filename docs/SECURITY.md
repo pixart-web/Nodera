@@ -269,12 +269,85 @@ start or fabricating success (rule 36).
   than returning garbled plaintext — verified by
   `TestSecretsWrongKeyFailsToDecrypt`.
 
-AI provider credentials, when a real provider adapter is added, will be
-resolved through this module by reference — never stored inline in
-`ai_providers.config` (that column is documented as non-secret config only —
-see migration `0006_ai.sql`). A proper external KMS/vault integration
-remains future work; this is deliberately a phase-1-appropriate,
-self-contained implementation.
+A proper external KMS/vault integration remains future work; this is
+deliberately a phase-1-appropriate, self-contained implementation.
+
+## Key rotation (documented, not yet automated)
+
+There is no automated key-rotation mechanism for
+`NODERA_SECRETS_ENCRYPTION_KEY` in this phase — rotating it safely today
+is a manual, deliberate operation:
+
+1. Reveal every secret (org- and platform-scoped) under the *current*
+   key via `Service.Reveal`/`RevealPlatform` (Go-only, in-process — see
+   above).
+2. Re-encrypt and re-`Set`/`SetPlatform` each one under the *new* key.
+3. Only then rotate `NODERA_SECRETS_ENCRYPTION_KEY` and restart — every
+   stored ciphertext must already be under the new key before the old
+   one is discarded, since GCM authenticates against the exact key it
+   was sealed with (`TestSecretsWrongKeyFailsToDecrypt`/
+   `TestPlatformSecrets_WrongKeyFailsToDecrypt` prove a wrong key fails
+   closed rather than returning garbled plaintext — the same property
+   that makes an un-migrated rotation loud and obvious, not a silent
+   data-loss bug).
+
+A future automated rotation would most naturally be a versioned-key
+scheme (store a key ID alongside each ciphertext, support decrypting
+under any still-valid key while only ever encrypting under the current
+one) rather than the single-key model above — not implemented here to
+avoid expanding this pass's scope beyond what the secrets model
+actually needed.
+
+## Platform secrets — IMPLEMENTED
+
+Organization secrets (above) are scoped to one organization
+(`secrets.organization_id`). Platform-wide credentials — a future cloud
+AI provider API key, an infrastructure provider credential — are not
+owned by any one organization, so `internal/secrets.Service` gained a
+parallel set of `Platform*` methods (`SetPlatform`/`ListPlatform`/
+`UpdateDescriptionPlatform`/`DeletePlatform`/`RevealPlatform`) over a
+separate `platform_secrets` table (migration `0020`, no
+`organization_id` column at all) rather than trying to force a platform
+secret into the org-scoped table with a null/fake organization.
+
+- **Same encryption, same cipher instance**: `Platform*` methods reuse
+  the exact same `cipher.AEAD` (`Service.gcm`) the org-scoped methods
+  use — one `NODERA_SECRETS_ENCRYPTION_KEY`, one cipher, two tables.
+- **Authorization**: gated by `internal/platformauth`
+  (`platform.secrets.manage` for `Set`/`UpdateDescription`/`Delete`/
+  `Reveal`, `platform.secrets.read` for `List` — the same manage/read
+  split `secrets.manage`/`secrets.read` already draw for organization
+  secrets), never `internal/rbac` — an organization admin holding
+  `secrets.manage` in their own organization grants nothing here, the
+  same authorization-mismatch fix `internal/platformauth` already
+  applied to the AI provider/model registry.
+- **No reveal-all endpoint, no plaintext over HTTP**: `RevealPlatform`,
+  like `Reveal`, is intentionally never wired to any HTTP handler — only
+  `List`/`Set`/`UpdateDescription`/`Delete` are (`GET`/`PUT`/`PATCH`/
+  `DELETE /api/v1/platform/secrets...`), and none of them ever return a
+  plaintext value.
+- **Deliberate deferral**: this pass ships the platform-secret
+  abstraction/schema/service and its full CRUD + `Reveal`, real and
+  tested, but does **not** yet migrate the AI provider adapters
+  (`internal/ai/providers/anthropic`, `openai`) to resolve their API key
+  from a platform secret — they still read
+  `NODERA_ANTHROPIC_API_KEY`/`NODERA_OPENAI_API_KEY` from the
+  environment at startup (`cmd/server/main.go`), unchanged. Hot-swapping
+  a running adapter's credential when a platform secret changes later is
+  a real architectural change (adapters are constructed once at process
+  start, not re-resolved per call) that risks destabilizing the AI
+  Gateway if rushed into this same pass; shipping the safe, tested
+  storage primitive now and wiring adapters to it as a dedicated
+  follow-up is the documented, deliberate choice here (rule 36: this is
+  a real, working primitive — not fabricated integration with the
+  adapters it doesn't have yet).
+- Tested by `internal/platform_secrets_test.go`: the full
+  set/list/reveal/update-description/delete lifecycle; a caller without
+  a `platform.secrets.*` grant (even a full organization owner) is
+  forbidden from every method; a secret encrypted under one
+  `Service` instance's key fails to decrypt under a different instance's
+  key (GCM authenticated encryption, same property org secrets already
+  have).
 
 ## Input validation
 

@@ -26,7 +26,7 @@ func TestSecretsSetListDeleteAndReveal(t *testing.T) {
 	h := newHarness(pool)
 	ac, _ := h.newOwnerContext(t, ctx, "secrets-owner@nodera.dev")
 
-	secretsSvc, err := secrets.New(pool, h.audit, testEncryptionKey(t))
+	secretsSvc, err := secrets.New(pool, h.audit, h.platform, testEncryptionKey(t))
 	if err != nil {
 		t.Fatalf("secrets.New: %v", err)
 	}
@@ -84,7 +84,7 @@ func TestSecretsUpdateDescriptionLeavesValueUntouched(t *testing.T) {
 	h := newHarness(pool)
 	ac, _ := h.newOwnerContext(t, ctx, "secrets-update-owner@nodera.dev")
 
-	secretsSvc, err := secrets.New(pool, h.audit, testEncryptionKey(t))
+	secretsSvc, err := secrets.New(pool, h.audit, h.platform, testEncryptionKey(t))
 	if err != nil {
 		t.Fatalf("secrets.New: %v", err)
 	}
@@ -122,7 +122,7 @@ func TestSecretsUpdateDescriptionRequiresManagePermission(t *testing.T) {
 	h := newHarness(pool)
 	ac, _ := h.newOwnerContext(t, ctx, "secrets-update-perm-owner@nodera.dev")
 
-	secretsSvc, err := secrets.New(pool, h.audit, testEncryptionKey(t))
+	secretsSvc, err := secrets.New(pool, h.audit, h.platform, testEncryptionKey(t))
 	if err != nil {
 		t.Fatalf("secrets.New: %v", err)
 	}
@@ -150,7 +150,7 @@ func TestSecretsAreTenantIsolated(t *testing.T) {
 	ownerB, _ := h.newOwnerContext(t, ctx, "secrets-b@nodera.dev")
 
 	key := testEncryptionKey(t)
-	secretsSvc, err := secrets.New(pool, h.audit, key)
+	secretsSvc, err := secrets.New(pool, h.audit, h.platform, key)
 	if err != nil {
 		t.Fatalf("secrets.New: %v", err)
 	}
@@ -181,7 +181,7 @@ func TestSecretsWrongKeyFailsToDecrypt(t *testing.T) {
 	h := newHarness(pool)
 	ac, _ := h.newOwnerContext(t, ctx, "secrets-wrongkey@nodera.dev")
 
-	writer, err := secrets.New(pool, h.audit, testEncryptionKey(t))
+	writer, err := secrets.New(pool, h.audit, h.platform, testEncryptionKey(t))
 	if err != nil {
 		t.Fatalf("secrets.New (writer): %v", err)
 	}
@@ -189,7 +189,7 @@ func TestSecretsWrongKeyFailsToDecrypt(t *testing.T) {
 		t.Fatalf("Set: %v", err)
 	}
 
-	reader, err := secrets.New(pool, h.audit, testEncryptionKey(t)) // different random key
+	reader, err := secrets.New(pool, h.audit, h.platform, testEncryptionKey(t)) // different random key
 	if err != nil {
 		t.Fatalf("secrets.New (reader): %v", err)
 	}

@@ -99,6 +99,10 @@ func newRouter(d apiDeps) http.Handler {
 			r.Get("/platform/my-permissions", d.handlePlatformListMine)
 			r.Get("/platform/admins", d.handlePlatformListGrants)
 			r.Get("/platform/audit", d.handlePlatformListAudit)
+			r.Get("/platform/secrets", d.handlePlatformListSecrets)
+			r.Put("/platform/secrets/{key}", d.handlePlatformSetSecret)
+			r.Patch("/platform/secrets/{key}/description", d.handlePlatformUpdateSecretDescription)
+			r.Delete("/platform/secrets/{key}", d.handlePlatformDeleteSecret)
 			r.Post("/platform/admins/{userID}/permissions/{key}", d.handlePlatformGrant)
 			r.Delete("/platform/admins/{userID}/permissions/{key}", d.handlePlatformRevoke)
 
@@ -1361,6 +1365,69 @@ func (d apiDeps) handleDeleteSecret(w http.ResponseWriter, r *http.Request) {
 	}
 	key := chi.URLParam(r, "key")
 	if err := d.secrets.Delete(r.Context(), mustAuthContext(r), key); err != nil {
+		httpserver.WriteError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (d apiDeps) handlePlatformListSecrets(w http.ResponseWriter, r *http.Request) {
+	if !d.secretsConfigured(w, r) {
+		return
+	}
+	list, err := d.secrets.ListPlatform(r.Context(), platformAuthContext(r))
+	if err != nil {
+		httpserver.WriteError(w, r, err)
+		return
+	}
+	httpserver.WriteJSON(w, http.StatusOK, list)
+}
+
+func (d apiDeps) handlePlatformSetSecret(w http.ResponseWriter, r *http.Request) {
+	if !d.secretsConfigured(w, r) {
+		return
+	}
+	var body struct {
+		Value       string `json:"value"`
+		Description string `json:"description"`
+	}
+	if !decodeJSON(w, r, &body) {
+		return
+	}
+	key := chi.URLParam(r, "key")
+	m, err := d.secrets.SetPlatform(r.Context(), platformAuthContext(r), key, body.Value, body.Description)
+	if err != nil {
+		httpserver.WriteError(w, r, err)
+		return
+	}
+	httpserver.WriteJSON(w, http.StatusOK, m)
+}
+
+func (d apiDeps) handlePlatformUpdateSecretDescription(w http.ResponseWriter, r *http.Request) {
+	if !d.secretsConfigured(w, r) {
+		return
+	}
+	var body struct {
+		Description string `json:"description"`
+	}
+	if !decodeJSON(w, r, &body) {
+		return
+	}
+	key := chi.URLParam(r, "key")
+	m, err := d.secrets.UpdateDescriptionPlatform(r.Context(), platformAuthContext(r), key, body.Description)
+	if err != nil {
+		httpserver.WriteError(w, r, err)
+		return
+	}
+	httpserver.WriteJSON(w, http.StatusOK, m)
+}
+
+func (d apiDeps) handlePlatformDeleteSecret(w http.ResponseWriter, r *http.Request) {
+	if !d.secretsConfigured(w, r) {
+		return
+	}
+	key := chi.URLParam(r, "key")
+	if err := d.secrets.DeletePlatform(r.Context(), platformAuthContext(r), key); err != nil {
 		httpserver.WriteError(w, r, err)
 		return
 	}

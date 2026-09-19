@@ -139,7 +139,7 @@ func run() error {
 	if cfg.Secrets.EncryptionKeyBase64 == "" {
 		log.Warn("secrets module disabled: NODERA_SECRETS_ENCRYPTION_KEY is not set")
 	} else {
-		secretsSvc, err = secrets.New(pool, auditSvc, cfg.Secrets.EncryptionKeyBase64)
+		secretsSvc, err = secrets.New(pool, auditSvc, platformSvc, cfg.Secrets.EncryptionKeyBase64)
 		if err != nil {
 			return err
 		}

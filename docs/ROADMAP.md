@@ -1988,6 +1988,75 @@ password, who revoked which session) simply weren't auditable anywhere.
       audit" section; `README.md` updated (both the audit log status row
       and the `-p 1` testing note).
 
+## Hardening pass (post-Phase-50): P1 — platform secrets
+
+The last item from the review's P1 list. Organization secrets
+(`internal/secrets`) already existed; platform-wide credentials (a
+future cloud AI provider key, an infrastructure credential) had nowhere
+appropriate to live — not an organization secret (no organization owns
+them), and inline env vars can't be managed, rotated, or audited through
+the API.
+
+- [x] Migration `0020`: `platform_secrets` — the org-scoped `secrets`
+      table's shape minus `organization_id`, plus two new platform
+      permissions (`platform.secrets.manage`, `platform.secrets.read`).
+- [x] `internal/secrets.Service` gained a parallel `Platform*` method set
+      (`SetPlatform`/`ListPlatform`/`UpdateDescriptionPlatform`/
+      `DeletePlatform`/`RevealPlatform`) reusing the exact same
+      `cipher.AEAD` the org-scoped methods use — one encryption key, one
+      cipher, two tables — gated by `internal/platformauth`, never
+      `internal/rbac`: an organization admin holding `secrets.manage` in
+      their own organization grants nothing here, the same
+      authorization-mismatch fix already applied to the AI registry.
+      `RevealPlatform`, like `Reveal`, is intentionally never wired to
+      any HTTP handler — no "reveal all secrets" endpoint, no plaintext
+      ever returned over HTTP.
+- [x] `GET`/`PUT`/`PATCH`/`DELETE /api/v1/platform/secrets...`, OpenAPI
+      updated (reusing the existing `SecretMeta` schema), frontend types
+      regenerated, `tsc`/`npm run build` clean.
+- [x] `internal/platform_secrets_test.go`: the full
+      set/list/reveal/update-description/delete lifecycle; a caller
+      without a `platform.secrets.*` grant (even a full organization
+      owner) forbidden from every method; a secret encrypted under one
+      key fails to decrypt under a different one (GCM authenticated
+      encryption — same property org secrets already prove).
+- [x] Key rotation, previously undocumented for either secrets scope, is
+      now documented (`docs/SECURITY.md` "Key rotation"): a manual
+      reveal-under-old-key → re-set-under-new-key → rotate-env-var
+      procedure, with the reasoning for why a versioned-key scheme (not
+      implemented) would be the natural next step for automating it.
+- [x] **Deliberate deferral, explicitly documented, not silently
+      dropped**: the Anthropic/OpenAI provider adapters are NOT migrated
+      to resolve their API key from a platform secret in this pass — they
+      still read `NODERA_ANTHROPIC_API_KEY`/`NODERA_OPENAI_API_KEY` from
+      the environment at startup, unchanged. Hot-swapping a running
+      adapter's credential when a platform secret changes is a real
+      architectural change (adapters are constructed once at process
+      start, not re-resolved per call) that risks destabilizing the AI
+      Gateway if rushed into the same pass that built the storage
+      primitive; wiring adapters to it is a dedicated follow-up (tracked
+      in `docs/AI_ARCHITECTURE.md`'s "What's deliberately not built
+      yet"). This closes the "platform secrets" item from this
+      hardening pass's P1 list at the storage-primitive level, which is
+      what was actually asked for — full adapter migration was always
+      the larger, separate follow-up.
+- [x] Docs: `docs/SECURITY.md` gained "Key rotation" and "Platform
+      secrets" sections; `docs/AI_ARCHITECTURE.md`'s "Credential handling
+      for cloud providers" and "What's deliberately not built yet"
+      updated to reflect the new (partial) resolution; `README.md`
+      updated.
+- [x] **This closes every P0 and P1 item from the master hardening
+      review's priority list** (approval concurrency/state
+      machine/requester-approver identity; platform authorization;
+      browser cookie auth + CSRF; SSRF/outbound policy; platform/identity
+      audit; platform secrets). P2 items (HTTP hardening, rate-limit
+      review, migration strategy, dependency policy, OpenAPI contract
+      hardening, AI privacy verification, jobs concurrency verification,
+      multi-tenancy audit, configuration/deployment hardening) remain
+      open — see the final report accompanying this pass's last commit
+      for the exact security-invariant status and what's genuinely
+      deferred versus done.
+
 ## Next up
 
 1. **Concrete job types**: the worker dispatcher is real but nothing
