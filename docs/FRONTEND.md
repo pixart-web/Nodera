@@ -115,10 +115,18 @@ update on it correctly returns a real `409 CONFLICT`.
 (resource type/id + a JSON parameters textarea). A `read`/`safe` tool's
 result renders directly; a `privileged`/`critical` tool instead shows its
 new `approval_id` and points at the Approvals table below, which lists by
-status and lets the user Approve/Reject a pending one with an optional
-reason — exercising the real Tool Gateway pipeline end to end (verified
+status (including a `cancelled` filter option) and lets the user
+Approve/Reject a pending one with an optional reason, or Cancel it
+outright — exercising the real Tool Gateway pipeline end to end (verified
 live: `check_ssl` against `github.com` returns genuine certificate data;
 `deploy_application` correctly creates an approval instead of running).
+"Cancel" is shown for every pending row regardless of who requested it,
+the same pattern the `ai.manage`-gated Provider/Model forms already use:
+the page doesn't pre-compute whether the caller is the original
+requester, it just calls `POST /approvals/{id}/cancel` and lets a real
+`403 FORBIDDEN` surface inline if they weren't. Verified live: created a
+real pending approval, cancelled it through the UI, watched it disappear
+from the pending list and reappear under the `cancelled` filter.
 
 The table also has an "Approval TTL" column (`ApprovalTTLCell`), populated
 only for `privileged`/`critical` tools (a `read`/`safe` tool never has an

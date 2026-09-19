@@ -271,6 +271,84 @@ func TestTools_RejectingApprovalNeverExecutes(t *testing.T) {
 	}
 }
 
+// CancelApproval lets the requester withdraw their own pending approval —
+// the tool never runs, and the row lands in a real terminal 'cancelled'
+// state, not silently deleted.
+func TestTools_CancelApprovalWithdrawsOwnPendingRequest(t *testing.T) {
+	pool := testhelpers.RequirePool(t)
+	ctx := context.Background()
+	h := newHarness(pool)
+	ac, _ := h.newOwnerContext(t, ctx, "cancel-owner@nodera.dev")
+
+	ran := false
+	toolsSvc := tools.New(pool, h.audit)
+	toolsSvc.RegisterHandler("restart_container", func(ctx context.Context, ac authctx.AuthContext, resourceType, resourceID string, params map[string]any) (any, error) {
+		ran = true
+		return nil, nil
+	})
+
+	result, err := toolsSvc.Execute(ctx, ac, "restart_container", tools.ExecuteInput{ResourceType: "container", ResourceID: "x"})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	cancelled, err := toolsSvc.CancelApproval(ctx, ac, *result.ApprovalID)
+	if err != nil {
+		t.Fatalf("CancelApproval: %v", err)
+	}
+	if cancelled.Status != "cancelled" {
+		t.Fatalf("expected status 'cancelled', got %q", cancelled.Status)
+	}
+	if ran {
+		t.Fatal("a cancelled approval must never execute the tool's handler")
+	}
+
+	// A decision on an already-cancelled approval is refused — cancelling
+	// is itself a terminal outcome, not a no-op state.
+	if _, err := toolsSvc.DecideApproval(ctx, ac, *result.ApprovalID, true, "too late"); err == nil {
+		t.Fatal("expected deciding a cancelled approval to fail")
+	}
+
+	// A second cancel on the same approval is refused too.
+	if _, err := toolsSvc.CancelApproval(ctx, ac, *result.ApprovalID); err == nil {
+		t.Fatal("expected cancelling an already-cancelled approval to fail")
+	} else if ae, ok := err.(*apierr.Error); !ok || ae.Code != apierr.CodeConflict {
+		t.Fatalf("expected CONFLICT, got %v", err)
+	}
+}
+
+// Only the original requester can cancel — an approver (or anyone else)
+// must go through DecideApproval instead. Cancelling someone else's
+// request would let a caller silently withdraw a request they don't own.
+func TestTools_CancelApprovalRefusesNonRequester(t *testing.T) {
+	pool := testhelpers.RequirePool(t)
+	ctx := context.Background()
+	h := newHarness(pool)
+	ac, _ := h.newOwnerContext(t, ctx, "cancel-other-owner@nodera.dev")
+	otherAC := h.newMemberContext(t, ctx, ac.OrganizationID, "cancel-other-member@nodera.dev")
+
+	toolsSvc := tools.New(pool, h.audit)
+	result, err := toolsSvc.Execute(ctx, ac, "restart_container", tools.ExecuteInput{ResourceType: "container", ResourceID: "x"})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	if _, err := toolsSvc.CancelApproval(ctx, otherAC, *result.ApprovalID); err == nil {
+		t.Fatal("expected a caller who didn't request the approval to be forbidden from cancelling it")
+	} else if ae, ok := err.(*apierr.Error); !ok || ae.Code != apierr.CodeForbidden {
+		t.Fatalf("expected FORBIDDEN, got %v", err)
+	}
+
+	// Confirm it's still genuinely pending, unaffected by the refused attempt.
+	approvals, err := toolsSvc.ListApprovals(ctx, ac, "pending")
+	if err != nil {
+		t.Fatalf("ListApprovals: %v", err)
+	}
+	if len(approvals) != 1 || approvals[0].ID != *result.ApprovalID {
+		t.Fatalf("expected the approval to remain pending and untouched, got %+v", approvals)
+	}
+}
+
 // A pending approval past its expires_at is lazily marked 'expired' the
 // next time it's touched (ListApprovals or DecideApproval), and can no
 // longer be decided. See TestTools_RunExpirySweepExpiresAcrossOrganizations

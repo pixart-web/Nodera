@@ -1355,6 +1355,50 @@ scanning in CI (`govulncheck`, `npm audit`).
 - [x] Full backend test suite re-run clean (`go test ./... -race`)
 - [x] Docs (`API.md`, `FRONTEND.md`, `README.md`) updated
 
+**Phase 44** — this pass:
+- [x] `tools.CancelApproval` — a real lifecycle gap found in the same
+      domain audit as Phases 41-43: `ListApprovals`/`DecideApproval`
+      existed, but a requester who realizes a `deploy_application`/
+      `restart_container` call was a mistake had no way to withdraw it —
+      only wait for an approver to reject it, or for it to expire
+- [x] Self-service, the same "act on your own resource" pattern
+      `RevokeSession`/`RevokeAPIToken`/`LeaveOrganization` already draw —
+      needs no `approvals.decide` (that's only for deciding *someone
+      else's* request), only that the caller is the original human
+      requester (`requesting_user_id`); an agent- or service-account-
+      originated request has no self-cancel path here
+- [x] New migration `0016` adds a genuine terminal `cancelled` status to
+      `approvals` (alongside `pending`/`approved`/`rejected`/`expired`) —
+      distinct from `expired`/`rejected` so the trail records *why* a
+      request never got decided, not just that it didn't
+- [x] 2 new integration tests, passing under `-race` alongside every
+      existing tools/approvals test: cancelling withdraws a pending
+      request and the tool never runs (plus a decision or a second cancel
+      on the now-cancelled approval both correctly refused), and a caller
+      who isn't the original requester is forbidden — confirmed the
+      approval stays genuinely untouched afterward
+- [x] 1 new HTTP route (`POST /approvals/{id}/cancel`) and OpenAPI
+      additions (including the `Approval` schema's `status` enum gaining
+      `cancelled`), validated with `@redocly/cli lint`;
+      `lib/api-types.generated.ts` regenerated
+- [x] `web/app/(org)/tools/page.tsx`: a "Cancel" button next to
+      Approve/Reject on every pending row (shown unconditionally, not
+      pre-computed by requester — a real `403 FORBIDDEN` surfaces inline
+      if the caller wasn't the requester, the same pattern the page's
+      other forms already use), and a `cancelled` option added to the
+      status filter
+- [x] Verified live end to end: created a real pending approval through
+      the UI, cancelled it, watched it disappear from the pending list
+      and reappear under the new `cancelled` filter. Checked the browser
+      console on a completely fresh tab — zero errors (a stale-HMR error
+      surfaced on a reused dev-server tab after a `.next` cache clear;
+      ruled out as a real bug by confirming `npm run build` was already
+      clean and a genuinely fresh tab showed nothing)
+- [x] Full backend test suite re-run clean (`go test ./... -race`),
+      confirming migration `0016` applies cleanly against both the dev
+      database and a fresh test database
+- [x] Docs (`API.md`, `AGENTS.md`, `FRONTEND.md`, `README.md`) updated
+
 ## Next up
 
 1. **Concrete job types**: the worker dispatcher is real but nothing

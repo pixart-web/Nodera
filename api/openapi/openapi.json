@@ -3423,6 +3423,40 @@
           }
         }
       }
+    },
+    "/api/v1/approvals/{id}/cancel": {
+      "post": {
+        "tags": [
+          "approvals"
+        ],
+        "summary": "Withdraw the caller's own pending approval request \u2014 no approvals.decide required, only the original requester can cancel",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OrgHeader"
+          },
+          {
+            "$ref": "#/components/parameters/PathId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Approval"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Caller did not request this approval"
+          },
+          "409": {
+            "description": "Approval is no longer pending (already decided, cancelled, or expired)"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -4310,7 +4344,8 @@
               "pending",
               "approved",
               "rejected",
-              "expired"
+              "expired",
+              "cancelled"
             ]
           },
           "created_at": {

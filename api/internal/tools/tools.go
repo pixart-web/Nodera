@@ -455,6 +455,71 @@ func (r *Registry) ListApprovals(ctx context.Context, ac authctx.AuthContext, st
 	return out, rows.Err()
 }
 
+// CancelApproval lets the original requester withdraw their own pending
+// approval — the self-service counterpart to DecideApproval, which
+// requires approvals.decide and can act on anyone's request. A requester
+// who realizes a call was a mistake shouldn't have to wait for an
+// approver to reject it or for it to expire; this needs no permission
+// beyond being the original requester, the same "act on your own
+// resource" pattern RevokeSession/RevokeAPIToken/LeaveOrganization
+// already follow. Only reaches approvals requested by a human user
+// (requesting_user_id) — an agent- or service-account-originated request
+// has no self-service cancel path here, since ac.ActorID wouldn't match
+// either.
+func (r *Registry) CancelApproval(ctx context.Context, ac authctx.AuthContext, id uuid.UUID) (Approval, error) {
+	if ac.ActorType != authctx.ActorUser {
+		return Approval{}, apierr.Forbidden("only the requesting user can cancel an approval")
+	}
+	if err := r.expirePending(ctx, ac.OrganizationID); err != nil {
+		return Approval{}, err
+	}
+
+	var existingStatus string
+	var requestingUserID *uuid.UUID
+	err := r.pool.QueryRow(ctx, `
+		SELECT status, requesting_user_id FROM approvals WHERE id = $1 AND organization_id = $2
+	`, id, ac.OrganizationID).Scan(&existingStatus, &requestingUserID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Approval{}, apierr.NotFound("approval")
+	}
+	if err != nil {
+		return Approval{}, apierr.Wrap(apierr.CodeInternal, "failed to load approval", err)
+	}
+	if requestingUserID == nil || *requestingUserID != ac.ActorID {
+		return Approval{}, apierr.Forbidden("only the requesting user can cancel an approval")
+	}
+	if existingStatus != "pending" {
+		return Approval{}, apierr.Conflict("approval is no longer pending (status: " + existingStatus + ")")
+	}
+
+	var a Approval
+	err = r.pool.QueryRow(ctx, `
+		UPDATE approvals SET status = 'cancelled', decided_at = now()
+		WHERE id = $1 AND organization_id = $2 AND status = 'pending'
+		RETURNING id, requested_action, risk_level, COALESCE(resource_type, ''), COALESCE(resource_id, ''),
+		          parameters, status, created_at, expires_at, decided_at, COALESCE(decision_reason, ''),
+		          COALESCE(execution_result, 'null')
+	`, id, ac.OrganizationID).Scan(
+		&a.ID, &a.RequestedAction, &a.RiskLevel, &a.ResourceType, &a.ResourceID, &a.Parameters,
+		&a.Status, &a.CreatedAt, &a.ExpiresAt, &a.DecidedAt, &a.DecisionReason, &a.ExecutionResult,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Approval{}, apierr.Conflict("approval is no longer pending")
+	}
+	if err != nil {
+		return Approval{}, apierr.Wrap(apierr.CodeInternal, "failed to cancel approval", err)
+	}
+
+	if err := r.audit.Record(ctx, ac, audit.Entry{
+		Action: "approvals.approval.cancelled", ResourceType: "approval", ResourceID: a.ID.String(),
+		Success: true, ResultingState: a,
+	}); err != nil {
+		logger.FromContext(ctx).Error("failed to write audit entry", "error", err)
+	}
+
+	return a, nil
+}
+
 // DecideApproval records a human decision on a pending approval. If
 // approved, it then attempts execution immediately (using the parameters
 // captured when the approval was requested) and records the outcome —

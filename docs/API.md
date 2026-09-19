@@ -154,6 +154,7 @@ tracked in `docs/ROADMAP.md` if that stops being true.
 | DELETE | `/api/v1/tools/{key}/approval-ttl` | session or token + org | Clear the organization's override for a tool, reverting it to the 24h default (`tools.manage`) |
 | GET | `/api/v1/approvals` | session or token + org | List approvals, optional `?status=` filter (`approvals.decide`) |
 | POST | `/api/v1/approvals/{id}/decide` | session or token + org | Approve or reject a pending approval (`approvals.decide`) — approving attempts execution immediately |
+| POST | `/api/v1/approvals/{id}/cancel` | session or token + org | Withdraw the caller's own pending approval request — no `approvals.decide` required, only the original requester can cancel; `403 FORBIDDEN` otherwise |
 | GET | `/api/v1/audit` | session or token + org | Query the audit log, paginated, optional `?resource_type=`/`?action=` filters (`audit.read`) |
 | GET | `/api/v1/agents` | session or token + org | List agent definitions (`agents.execute`) |
 | POST | `/api/v1/agents` | session or token + org | Create an agent definition (`agents.manage`) — `permission_scope` must be a subset of the caller's own permissions |

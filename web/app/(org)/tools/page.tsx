@@ -216,6 +216,16 @@ export default function ToolsPage() {
     }
   }
 
+  async function cancel(id: string) {
+    setDecideError(null);
+    try {
+      await api.post(`/api/v1/approvals/${id}/cancel`);
+      approvals.reload();
+    } catch (err) {
+      setDecideError(err instanceof ApiError ? err.message : "Failed to cancel approval");
+    }
+  }
+
   return (
     <div>
       <PageHeader
@@ -297,6 +307,7 @@ export default function ToolsPage() {
           <option value="approved">approved</option>
           <option value="rejected">rejected</option>
           <option value="expired">expired</option>
+          <option value="cancelled">cancelled</option>
           <option value="">all</option>
         </select>
       </div>
@@ -346,6 +357,9 @@ export default function ToolsPage() {
                       </button>
                       <button className="text-xs text-danger hover:underline" onClick={() => decide(a.id, false)}>
                         Reject
+                      </button>
+                      <button className="text-xs text-base-400 hover:underline" onClick={() => cancel(a.id)}>
+                        Cancel
                       </button>
                     </td>
                   )}

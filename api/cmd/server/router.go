@@ -156,6 +156,7 @@ func newRouter(d apiDeps) http.Handler {
 				r.Delete("/tools/{key}/approval-ttl", d.handleClearApprovalTTL)
 				r.Get("/approvals", d.handleListApprovals)
 				r.Post("/approvals/{id}/decide", d.handleDecideApproval)
+				r.Post("/approvals/{id}/cancel", d.handleCancelApproval)
 
 				r.Get("/agents", d.handleListAgents)
 				r.Post("/agents", d.handleCreateAgent)
@@ -1309,6 +1310,20 @@ func (d apiDeps) handleDecideApproval(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a, err := d.tools.DecideApproval(r.Context(), mustAuthContext(r), id, body.Approve, body.Reason)
+	if err != nil {
+		httpserver.WriteError(w, r, err)
+		return
+	}
+	httpserver.WriteJSON(w, http.StatusOK, a)
+}
+
+func (d apiDeps) handleCancelApproval(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		httpserver.WriteError(w, r, apierr.Validation("invalid approval id"))
+		return
+	}
+	a, err := d.tools.CancelApproval(r.Context(), mustAuthContext(r), id)
 	if err != nil {
 		httpserver.WriteError(w, r, err)
 		return

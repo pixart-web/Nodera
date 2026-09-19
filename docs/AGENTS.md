@@ -35,6 +35,19 @@ yet — those are different facts, both recorded truthfully, rule 36).
 Rejecting never executes anything, proven by
 `TestTools_RejectingApprovalNeverExecutes`.
 
+The requester themselves can also withdraw their own pending approval —
+`POST /api/v1/approvals/{id}/cancel` (`Registry.CancelApproval`) —
+without holding `approvals.decide`; that permission is only needed to
+decide *someone else's* request, the same "act on your own resource"
+distinction `RevokeSession`/`RevokeAPIToken`/`LeaveOrganization` already
+draw. Only reaches approvals a human user requested
+(`requesting_user_id`); an agent- or service-account-originated request
+has no self-cancel path. Lands in a real terminal `cancelled` status
+(migration `0016`), distinct from `expired`/`rejected` — the trail
+records *why* it never got decided. Proven by
+`TestTools_CancelApprovalWithdrawsOwnPendingRequest` and
+`TestTools_CancelApprovalRefusesNonRequester`.
+
 A pending approval also expires — `defaultApprovalTTL` (24h) unless the
 organization has configured its own TTL for that specific tool via
 `organization_tool_settings` (migration `0013`; `tools.manage` permission,
