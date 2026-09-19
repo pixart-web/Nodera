@@ -570,7 +570,17 @@ export default function AIPage() {
   const providers = useApi(() => api.get<AIProvider[]>("/api/v1/ai/providers"), []);
   const models = useApi(() => api.get<AIModel[]>("/api/v1/ai/models"), []);
   const [usageLimit, setUsageLimit] = useState(20);
-  const usage = useApi(() => api.get<Page<AIUsageRecord>>(`/api/v1/ai/usage?limit=${usageLimit}`), [usageLimit]);
+  const [usageProfileFilter, setUsageProfileFilter] = useState("");
+  const [usageProviderFilter, setUsageProviderFilter] = useState("");
+  const usage = useApi(
+    () =>
+      api.get<Page<AIUsageRecord>>(
+        `/api/v1/ai/usage?limit=${usageLimit}${
+          usageProfileFilter ? `&profile_key=${encodeURIComponent(usageProfileFilter)}` : ""
+        }${usageProviderFilter ? `&provider_key=${encodeURIComponent(usageProviderFilter)}` : ""}`,
+      ),
+    [usageLimit, usageProfileFilter, usageProviderFilter],
+  );
 
   const [showProfileForm, setShowProfileForm] = useState(false);
   const [showProviderForm, setShowProviderForm] = useState(false);
@@ -641,6 +651,38 @@ export default function AIPage() {
 
       <div className="mb-8">
         <h2 className="mb-3 text-sm font-medium text-base-100">Usage</h2>
+        <div className="mb-3 flex items-center gap-3">
+          <select
+            className="input"
+            value={usageProfileFilter}
+            onChange={(e) => {
+              setUsageProfileFilter(e.target.value);
+              setUsageLimit(20);
+            }}
+          >
+            <option value="">All profiles</option>
+            {(profiles.data ?? []).map((p) => (
+              <option key={p.key} value={p.key}>
+                {p.key}
+              </option>
+            ))}
+          </select>
+          <select
+            className="input"
+            value={usageProviderFilter}
+            onChange={(e) => {
+              setUsageProviderFilter(e.target.value);
+              setUsageLimit(20);
+            }}
+          >
+            <option value="">All providers</option>
+            {(providers.data ?? []).map((p) => (
+              <option key={p.key} value={p.key}>
+                {p.key}
+              </option>
+            ))}
+          </select>
+        </div>
         {usage.error && <ErrorBanner message={usage.error} />}
         <div className="card">
           {usage.loading ? (

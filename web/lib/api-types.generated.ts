@@ -3617,6 +3617,10 @@ export interface paths {
                 query?: {
                     limit?: components["parameters"]["Limit"];
                     offset?: components["parameters"]["Offset"];
+                    /** @description Exact-match filter on profile_key. */
+                    profile_key?: string;
+                    /** @description Exact-match filter on provider_key. */
+                    provider_key?: string;
                 };
                 header?: {
                     /** @description Required for a session token (which org to act within). Optional for an API token, which already embeds one — if present it must match. */

@@ -3452,6 +3452,22 @@
           },
           {
             "$ref": "#/components/parameters/Offset"
+          },
+          {
+            "name": "profile_key",
+            "in": "query",
+            "description": "Exact-match filter on profile_key.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "provider_key",
+            "in": "query",
+            "description": "Exact-match filter on provider_key.",
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {

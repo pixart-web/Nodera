@@ -133,7 +133,7 @@ tracked in `docs/ROADMAP.md` if that stops being true.
 | GET | `/api/v1/jobs/{id}` | session or token + org | Get a job |
 | POST | `/api/v1/jobs/{id}/cancel` | session or token + org | Cancel a queued job |
 | POST | `/api/v1/jobs/{id}/retry` | session or token + org | Re-queue a failed job for another full attempt cycle (`jobs.manage`) — attempts/progress/error reset, same job ID |
-| GET | `/api/v1/ai/usage` | session or token + org | List the calling organization's own AI usage history, most recent first, paginated (`ai.use`) — operational metrics only, never prompt/response content |
+| GET | `/api/v1/ai/usage` | session or token + org | List the calling organization's own AI usage history, most recent first, paginated (`ai.use`) — operational metrics only, never prompt/response content; optional `?profile_key=`/`?provider_key=` exact-match filters |
 | GET | `/api/v1/ai/profiles` | session or token + org | List AI profiles (`ai.use`) |
 | POST | `/api/v1/ai/profiles` | session or token + org | Create an AI profile (`ai.manage`) |
 | PUT | `/api/v1/ai/profiles/{id}` | session or token + org | Update an AI profile (`ai.manage`) — partial update, `key` is immutable; only reaches org-owned profiles (`404` for a system-defined one) |

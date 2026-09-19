@@ -1030,7 +1030,12 @@ func (d apiDeps) handleRetryJob(w http.ResponseWriter, r *http.Request) {
 
 func (d apiDeps) handleListAIUsage(w http.ResponseWriter, r *http.Request) {
 	p := httpserver.ParsePagination(r)
-	records, err := d.ai.ListUsage(r.Context(), mustAuthContext(r), p.Limit+1, p.Offset)
+	records, err := d.ai.ListUsage(r.Context(), mustAuthContext(r), ai.UsageFilter{
+		ProfileKey:  r.URL.Query().Get("profile_key"),
+		ProviderKey: r.URL.Query().Get("provider_key"),
+		Limit:       p.Limit + 1,
+		Offset:      p.Offset,
+	})
 	if err != nil {
 		httpserver.WriteError(w, r, err)
 		return

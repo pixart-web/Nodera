@@ -1549,6 +1549,45 @@ scanning in CI (`govulncheck`, `npm audit`).
 - [x] Full backend test suite re-run clean (`go test ./... -race`)
 - [x] Docs (`API.md`, `FRONTEND.md`, `README.md`) updated
 
+**Phase 49** — this pass:
+- [x] `ai.ListUsage` profile/provider filtering — the last finding from
+      the domain audit that produced Phases 41-48: `ListUsage` (Phase 40)
+      only took `limit`/`offset`, so an org running several AI
+      profiles/providers couldn't isolate one profile's or provider's
+      usage/cost without paging through every other one's rows first —
+      real cost-blindness for exactly the multi-provider setup earlier
+      phases built
+- [x] New `UsageFilter` struct (`ProfileKey`/`ProviderKey`, both optional
+      exact-match, plus the existing `Limit`/`Offset`) replaces
+      `ListUsage`'s three positional params — a small, contained
+      signature change; the one router call site and all existing test
+      call sites updated
+- [x] 1 new integration test, passing under `-race` alongside every
+      existing usage test: two profiles sharing one provider plus a
+      second profile on a genuinely different provider (a mock Ollama
+      server, the same `httptest` pattern `TestAIChatRoutesToOllamaProvider`
+      already established) prove `ProfileKey` and `ProviderKey` each
+      narrow correctly, and no filter still returns everything
+- [x] `GET /api/v1/ai/usage` gained `?profile_key=`/`?provider_key=` query
+      params, OpenAPI addition validated with `@redocly/cli lint`;
+      `lib/api-types.generated.ts` regenerated
+- [x] `web/app/(org)/ai/page.tsx`: two `<select>` filters above the Usage
+      table, populated from the already-loaded Profiles/Providers lists
+      rather than a separate fetch; changing either resets pagination
+      back to 20 rows
+- [x] Verified live end to end: created two real profiles sharing the
+      `local-echo` provider, sent a chat through each, and confirmed
+      filtering by profile in the real UI narrowed the table to exactly
+      one profile's row while the other's same-provider row stayed
+      correctly hidden. Checked the browser console on a fresh tab — zero
+      errors
+- [x] Full backend test suite re-run clean (`go test ./... -race`)
+- [x] Docs (`API.md`, `FRONTEND.md`, `README.md`) updated
+- [x] This closes out the 9-phase domain-audit sweep begun in Phase 41
+      (identity audit trail) — Phases 41-49 collectively closed every
+      genuine CRUD/lifecycle/audit/rate-limit gap that audit surfaced
+      across identity, jobs, tools/approvals, and the AI gateway
+
 ## Next up
 
 1. **Concrete job types**: the worker dispatcher is real but nothing

@@ -199,11 +199,19 @@ profile, provider/model, tokens, latency, status, timestamp — the first
 place any of that data was ever visible outside a direct database query.
 `ChatPanel` takes an `onSent` callback the page wires to `usage.reload()`,
 so sending a message refreshes the Usage table in the same render as the
-response, rather than requiring a manual page reload to see it. Verified
-live: sent two real chat messages through a test profile and watched both
-show up in Usage immediately, most recent first, with the real token
-counts and `local` classification; confirmed via a direct API call that
-the paginated envelope (`items`/`limit`/`offset`/`has_more`) is correct.
+response, rather than requiring a manual page reload to see it. Two
+`<select>` filters ("All profiles"/"All providers", populated from the
+already-loaded Profiles/Providers lists) sit above the table
+(`?profile_key=`/`?provider_key=`); changing either resets pagination
+back to 20 rows, same convention the Audit page's time-range filters use.
+Verified live: sent two real chat messages through a test profile and
+watched both show up in Usage immediately, most recent first, with the
+real token counts and `local` classification; confirmed via a direct API
+call that the paginated envelope (`items`/`limit`/`offset`/`has_more`) is
+correct; created two profiles sharing the same provider, sent one chat
+through each, and confirmed filtering by profile narrowed the table to
+exactly that profile's row while the other profile's same-provider row
+correctly stayed hidden.
 A Profiles section (list + create + edit +
 delete, with `privacy_level` as a `<select>` and `preferred_model_ids`/
 `fallback_model_ids`/`required_capabilities` as comma-separated inputs

@@ -525,7 +525,19 @@ type UsageRecord struct {
 // recent first. Tenant-scoped like every other list method (ADR-004) —
 // unlike the provider/model registry above, ai_usage_records does carry
 // organization_id, so this needs no platform-wide-vs-tenant-scoped caveat.
-func (s *Service) ListUsage(ctx context.Context, ac authctx.AuthContext, limit, offset int) ([]UsageRecord, error) {
+// UsageFilter narrows a ListUsage call. ProfileKey/ProviderKey are
+// optional, exact-match — an org running several AI profiles/providers
+// (see docs/AI_ARCHITECTURE.md) couldn't otherwise isolate one profile's
+// or provider's usage/cost without paging through every other one's rows
+// first.
+type UsageFilter struct {
+	ProfileKey  string
+	ProviderKey string
+	Limit       int
+	Offset      int
+}
+
+func (s *Service) ListUsage(ctx context.Context, ac authctx.AuthContext, f UsageFilter) ([]UsageRecord, error) {
 	if err := rbac.Require(ac, permUse); err != nil {
 		return nil, err
 	}
@@ -535,9 +547,11 @@ func (s *Service) ListUsage(ctx context.Context, ac authctx.AuthContext, limit, 
 		       COALESCE(correlation_id, ''), created_at
 		FROM ai_usage_records
 		WHERE organization_id = $1
+		  AND ($4 = '' OR profile_key = $4)
+		  AND ($5 = '' OR provider_key = $5)
 		ORDER BY created_at DESC
 		LIMIT $2 OFFSET $3
-	`, ac.OrganizationID, limit, offset)
+	`, ac.OrganizationID, f.Limit, f.Offset, f.ProfileKey, f.ProviderKey)
 	if err != nil {
 		return nil, apierr.Wrap(apierr.CodeInternal, "failed to list AI usage records", err)
 	}
