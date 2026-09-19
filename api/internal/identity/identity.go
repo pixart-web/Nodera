@@ -120,6 +120,102 @@ func (s *Service) SignUp(ctx context.Context, email, password, displayName strin
 	return u, nil
 }
 
+// UpdateProfile changes a user's own display name. Takes a raw userID
+// rather than an authctx.AuthContext — like CreateOrganization, this is a
+// pre-organization identity operation (a session token alone resolves a
+// user ID; the organization and permissions aren't known yet at this
+// point in the request pipeline, see cmd/server/middleware.go
+// requireSession vs. requireOrganization). Email is deliberately not
+// editable here — changing it would need re-verification (no email
+// delivery exists in this phase, docs/ROADMAP.md) and touches login
+// identity, a bigger change than this method's scope.
+func (s *Service) UpdateProfile(ctx context.Context, userID uuid.UUID, displayName string) (User, error) {
+	if displayName == "" {
+		return User{}, apierr.Validation("display name is required")
+	}
+
+	var u User
+	err := s.pool.QueryRow(ctx, `
+		UPDATE users SET display_name = $2, updated_at = now() WHERE id = $1
+		RETURNING id, email, display_name, status, created_at
+	`, userID, displayName).Scan(&u.ID, &u.Email, &u.DisplayName, &u.Status, &u.CreatedAt)
+	if err != nil {
+		return User{}, apierr.Wrap(apierr.CodeInternal, "failed to update profile", err)
+	}
+	return u, nil
+}
+
+// ChangePassword verifies the caller's current password, then rotates it
+// and revokes every other active session for the account — the caller's
+// own current session (identified by currentSessionToken, empty if the
+// caller authenticated with an API token rather than a session) is
+// deliberately left untouched, so changing your password doesn't also log
+// you out. Any other session (on another device, or one an attacker
+// established with a since-compromised password) is revoked immediately.
+// Same pre-organization signature rationale as UpdateProfile.
+func (s *Service) ChangePassword(ctx context.Context, userID uuid.UUID, currentSessionToken, currentPassword, newPassword string) error {
+	if err := validatePassword(newPassword); err != nil {
+		return err
+	}
+
+	var hash string
+	err := s.pool.QueryRow(ctx, `
+		SELECT password_hash FROM user_password_credentials WHERE user_id = $1
+	`, userID).Scan(&hash)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return apierr.NotFound("password credential")
+	}
+	if err != nil {
+		return apierr.Wrap(apierr.CodeInternal, "failed to load password credential", err)
+	}
+
+	ok, err := verifyPassword(currentPassword, hash)
+	if err != nil {
+		return apierr.Wrap(apierr.CodeInternal, "failed to verify current password", err)
+	}
+	if !ok {
+		return apierr.Unauthenticated("current password is incorrect")
+	}
+
+	newHash, err := hashPassword(newPassword)
+	if err != nil {
+		return apierr.Wrap(apierr.CodeInternal, "failed to hash new password", err)
+	}
+
+	// Resolve the current session's ID (if any) so it can be excluded from
+	// the mass-revoke below — an invalid/expired/absent token just means
+	// there's nothing to exclude, not an error worth failing the whole
+	// password change over.
+	var currentSessionID uuid.UUID
+	if currentSessionToken != "" {
+		if _, sid, err := s.sessionUser(ctx, currentSessionToken); err == nil {
+			currentSessionID = sid
+		}
+	}
+
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return apierr.Wrap(apierr.CodeInternal, "failed to begin transaction", err)
+	}
+	defer tx.Rollback(ctx)
+
+	if _, err := tx.Exec(ctx, `
+		UPDATE user_password_credentials SET password_hash = $2, updated_at = now() WHERE user_id = $1
+	`, userID, newHash); err != nil {
+		return apierr.Wrap(apierr.CodeInternal, "failed to store new password", err)
+	}
+	if _, err := tx.Exec(ctx, `
+		UPDATE sessions SET revoked_at = now() WHERE user_id = $1 AND id != $2 AND revoked_at IS NULL
+	`, userID, currentSessionID); err != nil {
+		return apierr.Wrap(apierr.CodeInternal, "failed to revoke other sessions", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return apierr.Wrap(apierr.CodeInternal, "failed to commit transaction", err)
+	}
+	return nil
+}
+
 // Login verifies credentials and creates a new session. It returns the raw
 // session token (given to the client once, never stored) and the user.
 func (s *Service) Login(ctx context.Context, email, password, ipAddress, userAgent string) (token string, u User, err error) {

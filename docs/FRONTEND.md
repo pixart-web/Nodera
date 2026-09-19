@@ -35,6 +35,8 @@ web/
                                   org-wide token listing (organization.manage only)
       settings/page.tsx           roles catalog + member role assignment
                                   (organization.manage only)
+      account/page.tsx            own profile (display name) + change password —
+                                  not organization-scoped
       audit/page.tsx            full audit log
   lib/
     api.ts                 fetch wrapper: bearer token + X-Nodera-Org headers, normalized ApiError
@@ -207,6 +209,30 @@ call). System roles show `system` instead of either control, same as
 before. Verified live: renamed a custom role and changed its description
 through the form, confirmed the table updated and the permission set
 (`audit.read`) was unaffected by a details-only edit.
+
+## Account page
+
+`account/page.tsx` is deliberately not under any `organization.manage`
+gate and not organization-scoped at all — it's the caller's own identity,
+not an organizational resource. Two forms: a Profile form (display name
+only; email is shown but disabled, with copy explaining it can't be
+changed here — `internal/identity.UpdateProfile` doesn't accept one,
+since changing it would need re-verification email delivery that doesn't
+exist in this phase) and a Change Password form (current + new password).
+On a successful profile save, the new display name is written back to
+`lib/session.ts`'s stored user (`setStoredUser`) so the sidebar footer and
+any other page reading it reflect the change without a full reload. The
+sidebar's own email/display-name footer is now a link to this page.
+
+Verified live: renamed the display name and confirmed it persisted across
+a reload (still pre-filled correctly); submitted the wrong current
+password and saw the real `current password is incorrect` error inline;
+changed the password with the correct one, saw the real success message
+("every other active session was signed out; this one was not"), and
+confirmed by navigating to another page that the current session was
+genuinely still valid (not just claimed to be) — proving the
+don't-log-yourself-out behavior actually works, not just that the API
+call returned 204.
 
 ## Real-time updates (polling)
 

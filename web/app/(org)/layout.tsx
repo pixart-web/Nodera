@@ -79,7 +79,9 @@ export default function OrgLayout({ children }: { children: React.ReactNode }) {
             Switch organization
           </button>
           <div className="flex items-center justify-between">
-            <span className="truncate text-xs text-base-400">{user?.email}</span>
+            <Link href="/account" className="truncate text-xs text-base-400 hover:text-base-200" title="Account settings">
+              {user?.email}
+            </Link>
             <button onClick={logout} className="text-xs text-base-400 hover:text-danger">
               Sign out
             </button>

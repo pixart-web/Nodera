@@ -74,6 +74,9 @@ func newRouter(d apiDeps) http.Handler {
 			r.Get("/organizations", d.handleListOrganizations)
 			r.Post("/organizations", d.handleCreateOrganization)
 
+			r.Put("/account/profile", d.handleUpdateProfile)
+			r.Post("/account/password", d.handleChangePassword)
+
 			r.Group(func(r chi.Router) {
 				r.Use(d.requireOrganization)
 
@@ -230,6 +233,39 @@ func (d apiDeps) handleLogin(w http.ResponseWriter, r *http.Request) {
 func (d apiDeps) handleLogout(w http.ResponseWriter, r *http.Request) {
 	token := bearerToken(r)
 	if err := d.identity.Logout(r.Context(), token); err != nil {
+		httpserver.WriteError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// --- account (self-service, pre-organization) ---
+
+func (d apiDeps) handleUpdateProfile(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		DisplayName string `json:"display_name"`
+	}
+	if !decodeJSON(w, r, &body) {
+		return
+	}
+	u, err := d.identity.UpdateProfile(r.Context(), userIDFromRequest(r), body.DisplayName)
+	if err != nil {
+		httpserver.WriteError(w, r, err)
+		return
+	}
+	httpserver.WriteJSON(w, http.StatusOK, u)
+}
+
+func (d apiDeps) handleChangePassword(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		CurrentPassword string `json:"current_password"`
+		NewPassword     string `json:"new_password"`
+	}
+	if !decodeJSON(w, r, &body) {
+		return
+	}
+	sessionToken, _ := r.Context().Value(ctxKeySessionToken{}).(string)
+	if err := d.identity.ChangePassword(r.Context(), userIDFromRequest(r), sessionToken, body.CurrentPassword, body.NewPassword); err != nil {
 		httpserver.WriteError(w, r, err)
 		return
 	}

@@ -618,6 +618,53 @@ scanning in CI (`govulncheck`, `npm audit`).
 - [x] Docs (`FRONTEND.md`, `README.md`) updated; removed the now-fulfilled
       "real-time updates" bullet from Next up
 
+**Phase 26** — this pass:
+- [x] Self-service account management, found by auditing `internal/identity`
+      for gaps rather than from a pre-listed Next-up item: there was no
+      way for a user to change their own password or display name after
+      signup at all. `UpdateProfile` (display name only — email isn't
+      editable here, since changing it would need re-verification email
+      delivery that doesn't exist in this phase) and `ChangePassword`
+      (current password required, rotates the hash, revokes every other
+      active session)
+- [x] Both take a raw `userID` rather than an `authctx.AuthContext` —
+      matching `CreateOrganization`'s existing pattern, since these are
+      pre-organization identity operations: a session token alone
+      resolves a user ID; the organization and permissions aren't known
+      yet at this point in the request pipeline
+      (`cmd/server/middleware.go`: `requireSession` vs.
+      `requireOrganization`)
+- [x] `ChangePassword` resolves the calling session's own ID (from the
+      raw token, empty for an API-token caller) so it can be excluded
+      from the mass session-revoke — changing your password doesn't log
+      you out of the session that made the request, only every other one
+- [x] 5 new integration tests, all passing under `-race`: profile update
+      changes the display name (email unaffected), an empty display name
+      is rejected, an incorrect current password is rejected, changing
+      the password revokes every other session but leaves the current
+      one valid, and the new password actually works for a future login
+      while the old one no longer does
+- [x] 2 new HTTP routes (`PUT /account/profile`, `POST
+      /account/password`, deliberately outside any organization-scoped
+      route group) and OpenAPI additions, validated with `@redocly/cli
+      lint`; `lib/api-types.generated.ts` regenerated
+- [x] `web/app/(org)/account/page.tsx`: a Profile form and a Change
+      Password form, linked from the sidebar footer (the user's own
+      email is now a link to this page). On a successful profile save,
+      the new display name is written back to `lib/session.ts`'s stored
+      user so the sidebar reflects it without a full reload
+- [x] Verified live end to end through the real UI: renamed the display
+      name and confirmed it persisted across a reload; submitted the
+      wrong current password and saw the real `current password is
+      incorrect` error; changed the password with the correct one, saw
+      the real success message, and confirmed by navigating to another
+      page that the current session was genuinely still valid (not just
+      claimed to be) — then reset the password back to the original test
+      value so later manual verification sessions keep working. Checked
+      the browser console on a fresh tab afterward — zero errors
+- [x] Full backend and frontend verification clean
+- [x] Docs (`API.md`, `FRONTEND.md`, `SECURITY.md`, `README.md`) updated
+
 ## Next up
 
 1. **Concrete job types**: the worker dispatcher is real but nothing

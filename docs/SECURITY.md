@@ -15,6 +15,13 @@ tests. Everything else is FOUNDATION ONLY or PLANNED — see `README.md`.
   for why this was chosen over JWTs.
 - Minimum password policy: 12+ characters, must mix letters with a digit or
   symbol (`internal/identity/validate.go`). No arbitrary composition rules.
+- Self-service password change (`POST /api/v1/account/password`,
+  `internal/identity.ChangePassword`) requires the current password and,
+  on success, revokes every other active session for the account — the
+  session that made the request is deliberately left alone, so the caller
+  isn't logged out by their own request, but every other session (another
+  device, or one an attacker holds with a since-compromised password) is
+  cut off immediately.
 
 ## Authorization — IMPLEMENTED
 

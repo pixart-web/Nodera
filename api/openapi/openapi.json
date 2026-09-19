@@ -2373,6 +2373,80 @@
           }
         }
       }
+    },
+    "/api/v1/account/profile": {
+      "put": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Update the calling user's own display name",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "display_name"
+                ],
+                "properties": {
+                  "display_name": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Profile updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/User"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/account/password": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Change the calling user's own password \u2014 revokes every other active session, leaving the current one untouched",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "current_password",
+                  "new_password"
+                ],
+                "properties": {
+                  "current_password": {
+                    "type": "string"
+                  },
+                  "new_password": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Password changed; other sessions revoked"
+          },
+          "401": {
+            "description": "current_password is incorrect"
+          }
+        }
+      }
     }
   },
   "components": {

@@ -82,6 +82,8 @@ tracked in `docs/ROADMAP.md` if that stops being true.
 | POST | `/api/v1/auth/signup` | none | Create a user (no org membership yet) |
 | POST | `/api/v1/auth/login` | none | Returns a session token + the caller's organizations |
 | POST | `/api/v1/auth/logout` | session | Revokes the current session |
+| PUT | `/api/v1/account/profile` | session or token | Update the caller's own display name (email is not editable here) |
+| POST | `/api/v1/account/password` | session or token | Change the caller's own password; revokes every other active session, leaving the current one untouched |
 | GET | `/api/v1/organizations` | session or token | List organizations the caller belongs to |
 | POST | `/api/v1/organizations` | session or token | Create an organization; creator becomes `owner` |
 | GET | `/api/v1/organization` | session or token + org | Get the current organization |
