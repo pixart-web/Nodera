@@ -176,10 +176,12 @@ it. Also verified `Run` against the `local-echo` provider returns real
 
 `ai/page.tsx` covers the whole AI Gateway surface: a Chat panel (pick a
 profile, send a message, see the real `ChatResult` including provider key,
-model, and token counts), a Profiles section (list + create, with
-`privacy_level` as a `<select>` and `preferred_model_ids`/
+model, and token counts), a Profiles section (list + create + edit +
+delete, with `privacy_level` as a `<select>` and `preferred_model_ids`/
 `fallback_model_ids`/`required_capabilities` as comma-separated inputs
-matching the Tools/Agents pages' convention), and Providers/Models
+matching the Tools/Agents pages' convention — the inline Edit form shows
+`key` as a disabled input since it's immutable once created), and
+Providers/Models
 sections (list + register, `ai.manage`-gated server-side — the page always
 shows the forms and lets a `FORBIDDEN` response surface as an error banner
 rather than trying to pre-compute the caller's permissions client-side,

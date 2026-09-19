@@ -177,6 +177,172 @@ func (s *Service) ListProfiles(ctx context.Context, ac authctx.AuthContext) ([]P
 	return out, rows.Err()
 }
 
+// UpdateProfileInput follows the pointer-based partial-update convention
+// used across the codebase: a nil scalar field leaves the existing value
+// untouched, a non-nil one replaces it. The two model-reference slices are
+// plain []string — nil leaves them untouched, an explicit empty slice
+// clears them. Key is intentionally not editable: it's the stable handle
+// agents and callers reference a profile by, and renaming it out from
+// under existing references would silently break them (there's no FK to
+// catch it, matching agents.ai_profile_key's own free-form design).
+type UpdateProfileInput struct {
+	Description          *string  `json:"description"`
+	RequiredCapabilities []string `json:"required_capabilities"`
+	PrivacyLevel         *string  `json:"privacy_level"`
+	PreferredModelRefs   []string `json:"preferred_model_ids"`
+	FallbackModelRefs    []string `json:"fallback_model_ids"`
+	Temperature          *float64 `json:"temperature"`
+	MaxTokens            *int     `json:"max_tokens"`
+	TimeoutSeconds       *int     `json:"timeout_seconds"`
+}
+
+func (s *Service) UpdateProfile(ctx context.Context, ac authctx.AuthContext, id uuid.UUID, in UpdateProfileInput) (Profile, error) {
+	if err := rbac.Require(ac, permManage); err != nil {
+		return Profile{}, err
+	}
+	existing, err := s.getProfileByID(ctx, ac.OrganizationID, id)
+	if err != nil {
+		return Profile{}, err
+	}
+
+	description := existing.Description
+	if in.Description != nil {
+		description = *in.Description
+	}
+	requiredCapabilities := existing.RequiredCapabilities
+	if in.RequiredCapabilities != nil {
+		requiredCapabilities = in.RequiredCapabilities
+	}
+	privacyLevel := existing.PrivacyLevel
+	if in.PrivacyLevel != nil {
+		if !validPrivacyLevels[*in.PrivacyLevel] {
+			return Profile{}, apierr.Validation("privacy_level must be one of public, internal, confidential, restricted")
+		}
+		privacyLevel = *in.PrivacyLevel
+	}
+	preferredModelRefs := existing.PreferredModelRefs
+	if in.PreferredModelRefs != nil {
+		if len(in.PreferredModelRefs) == 0 {
+			return Profile{}, apierr.Validation("at least one preferred model reference is required, formatted 'provider_key/model_identifier'")
+		}
+		preferredModelRefs = in.PreferredModelRefs
+	}
+	fallbackModelRefs := existing.FallbackModelRefs
+	if in.FallbackModelRefs != nil {
+		fallbackModelRefs = in.FallbackModelRefs
+	}
+	for _, ref := range append(append([]string{}, preferredModelRefs...), fallbackModelRefs...) {
+		if !strings.Contains(ref, "/") {
+			return Profile{}, apierr.Validation("model reference '" + ref + "' must be formatted 'provider_key/model_identifier'")
+		}
+	}
+	temperature := existing.Temperature
+	if in.Temperature != nil {
+		if *in.Temperature < 0 || *in.Temperature > 2 {
+			return Profile{}, apierr.Validation("temperature must be between 0 and 2")
+		}
+		temperature = *in.Temperature
+	}
+	maxTokens := existing.MaxTokens
+	if in.MaxTokens != nil {
+		if *in.MaxTokens <= 0 {
+			return Profile{}, apierr.Validation("max_tokens must be positive")
+		}
+		maxTokens = *in.MaxTokens
+	}
+	timeoutSeconds := existing.TimeoutSeconds
+	if in.TimeoutSeconds != nil {
+		if *in.TimeoutSeconds <= 0 {
+			return Profile{}, apierr.Validation("timeout_seconds must be positive")
+		}
+		timeoutSeconds = *in.TimeoutSeconds
+	}
+
+	var p Profile
+	err = s.pool.QueryRow(ctx, `
+		UPDATE ai_profiles
+		SET description = $1, required_capabilities = $2, privacy_level = $3,
+		    preferred_model_ids = $4, fallback_model_ids = $5, temperature = $6,
+		    max_tokens = $7, timeout_seconds = $8, updated_at = now()
+		WHERE id = $9 AND organization_id = $10
+		RETURNING id, key, description, required_capabilities, privacy_level,
+		          preferred_model_ids, fallback_model_ids, temperature, max_tokens, timeout_seconds, created_at
+	`, description, requiredCapabilities, privacyLevel, preferredModelRefs, fallbackModelRefs,
+		temperature, maxTokens, timeoutSeconds, id, ac.OrganizationID).Scan(
+		&p.ID, &p.Key, &p.Description, &p.RequiredCapabilities, &p.PrivacyLevel,
+		&p.PreferredModelRefs, &p.FallbackModelRefs, &p.Temperature, &p.MaxTokens, &p.TimeoutSeconds, &p.CreatedAt,
+	)
+	if err != nil {
+		return Profile{}, apierr.Wrap(apierr.CodeInternal, "failed to update AI profile", err)
+	}
+
+	if err := s.audit.Record(ctx, ac, audit.Entry{
+		Action: "ai.profile.updated", ResourceType: "ai_profile", ResourceID: p.ID.String(),
+		Success: true, PreviousState: existing, ResultingState: p,
+	}); err != nil {
+		logger.FromContext(ctx).Error("failed to write audit entry", "error", err)
+	}
+
+	return p, nil
+}
+
+// DeleteProfile permanently removes an org-owned AI profile. There is no FK
+// from agents.ai_profile_key or ai_usage_records.profile_key back to this
+// row (both are free-form text, resolved by key at call time, matching the
+// router's existing fail-closed behavior for an unresolvable reference) —
+// deleting a profile still in use surfaces as a clear NotFound the next
+// time something tries to resolve it, rather than a cascading delete or an
+// orphaned FK.
+func (s *Service) DeleteProfile(ctx context.Context, ac authctx.AuthContext, id uuid.UUID) error {
+	if err := rbac.Require(ac, permManage); err != nil {
+		return err
+	}
+	existing, err := s.getProfileByID(ctx, ac.OrganizationID, id)
+	if err != nil {
+		return err
+	}
+
+	tag, err := s.pool.Exec(ctx, `DELETE FROM ai_profiles WHERE id = $1 AND organization_id = $2`, id, ac.OrganizationID)
+	if err != nil {
+		return apierr.Wrap(apierr.CodeInternal, "failed to delete AI profile", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return apierr.NotFound("AI profile")
+	}
+
+	if err := s.audit.Record(ctx, ac, audit.Entry{
+		Action: "ai.profile.deleted", ResourceType: "ai_profile", ResourceID: id.String(),
+		Success: true, PreviousState: existing,
+	}); err != nil {
+		logger.FromContext(ctx).Error("failed to write audit entry", "error", err)
+	}
+
+	return nil
+}
+
+// getProfileByID loads an org-owned profile for Update/Delete. Unlike
+// getProfileByKey (used by the router, which also considers system-defined
+// organization_id IS NULL profiles), this only matches rows the calling
+// org actually owns — a system-defined profile can't be edited or removed
+// through an org-scoped ai.manage call.
+func (s *Service) getProfileByID(ctx context.Context, orgID, id uuid.UUID) (Profile, error) {
+	var p Profile
+	err := s.pool.QueryRow(ctx, `
+		SELECT id, key, description, required_capabilities, privacy_level,
+		       preferred_model_ids, fallback_model_ids, temperature, max_tokens, timeout_seconds, created_at
+		FROM ai_profiles
+		WHERE id = $1 AND organization_id = $2
+	`, id, orgID).Scan(&p.ID, &p.Key, &p.Description, &p.RequiredCapabilities, &p.PrivacyLevel,
+		&p.PreferredModelRefs, &p.FallbackModelRefs, &p.Temperature, &p.MaxTokens, &p.TimeoutSeconds, &p.CreatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Profile{}, apierr.NotFound("AI profile")
+	}
+	if err != nil {
+		return Profile{}, apierr.Wrap(apierr.CodeInternal, "failed to load AI profile", err)
+	}
+	return p, nil
+}
+
 func (s *Service) getProfileByKey(ctx context.Context, orgID uuid.UUID, key string) (Profile, error) {
 	var p Profile
 	err := s.pool.QueryRow(ctx, `

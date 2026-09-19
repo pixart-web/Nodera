@@ -890,6 +890,49 @@ scanning in CI (`govulncheck`, `npm audit`).
 - [x] Full backend test suite re-run clean (`go test ./... -race`)
 - [x] Docs (`API.md`, `FRONTEND.md`, `AGENTS.md`, `README.md`) updated
 
+**Phase 32** — this pass:
+- [x] `ai.UpdateProfile`/`ai.DeleteProfile` — found by the same kind of
+      CRUD-gap audit as Phase 31, applied to `internal/ai`: only
+      Create/List existed for profiles, no way to edit routing/policy
+      config after creation or remove a profile that's no longer needed
+- [x] `Update` follows the established pointer-based partial-update
+      pattern. `key` is deliberately excluded from what can change — it's
+      the stable handle agents and callers reference a profile by
+      (`agents.ai_profile_key` is free-form text, no FK), and renaming it
+      out from under existing references would silently break them with
+      no constraint to catch it
+- [x] `Update`/`Delete` only reach org-owned profiles
+      (`organization_id = caller's org`), never system-defined ones
+      (`organization_id IS NULL`) — `ListProfiles`/`Chat` can see and use a
+      system-defined profile, but an org's `ai.manage` can't mutate or
+      remove it out from under every org. Verified with a profile row
+      inserted directly with a NULL organization_id (no such row exists
+      via the API today, but the schema supports it and the isolation
+      needed a real test, not just an assumption)
+- [x] 5 new integration tests, passing under `-race` alongside the 2
+      pre-existing profile/chat tests: partial-update-only-touches-
+      provided-fields (and confirms `key` never changes), a plain member
+      without `ai.manage` rejected from both Update and Delete, delete-
+      then-Chat-fails-NotFound (plus a second Delete on the same id also
+      failing NotFound), and the system-defined-profile isolation case
+      above for both Update and Delete
+- [x] 2 new HTTP routes (`PUT /ai/profiles/{id}`, `DELETE
+      /ai/profiles/{id}`) and OpenAPI additions, validated with
+      `@redocly/cli lint`; `lib/api-types.generated.ts` regenerated
+- [x] `web/app/(org)/ai/page.tsx`: an inline "Edit" panel per profile row
+      (same expandable-row pattern as the Agents page) with `key` shown as
+      a disabled input, and a "Delete" button
+- [x] Verified live end to end: created a real profile through the UI,
+      edited only its description through the real form, reloaded on a
+      fresh tab and confirmed the change round-tripped through the real
+      backend while `key` and every other untouched field stayed the
+      same, then deleted it through the real UI and watched it disappear
+      from both the Profiles table and the Chat panel's profile dropdown
+      in the same render. Checked the browser console on a completely
+      fresh tab afterward — zero errors
+- [x] Full backend test suite re-run clean (`go test ./... -race`)
+- [x] Docs (`API.md`, `FRONTEND.md`, `README.md`) updated
+
 ## Next up
 
 1. **Concrete job types**: the worker dispatcher is real but nothing

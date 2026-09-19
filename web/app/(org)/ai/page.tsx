@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { api, ApiError } from "@/lib/api";
 import { useApi } from "@/lib/useApi";
 import { PageHeader } from "@/components/PageHeader";
@@ -251,6 +251,166 @@ function CreateProfileForm({ onCreated }: { onCreated: () => void }) {
   );
 }
 
+function EditProfileForm({ profile, onDone }: { profile: AIProfile; onDone: () => void }) {
+  const [description, setDescription] = useState(profile.description);
+  const [privacyLevel, setPrivacyLevel] = useState(profile.privacy_level);
+  const [preferredModelIds, setPreferredModelIds] = useState(profile.preferred_model_ids.join(", "));
+  const [fallbackModelIds, setFallbackModelIds] = useState(profile.fallback_model_ids.join(", "));
+  const [requiredCapabilities, setRequiredCapabilities] = useState(profile.required_capabilities.join(", "));
+  const [temperature, setTemperature] = useState(String(profile.temperature));
+  const [maxTokens, setMaxTokens] = useState(String(profile.max_tokens));
+  const [timeoutSeconds, setTimeoutSeconds] = useState(String(profile.timeout_seconds));
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    setBusy(true);
+    try {
+      await api.put<AIProfile>(`/api/v1/ai/profiles/${profile.id}`, {
+        description,
+        privacy_level: privacyLevel,
+        preferred_model_ids: parseList(preferredModelIds),
+        fallback_model_ids: parseList(fallbackModelIds),
+        required_capabilities: parseList(requiredCapabilities),
+        temperature: Number(temperature),
+        max_tokens: Number(maxTokens),
+        timeout_seconds: Number(timeoutSeconds),
+      });
+      onDone();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Failed to update profile");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form onSubmit={submit} className="space-y-3">
+      {error && <ErrorBanner message={error} />}
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <label className="label" htmlFor="edit-profile-key">
+            Key
+          </label>
+          <input id="edit-profile-key" className="input font-mono" value={profile.key} disabled />
+        </div>
+        <div>
+          <label className="label" htmlFor="edit-profile-privacy">
+            Privacy level
+          </label>
+          <select
+            id="edit-profile-privacy"
+            className="input"
+            value={privacyLevel}
+            onChange={(e) => setPrivacyLevel(e.target.value)}
+          >
+            <option value="public">public</option>
+            <option value="internal">internal</option>
+            <option value="confidential">confidential</option>
+            <option value="restricted">restricted</option>
+          </select>
+        </div>
+      </div>
+      <div>
+        <label className="label" htmlFor="edit-profile-description">
+          Description
+        </label>
+        <input
+          id="edit-profile-description"
+          className="input"
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+        />
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <label className="label" htmlFor="edit-profile-preferred">
+            Preferred model ids (comma-separated, provider_key/model_identifier)
+          </label>
+          <input
+            id="edit-profile-preferred"
+            className="input font-mono"
+            value={preferredModelIds}
+            onChange={(e) => setPreferredModelIds(e.target.value)}
+            required
+          />
+        </div>
+        <div>
+          <label className="label" htmlFor="edit-profile-fallback">
+            Fallback model ids (comma-separated)
+          </label>
+          <input
+            id="edit-profile-fallback"
+            className="input font-mono"
+            value={fallbackModelIds}
+            onChange={(e) => setFallbackModelIds(e.target.value)}
+          />
+        </div>
+      </div>
+      <div>
+        <label className="label" htmlFor="edit-profile-capabilities">
+          Required capabilities (comma-separated)
+        </label>
+        <input
+          id="edit-profile-capabilities"
+          className="input font-mono"
+          value={requiredCapabilities}
+          onChange={(e) => setRequiredCapabilities(e.target.value)}
+        />
+      </div>
+      <div className="grid grid-cols-3 gap-3">
+        <div>
+          <label className="label" htmlFor="edit-profile-temp">
+            Temperature
+          </label>
+          <input
+            id="edit-profile-temp"
+            className="input"
+            type="number"
+            step="0.1"
+            value={temperature}
+            onChange={(e) => setTemperature(e.target.value)}
+          />
+        </div>
+        <div>
+          <label className="label" htmlFor="edit-profile-max-tokens">
+            Max tokens
+          </label>
+          <input
+            id="edit-profile-max-tokens"
+            className="input"
+            type="number"
+            value={maxTokens}
+            onChange={(e) => setMaxTokens(e.target.value)}
+          />
+        </div>
+        <div>
+          <label className="label" htmlFor="edit-profile-timeout">
+            Timeout (seconds)
+          </label>
+          <input
+            id="edit-profile-timeout"
+            className="input"
+            type="number"
+            value={timeoutSeconds}
+            onChange={(e) => setTimeoutSeconds(e.target.value)}
+          />
+        </div>
+      </div>
+      <div className="flex items-center gap-3">
+        <button type="submit" className="btn-primary" disabled={busy}>
+          {busy ? "Saving…" : "Save changes"}
+        </button>
+        <button type="button" className="text-xs text-base-400 hover:text-base-200" onClick={onDone}>
+          Cancel
+        </button>
+      </div>
+    </form>
+  );
+}
+
 function RegisterProviderForm({ onDone }: { onDone: () => void }) {
   const [key, setKey] = useState("");
   const [kind, setKind] = useState("cloud");
@@ -410,6 +570,22 @@ export default function AIPage() {
   const [showProfileForm, setShowProfileForm] = useState(false);
   const [showProviderForm, setShowProviderForm] = useState(false);
   const [showModelForm, setShowModelForm] = useState(false);
+  const [editingProfileID, setEditingProfileID] = useState<string | null>(null);
+  const [deleteProfileError, setDeleteProfileError] = useState<string | null>(null);
+  const [deletingProfileID, setDeletingProfileID] = useState<string | null>(null);
+
+  async function deleteProfile(p: AIProfile) {
+    setDeleteProfileError(null);
+    setDeletingProfileID(p.id);
+    try {
+      await api.del(`/api/v1/ai/profiles/${p.id}`);
+      profiles.reload();
+    } catch (err) {
+      setDeleteProfileError(err instanceof ApiError ? err.message : "Failed to delete profile");
+    } finally {
+      setDeletingProfileID(null);
+    }
+  }
 
   return (
     <div>
@@ -440,6 +616,7 @@ export default function AIPage() {
           />
         )}
         {profiles.error && <ErrorBanner message={profiles.error} />}
+        {deleteProfileError && <ErrorBanner message={deleteProfileError} />}
         <div className="card">
           {profiles.loading ? (
             <div className="p-4 text-sm text-base-400">Loading…</div>
@@ -454,19 +631,50 @@ export default function AIPage() {
                   <th>Preferred models</th>
                   <th>Fallback models</th>
                   <th>Max tokens</th>
+                  <th></th>
                 </tr>
               </thead>
               <tbody>
                 {profiles.data!.map((p) => (
-                  <tr key={p.key}>
-                    <td className="font-mono text-xs">{p.key}</td>
-                    <td>
-                      <span className="badge bg-base-500/20 text-base-300">{p.privacy_level}</span>
-                    </td>
-                    <td className="font-mono text-xs text-base-300">{p.preferred_model_ids.join(", ")}</td>
-                    <td className="font-mono text-xs text-base-400">{p.fallback_model_ids.join(", ") || "—"}</td>
-                    <td className="text-xs text-base-400">{p.max_tokens}</td>
-                  </tr>
+                  <Fragment key={p.id}>
+                    <tr>
+                      <td className="font-mono text-xs">{p.key}</td>
+                      <td>
+                        <span className="badge bg-base-500/20 text-base-300">{p.privacy_level}</span>
+                      </td>
+                      <td className="font-mono text-xs text-base-300">{p.preferred_model_ids.join(", ")}</td>
+                      <td className="font-mono text-xs text-base-400">{p.fallback_model_ids.join(", ") || "—"}</td>
+                      <td className="text-xs text-base-400">{p.max_tokens}</td>
+                      <td className="space-x-3">
+                        <button
+                          className="text-xs text-base-400 hover:text-base-200"
+                          onClick={() => setEditingProfileID((cur) => (cur === p.id ? null : p.id))}
+                        >
+                          {editingProfileID === p.id ? "Close" : "Edit"}
+                        </button>
+                        <button
+                          className="text-xs text-base-400 hover:text-danger disabled:text-base-600"
+                          disabled={deletingProfileID === p.id}
+                          onClick={() => deleteProfile(p)}
+                        >
+                          {deletingProfileID === p.id ? "Deleting…" : "Delete"}
+                        </button>
+                      </td>
+                    </tr>
+                    {editingProfileID === p.id && (
+                      <tr>
+                        <td colSpan={6} className="bg-base-800/40 p-3">
+                          <EditProfileForm
+                            profile={p}
+                            onDone={() => {
+                              setEditingProfileID(null);
+                              profiles.reload();
+                            }}
+                          />
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
                 ))}
               </tbody>
             </table>

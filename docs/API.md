@@ -126,6 +126,8 @@ tracked in `docs/ROADMAP.md` if that stops being true.
 | POST | `/api/v1/jobs/{id}/retry` | session or token + org | Re-queue a failed job for another full attempt cycle (`jobs.manage`) — attempts/progress/error reset, same job ID |
 | GET | `/api/v1/ai/profiles` | session or token + org | List AI profiles (`ai.use`) |
 | POST | `/api/v1/ai/profiles` | session or token + org | Create an AI profile (`ai.manage`) |
+| PUT | `/api/v1/ai/profiles/{id}` | session or token + org | Update an AI profile (`ai.manage`) — partial update, `key` is immutable; only reaches org-owned profiles (`404` for a system-defined one) |
+| DELETE | `/api/v1/ai/profiles/{id}` | session or token + org | Permanently delete an org-owned AI profile (`ai.manage`); `404` for a system-defined one |
 | POST | `/api/v1/ai/chat` | session or token + org | Call the AI gateway with a profile key + messages (`ai.use`) |
 | GET | `/api/v1/ai/providers` | session or token + org | List the platform-wide provider registry (`ai.use`) |
 | POST | `/api/v1/ai/providers` | session or token + org | Register/update a provider (`ai.manage`) — platform-wide, see note below |

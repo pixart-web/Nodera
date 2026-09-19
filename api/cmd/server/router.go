@@ -127,6 +127,8 @@ func newRouter(d apiDeps) http.Handler {
 
 				r.Get("/ai/profiles", d.handleListAIProfiles)
 				r.Post("/ai/profiles", d.handleCreateAIProfile)
+				r.Put("/ai/profiles/{id}", d.handleUpdateAIProfile)
+				r.Delete("/ai/profiles/{id}", d.handleDeleteAIProfile)
 				r.Post("/ai/chat", d.handleAIChat)
 				r.Get("/ai/providers", d.handleListAIProviders)
 				r.Post("/ai/providers", d.handleUpsertAIProvider)
@@ -911,6 +913,37 @@ func (d apiDeps) handleCreateAIProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpserver.WriteJSON(w, http.StatusCreated, p)
+}
+
+func (d apiDeps) handleUpdateAIProfile(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		httpserver.WriteError(w, r, apierr.Validation("invalid profile id"))
+		return
+	}
+	var body ai.UpdateProfileInput
+	if !decodeJSON(w, r, &body) {
+		return
+	}
+	p, err := d.ai.UpdateProfile(r.Context(), mustAuthContext(r), id, body)
+	if err != nil {
+		httpserver.WriteError(w, r, err)
+		return
+	}
+	httpserver.WriteJSON(w, http.StatusOK, p)
+}
+
+func (d apiDeps) handleDeleteAIProfile(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		httpserver.WriteError(w, r, apierr.Validation("invalid profile id"))
+		return
+	}
+	if err := d.ai.DeleteProfile(r.Context(), mustAuthContext(r), id); err != nil {
+		httpserver.WriteError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (d apiDeps) handleAIChat(w http.ResponseWriter, r *http.Request) {

@@ -3112,6 +3112,105 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/ai/profiles/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Update an AI profile's configuration (ai.manage) — key is immutable; only org-owned profiles can be updated */
+        put: {
+            parameters: {
+                query?: never;
+                header?: {
+                    /** @description Required for a session token (which org to act within). Optional for an API token, which already embeds one — if present it must match. */
+                    "X-Nodera-Org"?: components["parameters"]["OrgHeader"];
+                };
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        description?: string;
+                        required_capabilities?: string[];
+                        /** @enum {string} */
+                        privacy_level?: "public" | "internal" | "confidential" | "restricted";
+                        preferred_model_ids?: string[];
+                        fallback_model_ids?: string[];
+                        temperature?: number;
+                        max_tokens?: number;
+                        timeout_seconds?: number;
+                    };
+                };
+            };
+            responses: {
+                /** @description AI profile updated */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AIProfile"];
+                    };
+                };
+                /** @description A requested permission the caller doesn't hold */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description No org-owned profile with this id (system-defined profiles cannot be updated this way) */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        post?: never;
+        /** Permanently delete an org-owned AI profile (ai.manage) */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: {
+                    /** @description Required for a session token (which org to act within). Optional for an API token, which already embeds one — if present it must match. */
+                    "X-Nodera-Org"?: components["parameters"]["OrgHeader"];
+                };
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description AI profile deleted */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description No org-owned profile with this id (system-defined profiles cannot be deleted this way) */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
