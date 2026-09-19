@@ -1287,6 +1287,31 @@ scanning in CI (`govulncheck`, `npm audit`).
 - [x] Full backend test suite re-run clean (`go test ./... -race`)
 - [x] Docs (`SECURITY.md`, `README.md`) updated
 
+**Phase 42** — this pass:
+- [x] `internal/jobs` audit trail — the second and smaller finding from
+      the same sweep that produced Phase 41: `jobs.go` had no `audit`
+      import at all, so `Enqueue`/`Cancel`/`Retry` (all real state
+      changes) left no trail, unlike every sibling domain. Unlike
+      Phase 41's identity methods, every jobs method already takes a
+      fully-resolved `authctx.AuthContext` with a real organization — no
+      pre-organization caveat needed here, so all three got audited
+- [x] `jobs.New` now takes an `AuditRecorder` (2 call sites updated:
+      `main.go`, and 3 local constructions in `jobs_integration_test.go`)
+- [x] 1 new integration test, passing under `-race` alongside the 3
+      pre-existing jobs tests: enqueue-then-cancel produces both
+      `jobs.job.enqueued` and `jobs.job.cancelled` as real, queryable
+      audit rows
+- [x] No new HTTP routes, OpenAPI changes, or frontend code — existing
+      endpoints simply now also write audit entries
+- [x] Verified live end to end: enqueued a real job with no registered
+      handler through the Jobs page (it failed visibly, the existing
+      documented behavior), retried it, and watched both
+      `jobs.job.enqueued` and `jobs.job.retried` appear at the top of the
+      real Audit page. Checked the browser console on a fresh tab — zero
+      errors
+- [x] Full backend test suite re-run clean (`go test ./... -race`)
+- [x] Docs (`README.md`) updated
+
 ## Next up
 
 1. **Concrete job types**: the worker dispatcher is real but nothing

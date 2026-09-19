@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/nodera/nodera/internal/audit"
 	"github.com/nodera/nodera/internal/jobs"
 	"github.com/nodera/nodera/internal/platform/authctx"
 	"github.com/nodera/nodera/internal/testhelpers"
@@ -21,7 +22,7 @@ func TestJobsEnqueueWorkerProcessesAndReportsResult(t *testing.T) {
 	h := newHarness(pool)
 	ac, _ := h.newOwnerContext(t, ctx, "jobs-owner@nodera.dev")
 
-	jobsSvc := jobs.New(pool)
+	jobsSvc := jobs.New(pool, h.audit)
 
 	j, err := jobsSvc.Enqueue(ctx, ac, jobs.EnqueueInput{
 		Type:    "test.echo",
@@ -82,7 +83,7 @@ func TestJobsUnregisteredHandlerFailsVisibly(t *testing.T) {
 	h := newHarness(pool)
 	ac, _ := h.newOwnerContext(t, ctx, "jobs-owner-2@nodera.dev")
 
-	jobsSvc := jobs.New(pool)
+	jobsSvc := jobs.New(pool, h.audit)
 	j, err := jobsSvc.Enqueue(ctx, ac, jobs.EnqueueInput{Type: "no.such.handler"})
 	if err != nil {
 		t.Fatalf("Enqueue: %v", err)
@@ -125,7 +126,7 @@ func TestJobsRetryRequeuesAFailedJobForAnotherAttempt(t *testing.T) {
 	h := newHarness(pool)
 	ac, _ := h.newOwnerContext(t, ctx, "jobs-retry-owner@nodera.dev")
 
-	jobsSvc := jobs.New(pool)
+	jobsSvc := jobs.New(pool, h.audit)
 	j, err := jobsSvc.Enqueue(ctx, ac, jobs.EnqueueInput{Type: "test.retry-me"})
 	if err != nil {
 		t.Fatalf("Enqueue: %v", err)
@@ -172,6 +173,46 @@ func TestJobsRetryRequeuesAFailedJobForAnotherAttempt(t *testing.T) {
 	go worker2.Run(worker2Ctx)
 
 	waitForStatus(t, ctx, jobsSvc, ac, j.ID, jobs.StatusSucceeded)
+}
+
+// Enqueue/Cancel/Retry now write real audit entries — verifies they're
+// actually queryable, not just written.
+func TestJobs_WritesAuditEntries(t *testing.T) {
+	pool := testhelpers.RequirePool(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	h := newHarness(pool)
+	ac, _ := h.newOwnerContext(t, ctx, "jobs-audit-owner@nodera.dev")
+
+	jobsSvc := jobs.New(pool, h.audit)
+
+	j, err := jobsSvc.Enqueue(ctx, ac, jobs.EnqueueInput{Type: "test.audited", Payload: json.RawMessage(`{}`)})
+	if err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+	if err := jobsSvc.Cancel(ctx, ac, j.ID); err != nil {
+		t.Fatalf("Cancel: %v", err)
+	}
+
+	records, err := h.audit.Query(ctx, ac, audit.QueryFilter{
+		OrganizationID: ac.OrganizationID, ResourceType: "job", ResourceID: j.ID.String(),
+	})
+	if err != nil {
+		t.Fatalf("Query: %v", err)
+	}
+	var sawEnqueued, sawCancelled bool
+	for _, r := range records {
+		switch r.Action {
+		case "jobs.job.enqueued":
+			sawEnqueued = true
+		case "jobs.job.cancelled":
+			sawCancelled = true
+		}
+	}
+	if !sawEnqueued || !sawCancelled {
+		t.Fatalf("expected both enqueued and cancelled audit actions, got %+v", records)
+	}
 }
 
 // waitForStatus polls Get until the job reaches want or the context is

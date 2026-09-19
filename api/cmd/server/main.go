@@ -82,7 +82,7 @@ func run() error {
 	tenancySvc := tenancy.New(pool, identitySvc, auditSvc)
 	infraSvc := infrastructure.New(pool, auditSvc)
 	appsSvc := applications.New(pool, auditSvc)
-	jobsSvc := jobs.New(pool)
+	jobsSvc := jobs.New(pool, auditSvc)
 
 	registeredProviders := []providers.Provider{localecho.New()}
 	if cfg.Ollama.BaseURL != "" {

@@ -16,17 +16,24 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/nodera/nodera/internal/audit"
 	"github.com/nodera/nodera/internal/platform/apierr"
 	"github.com/nodera/nodera/internal/platform/authctx"
+	"github.com/nodera/nodera/internal/platform/logger"
 	"github.com/nodera/nodera/internal/rbac"
 )
 
-type Service struct {
-	pool *pgxpool.Pool
+type AuditRecorder interface {
+	Record(ctx context.Context, ac authctx.AuthContext, e audit.Entry) error
 }
 
-func New(pool *pgxpool.Pool) *Service {
-	return &Service{pool: pool}
+type Service struct {
+	pool  *pgxpool.Pool
+	audit AuditRecorder
+}
+
+func New(pool *pgxpool.Pool, auditRecorder AuditRecorder) *Service {
+	return &Service{pool: pool, audit: auditRecorder}
 }
 
 type Status string
@@ -115,6 +122,14 @@ func (s *Service) Enqueue(ctx context.Context, ac authctx.AuthContext, in Enqueu
 	if err != nil {
 		return Job{}, apierr.Wrap(apierr.CodeInternal, "failed to enqueue job", err)
 	}
+
+	if err := s.audit.Record(ctx, ac, audit.Entry{
+		Action: "jobs.job.enqueued", ResourceType: "job", ResourceID: j.ID.String(),
+		Success: true, ResultingState: j,
+	}); err != nil {
+		logger.FromContext(ctx).Error("failed to write audit entry", "error", err)
+	}
+
 	return j, nil
 }
 
@@ -217,6 +232,11 @@ func (s *Service) Cancel(ctx context.Context, ac authctx.AuthContext, id uuid.UU
 	if tag.RowsAffected() == 0 {
 		return apierr.Conflict("job is not in a cancellable (queued) state, or does not exist")
 	}
+	if err := s.audit.Record(ctx, ac, audit.Entry{
+		Action: "jobs.job.cancelled", ResourceType: "job", ResourceID: id.String(), Success: true,
+	}); err != nil {
+		logger.FromContext(ctx).Error("failed to write audit entry", "error", err)
+	}
 	return nil
 }
 
@@ -252,6 +272,12 @@ func (s *Service) Retry(ctx context.Context, ac authctx.AuthContext, id uuid.UUI
 	}
 	if err != nil {
 		return Job{}, apierr.Wrap(apierr.CodeInternal, "failed to retry job", err)
+	}
+	if err := s.audit.Record(ctx, ac, audit.Entry{
+		Action: "jobs.job.retried", ResourceType: "job", ResourceID: j.ID.String(),
+		Success: true, ResultingState: j,
+	}); err != nil {
+		logger.FromContext(ctx).Error("failed to write audit entry", "error", err)
 	}
 	return j, nil
 }
