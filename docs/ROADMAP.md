@@ -1732,6 +1732,75 @@ regardless of how unlikely a genuine double-click race is in practice.
       open. Do not treat this entry alone as a deployment-candidate
       declaration.
 
+## Hardening pass (post-Phase-50): P1 — platform-scoped authorization
+
+The same independent review flagged a real authorization mismatch: the AI
+provider/model registry (`internal/ai/registry.go`) is platform-wide
+(`ai_providers`/`ai_models` carry no `organization_id`), but its mutations
+were gated by `ai.manage` — an *organization* permission. Any organization
+owner/admin holding `ai.manage` within their own organization could
+therefore upsert or delete platform-wide provider/model rows, which is not
+the intended trust boundary for a control plane meant to eventually host
+mutually-untrusting organizations.
+
+- [x] Verified the mismatch directly in `internal/ai/registry.go` — its
+      own package doc comment already flagged this as a "deliberate,
+      documented simplification" awaiting "a dedicated platform-admin
+      scope", so the fix targets exactly the gap the code already named.
+- [x] New `internal/platformauth` package: an explicit, per-user,
+      per-permission grant model (`platform_permissions` catalog +
+      `platform_user_permissions` grants, migration `0018`) — no single
+      "is platform admin" boolean, extensible to future platform-scoped
+      resources without collapsing into god-mode. `Require(ctx, ac, key)`
+      is the single choke point, mirroring `rbac.Require` exactly
+      (including the same `authctx.ActorSystem` bypass, so a configured
+      provider still auto-registers at startup without needing a human
+      grant first).
+- [x] `ai.Service` takes a `PlatformAuthorizer` at construction
+      (`ai.New(pool, audit, platform, providers...)`); `UpsertProvider`/
+      `DeleteProvider`/`UpsertModel`/`DeleteModel` now require
+      `platform.ai.providers.manage`/`platform.ai.models.manage`;
+      `ListProviders`/`ListModels` stay on the organization permission
+      `ai.use` (reading the registry to configure an org's own profile
+      isn't a platform-admin action).
+- [x] `POST`/`DELETE /api/v1/platform/admins/{userID}/permissions/{key}`
+      (gated by `platform.admins.manage`, with a guard against revoking
+      the last remaining grant of it) plus
+      `GET /api/v1/platform/{permissions,my-permissions,admins}`.
+      `platformauth.Service.BootstrapAdmin`, wired into
+      `cmd/server/main.go` behind `NODERA_PLATFORM_BOOTSTRAP_ADMIN_EMAIL`,
+      is the explicit, idempotent, operator-controlled mechanism for
+      establishing the first platform administrator — no hardcoded email
+      check anywhere in the request path.
+- [x] `internal/platform_authorization_test.go` — new tests proving an
+      organization owner (holding `ai.manage`) is forbidden from platform
+      registry mutations without an explicit grant, a granted user can
+      perform them, a platform grant never widens organization membership
+      in another organization (tenant isolation unaffected), grant/revoke
+      themselves require `platform.admins.manage`, the last-admin guard,
+      and `BootstrapAdmin`'s idempotency (including a nonexistent email
+      not failing startup). All existing AI registry tests updated to
+      grant the new platform permissions in test setup rather than
+      relying on the old (now-removed) `ai.manage`-only gate; full suite
+      passes under `go test ./... -race`.
+- [x] OpenAPI spec gained `PlatformPermission`/`PlatformGrant` schemas and
+      the five new paths; re-validated (`@redocly/cli lint` — passes),
+      frontend types regenerated, `tsc --noEmit` and `npm run build`
+      clean. No frontend UI added for platform-admin management in this
+      pass (backend/API correctness was the priority) — `curl`-verified
+      end to end against the real running server instead: a fresh
+      organization owner correctly received `FORBIDDEN` on
+      `POST /api/v1/ai/providers`; after setting
+      `NODERA_PLATFORM_BOOTSTRAP_ADMIN_EMAIL` and restarting, the same
+      user's `/platform/my-permissions` listed all three catalog
+      permissions and `/platform/admins` succeeded.
+- [x] Docs: `docs/SECURITY.md` gained a full "Platform vs organization
+      authorization" section; `README.md` and `.env.example` updated.
+- [ ] A dedicated frontend page for platform-admin management (viewing/
+      granting/revoking platform permissions through the UI, mirroring
+      `/settings`' role management) remains deferred — the API is real
+      and tested; the UI is a follow-up.
+
 ## Next up
 
 1. **Concrete job types**: the worker dispatcher is real but nothing

@@ -3557,6 +3557,189 @@
           }
         }
       }
+    },
+    "/api/v1/platform/permissions": {
+      "get": {
+        "tags": [
+          "platform"
+        ],
+        "summary": "List the full platform permission catalog (any authenticated user)",
+        "responses": {
+          "200": {
+            "description": "Platform permission catalog",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/PlatformPermission"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/platform/my-permissions": {
+      "get": {
+        "tags": [
+          "platform"
+        ],
+        "summary": "List the calling user's own platform permission grants",
+        "responses": {
+          "200": {
+            "description": "Permission keys the caller holds",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/platform/admins": {
+      "get": {
+        "tags": [
+          "platform"
+        ],
+        "summary": "List every platform permission grant in the system (platform.admins.manage)",
+        "responses": {
+          "200": {
+            "description": "Every platform permission grant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/PlatformGrant"
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Missing platform.admins.manage",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/platform/admins/{userID}/permissions/{key}": {
+      "post": {
+        "tags": [
+          "platform"
+        ],
+        "summary": "Grant a platform permission to a user (platform.admins.manage)",
+        "parameters": [
+          {
+            "name": "userID",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "A platform permission key, e.g. platform.ai.providers.manage"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Granted"
+          },
+          "403": {
+            "description": "Missing platform.admins.manage",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "User not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "platform"
+        ],
+        "summary": "Revoke a platform permission grant (platform.admins.manage)",
+        "parameters": [
+          {
+            "name": "userID",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "A platform permission key, e.g. platform.ai.providers.manage"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Revoked"
+          },
+          "403": {
+            "description": "Missing platform.admins.manage",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Cannot revoke the last platform.admins.manage grant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -5064,6 +5247,47 @@
               }
             }
           }
+        ]
+      },
+      "PlatformPermission": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "description"
+        ]
+      },
+      "PlatformGrant": {
+        "type": "object",
+        "properties": {
+          "user_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "permission_key": {
+            "type": "string"
+          },
+          "granted_by_user_id": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "granted_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "user_id",
+          "permission_key",
+          "granted_at"
         ]
       }
     }

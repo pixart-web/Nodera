@@ -42,6 +42,66 @@ tests. Everything else is FOUNDATION ONLY or PLANNED — see `README.md`.
   only ever constructed internally (migrations, scheduled jobs), never
   derived from a client request, so this cannot be spoofed over HTTP.
 
+## Platform vs organization authorization — IMPLEMENTED
+
+Some resources are platform-wide, not owned by any single organization —
+today, the AI provider/model registry (`internal/ai/registry.go`;
+`ai_providers`/`ai_models` carry no `organization_id`). Gating a mutation
+to platform-wide state with an *organization* permission (e.g. `ai.manage`)
+would let any organization admin mutate global state merely by
+administering their own organization — a real authorization mismatch for
+a control plane. `internal/platformauth` closes it with a second,
+independent authorization axis:
+
+- `platform_permissions` is an explicit catalog table (currently
+  `platform.ai.providers.manage`, `platform.ai.models.manage`,
+  `platform.admins.manage`), and `platform_user_permissions` is a
+  per-user, per-permission grant table (migration `0018`). There is no
+  single "is platform admin" boolean — a user holds whatever subset of
+  platform permissions they were explicitly granted, extensible to future
+  platform-scoped resources (nodes, global config) without collapsing
+  into god-mode.
+- `platformauth.Service.Require(ctx, ac, key)` is platform authorization's
+  single choke point, mirroring `rbac.Require`. It never consults
+  `AuthContext.Permissions` (organization-scoped) or infers platform
+  authority from organization ownership/role — it always queries the
+  explicit grant table for the caller's own user id. Only `ActorUser`
+  identities can hold platform permissions in this phase (agents/service
+  accounts act within an organization's scope only); a `system` actor
+  bypasses it, same exception as `rbac.Require`, which is what lets a
+  configured provider auto-register at startup.
+- `UpsertProvider`/`DeleteProvider`/`UpsertModel`/`DeleteModel` require
+  the platform permission; `ListProviders`/`ListModels` stay gated by the
+  ordinary organization permission `ai.use` — reading the registry to
+  configure an org's own AI profile is not a platform-admin operation.
+- Granting/revoking platform permissions (`POST`/`DELETE
+  /api/v1/platform/admins/{userID}/permissions/{key}`) itself requires
+  `platform.admins.manage` — not subject to the no-escalation check
+  organization role assignment uses, because holding
+  `platform.admins.manage` already implies full platform-admin trust (the
+  same posture an organization `owner` holding every organization
+  permission takes). Revoking the last remaining
+  `platform.admins.manage` grant is refused, mirroring tenancy's
+  "cannot remove the last owner" guard, to avoid permanently locking out
+  platform administration with no recovery path short of a manual SQL fix.
+- **Bootstrapping the first platform administrator**: set
+  `NODERA_PLATFORM_BOOTSTRAP_ADMIN_EMAIL` to a real user's email.
+  `platformauth.Service.BootstrapAdmin` runs once at every startup
+  (`cmd/server/main.go`) and idempotently grants that user every catalog
+  permission if they exist; a nonexistent email logs a warning rather
+  than failing startup. This is deliberately not a standing authorization
+  rule — nothing at request time compares an email to this value (no
+  `if email == admin@...` anywhere in the request path), so removing the
+  env var after first boot doesn't revoke anything, and leaving it set
+  permanently just re-runs the same idempotent grant on every restart.
+- Tested by `internal/platform_authorization_test.go`: an organization
+  owner (holding `ai.manage`) is forbidden from mutating the platform
+  registry without an explicit grant; a granted user can; a platform
+  grant never widens organization membership/permissions in another
+  organization (tenant isolation is unaffected); grant/revoke require
+  `platform.admins.manage`; the last-admin guard; `BootstrapAdmin`'s
+  idempotency.
+
 ## Tenant isolation — IMPLEMENTED
 
 - Every tenant-scoped table has a non-null `organization_id`.

@@ -22,6 +22,7 @@ import (
 	"github.com/nodera/nodera/internal/platform/apierr"
 	"github.com/nodera/nodera/internal/platform/httpserver"
 	"github.com/nodera/nodera/internal/platform/ratelimit"
+	"github.com/nodera/nodera/internal/platformauth"
 	"github.com/nodera/nodera/internal/rbac"
 	"github.com/nodera/nodera/internal/secrets"
 	"github.com/nodera/nodera/internal/tenancy"
@@ -41,6 +42,7 @@ type apiDeps struct {
 	tools              *tools.Registry
 	agents             *agents.Service
 	rbac               *rbac.Service
+	platform           *platformauth.Service
 	pool               *pgxpool.Pool
 	loginRate          ratelimit.Allower
 	signupRate         ratelimit.Allower
@@ -80,6 +82,16 @@ func newRouter(d apiDeps) http.Handler {
 			r.Get("/account/sessions", d.handleListSessions)
 			r.Delete("/account/sessions/{id}", d.handleRevokeSession)
 			r.Post("/account/sessions/revoke-others", d.handleRevokeAllOtherSessions)
+
+			// Platform-scoped authorization (internal/platformauth) —
+			// deliberately outside the requireOrganization group below:
+			// platform permissions apply across every organization, not
+			// within one, so these never take an X-Nodera-Org header.
+			r.Get("/platform/permissions", d.handlePlatformListCatalog)
+			r.Get("/platform/my-permissions", d.handlePlatformListMine)
+			r.Get("/platform/admins", d.handlePlatformListGrants)
+			r.Post("/platform/admins/{userID}/permissions/{key}", d.handlePlatformGrant)
+			r.Delete("/platform/admins/{userID}/permissions/{key}", d.handlePlatformRevoke)
 
 			r.Group(func(r chi.Router) {
 				r.Use(d.requireOrganization)
@@ -683,6 +695,63 @@ func (d apiDeps) handleAdminRevokeAPIToken(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	if err := d.identity.AdminRevokeAPIToken(r.Context(), mustAuthContext(r), id); err != nil {
+		httpserver.WriteError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// --- Platform-scoped authorization (internal/platformauth) ---
+
+func (d apiDeps) handlePlatformListCatalog(w http.ResponseWriter, r *http.Request) {
+	list, err := d.platform.ListCatalog(r.Context())
+	if err != nil {
+		httpserver.WriteError(w, r, err)
+		return
+	}
+	httpserver.WriteJSON(w, http.StatusOK, list)
+}
+
+func (d apiDeps) handlePlatformListMine(w http.ResponseWriter, r *http.Request) {
+	list, err := d.platform.ListMine(r.Context(), platformAuthContext(r))
+	if err != nil {
+		httpserver.WriteError(w, r, err)
+		return
+	}
+	httpserver.WriteJSON(w, http.StatusOK, list)
+}
+
+func (d apiDeps) handlePlatformListGrants(w http.ResponseWriter, r *http.Request) {
+	list, err := d.platform.ListGrants(r.Context(), platformAuthContext(r))
+	if err != nil {
+		httpserver.WriteError(w, r, err)
+		return
+	}
+	httpserver.WriteJSON(w, http.StatusOK, list)
+}
+
+func (d apiDeps) handlePlatformGrant(w http.ResponseWriter, r *http.Request) {
+	targetUserID, err := uuid.Parse(chi.URLParam(r, "userID"))
+	if err != nil {
+		httpserver.WriteError(w, r, apierr.Validation("invalid user id"))
+		return
+	}
+	key := chi.URLParam(r, "key")
+	if err := d.platform.Grant(r.Context(), platformAuthContext(r), targetUserID, key); err != nil {
+		httpserver.WriteError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (d apiDeps) handlePlatformRevoke(w http.ResponseWriter, r *http.Request) {
+	targetUserID, err := uuid.Parse(chi.URLParam(r, "userID"))
+	if err != nil {
+		httpserver.WriteError(w, r, apierr.Validation("invalid user id"))
+		return
+	}
+	key := chi.URLParam(r, "key")
+	if err := d.platform.Revoke(r.Context(), platformAuthContext(r), targetUserID, key); err != nil {
 		httpserver.WriteError(w, r, err)
 		return
 	}

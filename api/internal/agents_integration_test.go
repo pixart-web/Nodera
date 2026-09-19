@@ -16,7 +16,7 @@ import (
 // wired the same way cmd/server/main.go wires them (minus provider
 // adapters beyond local-echo, which needs no external dependency — rule 39).
 func newAgentsServices(h *testHarness) (*agents.Service, *ai.Service, *tools.Registry) {
-	aiSvc := ai.New(h.pool, h.audit, localecho.New())
+	aiSvc := ai.New(h.pool, h.audit, h.platform, localecho.New())
 	toolsSvc := tools.New(h.pool, h.audit)
 	agentsSvc := agents.New(h.pool, h.audit, aiSvc, toolsSvc)
 	return agentsSvc, aiSvc, toolsSvc

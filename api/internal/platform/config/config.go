@@ -21,6 +21,7 @@ type Config struct {
 	Ollama    OllamaConfig
 	Anthropic AnthropicConfig
 	OpenAI    OpenAIConfig
+	Platform  PlatformConfig
 }
 
 type HTTPConfig struct {
@@ -82,6 +83,18 @@ type OpenAIConfig struct {
 	APIKey string
 }
 
+type PlatformConfig struct {
+	// BootstrapAdminEmail, if set, grants every platform permission
+	// (internal/platformauth) to the user with this email at every
+	// startup — idempotent, so it's safe to leave set permanently or only
+	// set it once for the first boot. This is the explicit,
+	// operator-controlled mechanism for establishing the first platform
+	// administrator; see docs/SECURITY.md "Bootstrapping the first
+	// platform administrator". A misconfigured/nonexistent email logs a
+	// warning rather than failing startup.
+	BootstrapAdminEmail string
+}
+
 // Load reads configuration from the environment. It returns an error rather
 // than panicking so callers (including tests) can handle misconfiguration
 // explicitly.
@@ -127,6 +140,9 @@ func Load() (Config, error) {
 		},
 		OpenAI: OpenAIConfig{
 			APIKey: os.Getenv("NODERA_OPENAI_API_KEY"),
+		},
+		Platform: PlatformConfig{
+			BootstrapAdminEmail: os.Getenv("NODERA_PLATFORM_BOOTSTRAP_ADMIN_EMAIL"),
 		},
 	}
 

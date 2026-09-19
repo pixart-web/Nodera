@@ -33,6 +33,7 @@ import (
 	"github.com/nodera/nodera/internal/platform/db"
 	"github.com/nodera/nodera/internal/platform/logger"
 	"github.com/nodera/nodera/internal/platform/ratelimit"
+	"github.com/nodera/nodera/internal/platformauth"
 	"github.com/nodera/nodera/internal/rbac"
 	"github.com/nodera/nodera/internal/secrets"
 	"github.com/nodera/nodera/internal/tenancy"
@@ -78,11 +79,18 @@ func run() error {
 
 	auditSvc := audit.New(pool)
 	rbacSvc := rbac.New(pool, auditSvc)
+	platformSvc := platformauth.New(pool, auditSvc)
 	identitySvc := identity.New(pool, rbacSvc, cfg.Auth.SessionTTL, auditSvc)
 	tenancySvc := tenancy.New(pool, identitySvc, auditSvc)
 	infraSvc := infrastructure.New(pool, auditSvc)
 	appsSvc := applications.New(pool, auditSvc)
 	jobsSvc := jobs.New(pool, auditSvc)
+
+	if cfg.Platform.BootstrapAdminEmail != "" {
+		if err := platformSvc.BootstrapAdmin(ctx, cfg.Platform.BootstrapAdminEmail); err != nil {
+			return fmt.Errorf("failed to bootstrap platform administrator: %w", err)
+		}
+	}
 
 	registeredProviders := []providers.Provider{localecho.New()}
 	if cfg.Ollama.BaseURL != "" {
@@ -94,7 +102,7 @@ func run() error {
 	if cfg.OpenAI.APIKey != "" {
 		registeredProviders = append(registeredProviders, openai.New("openai", cfg.OpenAI.APIKey))
 	}
-	aiSvc := ai.New(pool, auditSvc, registeredProviders...)
+	aiSvc := ai.New(pool, auditSvc, platformSvc, registeredProviders...)
 
 	// Auto-register each configured provider's row so it shows up in the
 	// registry without a manual POST /api/v1/ai/providers call — the Go
@@ -164,6 +172,7 @@ func run() error {
 		tools:              toolsSvc,
 		agents:             agentsSvc,
 		rbac:               rbacSvc,
+		platform:           platformSvc,
 		pool:               pool,
 		loginRate:          loginRate,
 		signupRate:         signupRate,

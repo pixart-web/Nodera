@@ -24,6 +24,8 @@ func TestAIChatRoutesToAnthropicProvider(t *testing.T) {
 	ctx := context.Background()
 	h := newHarness(pool)
 	ac, _ := h.newOwnerContext(t, ctx, "anthropic-owner@nodera.dev")
+	h.grantPlatformPermission(t, ctx, ac.ActorID, "platform.ai.providers.manage")
+	h.grantPlatformPermission(t, ctx, ac.ActorID, "platform.ai.models.manage")
 
 	mockAnthropic := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -34,7 +36,7 @@ func TestAIChatRoutesToAnthropicProvider(t *testing.T) {
 	}))
 	defer mockAnthropic.Close()
 
-	aiSvc := ai.New(pool, h.audit, localecho.New(), anthropic.NewWithBaseURL("anthropic", "test-api-key", mockAnthropic.URL))
+	aiSvc := ai.New(pool, h.audit, h.platform, localecho.New(), anthropic.NewWithBaseURL("anthropic", "test-api-key", mockAnthropic.URL))
 
 	// Register the provider in the platform-wide registry (this is what
 	// cmd/server/main.go does automatically when NODERA_ANTHROPIC_API_KEY
@@ -87,13 +89,15 @@ func TestAIRestrictedProfileNeverRoutesToAnthropic(t *testing.T) {
 	ctx := context.Background()
 	h := newHarness(pool)
 	ac, _ := h.newOwnerContext(t, ctx, "anthropic-restricted-owner@nodera.dev")
+	h.grantPlatformPermission(t, ctx, ac.ActorID, "platform.ai.providers.manage")
+	h.grantPlatformPermission(t, ctx, ac.ActorID, "platform.ai.models.manage")
 
 	mockAnthropic := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Fatal("a RESTRICTED profile must never reach the cloud provider's HTTP endpoint at all")
 	}))
 	defer mockAnthropic.Close()
 
-	aiSvc := ai.New(pool, h.audit, anthropic.NewWithBaseURL("anthropic", "test-api-key", mockAnthropic.URL))
+	aiSvc := ai.New(pool, h.audit, h.platform, anthropic.NewWithBaseURL("anthropic", "test-api-key", mockAnthropic.URL))
 
 	if _, err := aiSvc.UpsertProvider(ctx, ac, ai.UpsertProviderInput{
 		Key: "anthropic", Kind: "cloud", DisplayName: "Anthropic (test)", Status: "active",

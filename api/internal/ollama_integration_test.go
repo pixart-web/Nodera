@@ -24,6 +24,8 @@ func TestAIChatRoutesToOllamaProvider(t *testing.T) {
 	ctx := context.Background()
 	h := newHarness(pool)
 	ac, _ := h.newOwnerContext(t, ctx, "ollama-owner@nodera.dev")
+	h.grantPlatformPermission(t, ctx, ac.ActorID, "platform.ai.providers.manage")
+	h.grantPlatformPermission(t, ctx, ac.ActorID, "platform.ai.models.manage")
 
 	mockOllama := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -36,7 +38,7 @@ func TestAIChatRoutesToOllamaProvider(t *testing.T) {
 	}))
 	defer mockOllama.Close()
 
-	aiSvc := ai.New(pool, h.audit, localecho.New(), ollama.New("ollama", mockOllama.URL))
+	aiSvc := ai.New(pool, h.audit, h.platform, localecho.New(), ollama.New("ollama", mockOllama.URL))
 
 	// Register the provider in the platform-wide registry (this is what
 	// cmd/server/main.go does automatically when NODERA_OLLAMA_BASE_URL is
@@ -85,9 +87,11 @@ func TestAIRegistryProviderWithNoAdapterIsUnavailable(t *testing.T) {
 	ctx := context.Background()
 	h := newHarness(pool)
 	ac, _ := h.newOwnerContext(t, ctx, "no-adapter-owner@nodera.dev")
+	h.grantPlatformPermission(t, ctx, ac.ActorID, "platform.ai.providers.manage")
+	h.grantPlatformPermission(t, ctx, ac.ActorID, "platform.ai.models.manage")
 
 	// Note: no 'openai' Go adapter passed to ai.New.
-	aiSvc := ai.New(pool, h.audit, localecho.New())
+	aiSvc := ai.New(pool, h.audit, h.platform, localecho.New())
 
 	if _, err := aiSvc.UpsertProvider(ctx, ac, ai.UpsertProviderInput{
 		Key: "openai", Kind: "cloud", DisplayName: "OpenAI", Status: "active",
@@ -119,8 +123,10 @@ func TestAIRegistryListProvidersAndModels(t *testing.T) {
 	ctx := context.Background()
 	h := newHarness(pool)
 	ac, _ := h.newOwnerContext(t, ctx, "registry-owner@nodera.dev")
+	h.grantPlatformPermission(t, ctx, ac.ActorID, "platform.ai.providers.manage")
+	h.grantPlatformPermission(t, ctx, ac.ActorID, "platform.ai.models.manage")
 
-	aiSvc := ai.New(pool, h.audit, localecho.New())
+	aiSvc := ai.New(pool, h.audit, h.platform, localecho.New())
 
 	providersList, err := aiSvc.ListProviders(ctx, ac)
 	if err != nil {
@@ -164,8 +170,10 @@ func TestAIRegistryDeleteModel(t *testing.T) {
 	ctx := context.Background()
 	h := newHarness(pool)
 	ac, _ := h.newOwnerContext(t, ctx, "registry-delete-model-owner@nodera.dev")
+	h.grantPlatformPermission(t, ctx, ac.ActorID, "platform.ai.providers.manage")
+	h.grantPlatformPermission(t, ctx, ac.ActorID, "platform.ai.models.manage")
 
-	aiSvc := ai.New(pool, h.audit, localecho.New())
+	aiSvc := ai.New(pool, h.audit, h.platform, localecho.New())
 
 	if _, err := aiSvc.UpsertProvider(ctx, ac, ai.UpsertProviderInput{
 		Key: "delete-model-test-provider", Kind: "cloud", DisplayName: "Test", Status: "active",
@@ -206,8 +214,10 @@ func TestAIRegistryDeleteProviderCascadesToModels(t *testing.T) {
 	ctx := context.Background()
 	h := newHarness(pool)
 	ac, _ := h.newOwnerContext(t, ctx, "registry-delete-provider-owner@nodera.dev")
+	h.grantPlatformPermission(t, ctx, ac.ActorID, "platform.ai.providers.manage")
+	h.grantPlatformPermission(t, ctx, ac.ActorID, "platform.ai.models.manage")
 
-	aiSvc := ai.New(pool, h.audit, localecho.New())
+	aiSvc := ai.New(pool, h.audit, h.platform, localecho.New())
 
 	if _, err := aiSvc.UpsertProvider(ctx, ac, ai.UpsertProviderInput{
 		Key: "delete-provider-test", Kind: "cloud", DisplayName: "Test", Status: "active",
@@ -256,8 +266,10 @@ func TestAIRegistryDeleteRequiresManagePermission(t *testing.T) {
 	ctx := context.Background()
 	h := newHarness(pool)
 	ac, _ := h.newOwnerContext(t, ctx, "registry-delete-perm-owner@nodera.dev")
+	h.grantPlatformPermission(t, ctx, ac.ActorID, "platform.ai.providers.manage")
+	h.grantPlatformPermission(t, ctx, ac.ActorID, "platform.ai.models.manage")
 
-	aiSvc := ai.New(pool, h.audit, localecho.New())
+	aiSvc := ai.New(pool, h.audit, h.platform, localecho.New())
 
 	if _, err := aiSvc.UpsertProvider(ctx, ac, ai.UpsertProviderInput{
 		Key: "delete-perm-test", Kind: "cloud", DisplayName: "Test", Status: "active",

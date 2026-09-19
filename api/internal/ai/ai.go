@@ -29,26 +29,43 @@ type AuditRecorder interface {
 	Record(ctx context.Context, ac authctx.AuthContext, e audit.Entry) error
 }
 
+// PlatformAuthorizer checks platform-scoped permissions (internal/platformauth)
+// — entirely separate from internal/rbac's organization-scoped
+// permissions. The AI provider/model registry is platform-wide (see
+// registry.go's package doc), so its mutations must be gated by this, not
+// by an organization permission an org admin could hold in their own org.
+type PlatformAuthorizer interface {
+	Require(ctx context.Context, ac authctx.AuthContext, key string) error
+}
+
 // Service composes the AI profile registry, the deterministic router, and
 // usage tracking. Provider adapters are registered at process wiring time
 // (cmd/server/main.go) — the Service never imports a vendor SDK directly.
 type Service struct {
 	pool      *pgxpool.Pool
 	audit     AuditRecorder
+	platform  PlatformAuthorizer
 	providers map[string]providers.Provider // keyed by ai_providers.key
 }
 
-func New(pool *pgxpool.Pool, audit AuditRecorder, registeredProviders ...providers.Provider) *Service {
+func New(pool *pgxpool.Pool, audit AuditRecorder, platform PlatformAuthorizer, registeredProviders ...providers.Provider) *Service {
 	m := make(map[string]providers.Provider, len(registeredProviders))
 	for _, p := range registeredProviders {
 		m[p.Key()] = p
 	}
-	return &Service{pool: pool, audit: audit, providers: m}
+	return &Service{pool: pool, audit: audit, platform: platform, providers: m}
 }
 
 const (
-	permManage = "ai.manage"
+	permManage = "ai.manage" // organization-scoped: manage this org's own AI profiles
 	permUse    = "ai.use"
+
+	// permPlatformAIProvidersManage/ModelsManage gate mutations to the
+	// platform-wide provider/model registry (registry.go) — deliberately
+	// distinct from permManage above, which only ever authorizes actions
+	// within the caller's own organization.
+	permPlatformAIProvidersManage = "platform.ai.providers.manage"
+	permPlatformAIModelsManage    = "platform.ai.models.manage"
 )
 
 // --- Profiles ---

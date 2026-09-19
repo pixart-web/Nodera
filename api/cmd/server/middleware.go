@@ -108,6 +108,23 @@ func userIDFromRequest(r *http.Request) uuid.UUID {
 	return id
 }
 
+// platformAuthContext builds the AuthContext platform-scoped endpoints
+// (r.Get("/platform/...") — outside the requireOrganization group, since
+// platform permissions apply across every organization) check against. An
+// API-token caller already resolved a full AuthContext in requireSession;
+// reuse it as-is (platformauth.Require only ever looks at ActorType/
+// ActorID, never OrganizationID/Permissions, so an org-scoped API token
+// works correctly here without granting it anything beyond what the
+// underlying user actually holds). A session-token caller only resolved a
+// bare user id (org selection happens later, if at all, and platform
+// permissions don't need one), so build the minimal AuthContext directly.
+func platformAuthContext(r *http.Request) authctx.AuthContext {
+	if ac, ok := r.Context().Value(ctxKeyAuthContext{}).(authctx.AuthContext); ok {
+		return ac
+	}
+	return authctx.AuthContext{ActorType: authctx.ActorUser, ActorID: userIDFromRequest(r)}
+}
+
 func mustAuthContext(r *http.Request) authctx.AuthContext {
 	ac, _ := r.Context().Value(ctxKeyAuthContext{}).(authctx.AuthContext)
 	return ac

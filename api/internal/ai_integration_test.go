@@ -22,8 +22,10 @@ func TestAIProfileCreateAndChatRoundTrip(t *testing.T) {
 	ctx := context.Background()
 	h := newHarness(pool)
 	ac, _ := h.newOwnerContext(t, ctx, "ai-owner@nodera.dev")
+	h.grantPlatformPermission(t, ctx, ac.ActorID, "platform.ai.providers.manage")
+	h.grantPlatformPermission(t, ctx, ac.ActorID, "platform.ai.models.manage")
 
-	aiSvc := ai.New(pool, h.audit, localecho.New())
+	aiSvc := ai.New(pool, h.audit, h.platform, localecho.New())
 
 	profile, err := aiSvc.CreateProfile(ctx, ac, ai.CreateProfileInput{
 		Key:                "test.echo",
@@ -77,8 +79,10 @@ func TestAIListUsageReflectsRealChatCalls(t *testing.T) {
 	ctx := context.Background()
 	h := newHarness(pool)
 	ac, _ := h.newOwnerContext(t, ctx, "ai-usage-owner@nodera.dev")
+	h.grantPlatformPermission(t, ctx, ac.ActorID, "platform.ai.providers.manage")
+	h.grantPlatformPermission(t, ctx, ac.ActorID, "platform.ai.models.manage")
 
-	aiSvc := ai.New(pool, h.audit, localecho.New())
+	aiSvc := ai.New(pool, h.audit, h.platform, localecho.New())
 
 	profile, err := aiSvc.CreateProfile(ctx, ac, ai.CreateProfileInput{
 		Key:                "test.usage",
@@ -141,7 +145,7 @@ func TestAIListUsageIsTenantIsolated(t *testing.T) {
 	acA, _ := h.newOwnerContext(t, ctx, "ai-usage-a@nodera.dev")
 	acB, _ := h.newOwnerContext(t, ctx, "ai-usage-b@nodera.dev")
 
-	aiSvc := ai.New(pool, h.audit, localecho.New())
+	aiSvc := ai.New(pool, h.audit, h.platform, localecho.New())
 
 	profile, err := aiSvc.CreateProfile(ctx, acA, ai.CreateProfileInput{
 		Key:                "test.usage-isolated",
@@ -173,6 +177,8 @@ func TestAIListUsageFiltersByProfileAndProvider(t *testing.T) {
 	ctx := context.Background()
 	h := newHarness(pool)
 	ac, _ := h.newOwnerContext(t, ctx, "ai-usage-filter-owner@nodera.dev")
+	h.grantPlatformPermission(t, ctx, ac.ActorID, "platform.ai.providers.manage")
+	h.grantPlatformPermission(t, ctx, ac.ActorID, "platform.ai.models.manage")
 
 	mockOllama := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -185,7 +191,7 @@ func TestAIListUsageFiltersByProfileAndProvider(t *testing.T) {
 	}))
 	defer mockOllama.Close()
 
-	aiSvc := ai.New(pool, h.audit, localecho.New(), ollama.New("ollama", mockOllama.URL))
+	aiSvc := ai.New(pool, h.audit, h.platform, localecho.New(), ollama.New("ollama", mockOllama.URL))
 
 	if _, err := aiSvc.UpsertProvider(ctx, ac, ai.UpsertProviderInput{
 		Key: "ollama", Kind: "local", DisplayName: "Ollama (test)", Status: "active",
@@ -248,8 +254,10 @@ func TestAIListUsageRequiresAIUsePermission(t *testing.T) {
 	ctx := context.Background()
 	h := newHarness(pool)
 	ac, _ := h.newOwnerContext(t, ctx, "ai-usage-perm-owner@nodera.dev")
+	h.grantPlatformPermission(t, ctx, ac.ActorID, "platform.ai.providers.manage")
+	h.grantPlatformPermission(t, ctx, ac.ActorID, "platform.ai.models.manage")
 
-	aiSvc := ai.New(pool, h.audit, localecho.New())
+	aiSvc := ai.New(pool, h.audit, h.platform, localecho.New())
 
 	// The seeded 'member' role already holds ai.use, so a plain member
 	// can't exercise this guard — construct a caller with an empty
@@ -270,8 +278,10 @@ func TestAIChatUnknownProfileIsNotFound(t *testing.T) {
 	ctx := context.Background()
 	h := newHarness(pool)
 	ac, _ := h.newOwnerContext(t, ctx, "ai-owner-2@nodera.dev")
+	h.grantPlatformPermission(t, ctx, ac.ActorID, "platform.ai.providers.manage")
+	h.grantPlatformPermission(t, ctx, ac.ActorID, "platform.ai.models.manage")
 
-	aiSvc := ai.New(pool, h.audit, localecho.New())
+	aiSvc := ai.New(pool, h.audit, h.platform, localecho.New())
 
 	if _, err := aiSvc.Chat(ctx, ac, "does.not.exist", []providers.Message{{Role: "user", Content: "x"}}); err == nil {
 		t.Fatal("expected an error for a nonexistent AI profile")
@@ -283,8 +293,10 @@ func TestAIUpdateProfileChangesOnlyProvidedFields(t *testing.T) {
 	ctx := context.Background()
 	h := newHarness(pool)
 	ac, _ := h.newOwnerContext(t, ctx, "ai-update-owner@nodera.dev")
+	h.grantPlatformPermission(t, ctx, ac.ActorID, "platform.ai.providers.manage")
+	h.grantPlatformPermission(t, ctx, ac.ActorID, "platform.ai.models.manage")
 
-	aiSvc := ai.New(pool, h.audit, localecho.New())
+	aiSvc := ai.New(pool, h.audit, h.platform, localecho.New())
 
 	profile, err := aiSvc.CreateProfile(ctx, ac, ai.CreateProfileInput{
 		Key:                "test.update-only",
@@ -323,8 +335,10 @@ func TestAIUpdateDeleteProfileRequireManagePermission(t *testing.T) {
 	ctx := context.Background()
 	h := newHarness(pool)
 	ac, _ := h.newOwnerContext(t, ctx, "ai-perm-owner@nodera.dev")
+	h.grantPlatformPermission(t, ctx, ac.ActorID, "platform.ai.providers.manage")
+	h.grantPlatformPermission(t, ctx, ac.ActorID, "platform.ai.models.manage")
 
-	aiSvc := ai.New(pool, h.audit, localecho.New())
+	aiSvc := ai.New(pool, h.audit, h.platform, localecho.New())
 
 	profile, err := aiSvc.CreateProfile(ctx, ac, ai.CreateProfileInput{
 		Key:                "test.perm-guard",
@@ -356,8 +370,10 @@ func TestAIDeleteProfileThenChatFailsNotFound(t *testing.T) {
 	ctx := context.Background()
 	h := newHarness(pool)
 	ac, _ := h.newOwnerContext(t, ctx, "ai-delete-owner@nodera.dev")
+	h.grantPlatformPermission(t, ctx, ac.ActorID, "platform.ai.providers.manage")
+	h.grantPlatformPermission(t, ctx, ac.ActorID, "platform.ai.models.manage")
 
-	aiSvc := ai.New(pool, h.audit, localecho.New())
+	aiSvc := ai.New(pool, h.audit, h.platform, localecho.New())
 
 	profile, err := aiSvc.CreateProfile(ctx, ac, ai.CreateProfileInput{
 		Key:                "test.to-delete",
@@ -388,8 +404,10 @@ func TestAICannotUpdateOrDeleteSystemDefinedProfile(t *testing.T) {
 	ctx := context.Background()
 	h := newHarness(pool)
 	ac, _ := h.newOwnerContext(t, ctx, "ai-system-owner@nodera.dev")
+	h.grantPlatformPermission(t, ctx, ac.ActorID, "platform.ai.providers.manage")
+	h.grantPlatformPermission(t, ctx, ac.ActorID, "platform.ai.models.manage")
 
-	aiSvc := ai.New(pool, h.audit, localecho.New())
+	aiSvc := ai.New(pool, h.audit, h.platform, localecho.New())
 
 	// System-defined profiles (organization_id IS NULL) aren't created
 	// through the API today, but the schema supports them; insert one

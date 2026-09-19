@@ -11,6 +11,7 @@ import (
 	"github.com/nodera/nodera/internal/audit"
 	"github.com/nodera/nodera/internal/identity"
 	"github.com/nodera/nodera/internal/platform/authctx"
+	"github.com/nodera/nodera/internal/platformauth"
 	"github.com/nodera/nodera/internal/rbac"
 	"github.com/nodera/nodera/internal/tenancy"
 )
@@ -29,6 +30,7 @@ type testHarness struct {
 	tenancy  *tenancy.Service
 	audit    *audit.Service
 	rbac     *rbac.Service
+	platform *platformauth.Service
 }
 
 func newHarness(pool *pgxpool.Pool) *testHarness {
@@ -41,6 +43,7 @@ func newHarness(pool *pgxpool.Pool) *testHarness {
 		tenancy:  tenancy.New(pool, identitySvc, auditSvc),
 		audit:    auditSvc,
 		rbac:     rbacSvc,
+		platform: platformauth.New(pool, auditSvc),
 	}
 }
 
@@ -96,6 +99,21 @@ func (h *testHarness) newMemberContext(t *testing.T, ctx context.Context, orgID 
 		t.Fatalf("AuthContextForSession: %v", err)
 	}
 	return ac
+}
+
+// grantPlatformPermission directly inserts a platform_user_permissions row
+// for test setup, bypassing platformauth.Service.Grant's own
+// platform.admins.manage requirement (which would be circular for
+// bootstrapping a test's first grant) — the same "insert the fixture
+// directly" pattern newMemberContext uses for organization_member_roles.
+func (h *testHarness) grantPlatformPermission(t *testing.T, ctx context.Context, userID uuid.UUID, key string) {
+	t.Helper()
+	if _, err := h.pool.Exec(ctx, `
+		INSERT INTO platform_user_permissions (user_id, permission_key) VALUES ($1, $2)
+		ON CONFLICT (user_id, permission_key) DO NOTHING
+	`, userID, key); err != nil {
+		t.Fatalf("grantPlatformPermission(%s): %v", key, err)
+	}
 }
 
 func slugify(email string) string {

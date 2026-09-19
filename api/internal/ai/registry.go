@@ -21,13 +21,15 @@ import (
 // provider like Ollama through the API instead of only via a migration
 // seed (which is how the local-echo test provider is registered).
 //
-// Because ai_providers/ai_models carry no organization_id, these methods
-// only check that the caller holds ai.manage within *some* organization —
-// they are not tenant-scoped the way every other domain method is. This is
-// a deliberate, documented simplification for a platform expected to be
-// operated by one administrating organization in phase 1 (docs/SECURITY.md);
-// a dedicated platform-admin scope is future work if Nodera ever needs to
-// isolate registry management between mutually-untrusting organizations.
+// Because ai_providers/ai_models carry no organization_id, the mutating
+// methods (UpsertProvider/DeleteProvider/UpsertModel/DeleteModel) are
+// gated by internal/platformauth's platform.ai.providers.manage /
+// platform.ai.models.manage — not by ai.manage, which is organization-
+// scoped and would otherwise let any organization admin mutate global
+// state merely by administering their own organization. List* stays
+// gated by the ordinary organization permission ai.use: reading the
+// registry to configure an org's own AI profile is not a platform-admin
+// operation.
 type ProviderInfo struct {
 	ID          uuid.UUID `json:"id"`
 	Key         string    `json:"key"`
@@ -55,7 +57,7 @@ var validProviderStatuses = map[string]bool{"unconfigured": true, "active": true
 // wired, in which case the router correctly treats it as unavailable
 // rather than fabricating a call (rule 36).
 func (s *Service) UpsertProvider(ctx context.Context, ac authctx.AuthContext, in UpsertProviderInput) (ProviderInfo, error) {
-	if err := rbac.Require(ac, permManage); err != nil {
+	if err := s.platform.Require(ctx, ac, permPlatformAIProvidersManage); err != nil {
 		return ProviderInfo{}, err
 	}
 	if in.Key == "" {
@@ -109,7 +111,7 @@ func (s *Service) UpsertProvider(ctx context.Context, ac authctx.AuthContext, in
 // resolve time (the router already handles an unresolvable reference this
 // way) rather than via a cascading delete or a dangling FK.
 func (s *Service) DeleteProvider(ctx context.Context, ac authctx.AuthContext, key string) error {
-	if err := rbac.Require(ac, permManage); err != nil {
+	if err := s.platform.Require(ctx, ac, permPlatformAIProvidersManage); err != nil {
 		return err
 	}
 	tag, err := s.pool.Exec(ctx, `DELETE FROM ai_providers WHERE key = $1`, key)
@@ -175,7 +177,7 @@ type UpsertModelInput struct {
 var validModelStatuses = map[string]bool{"available": true, "unavailable": true, "deprecated": true}
 
 func (s *Service) UpsertModel(ctx context.Context, ac authctx.AuthContext, in UpsertModelInput) (ModelInfo, error) {
-	if err := rbac.Require(ac, permManage); err != nil {
+	if err := s.platform.Require(ctx, ac, permPlatformAIModelsManage); err != nil {
 		return ModelInfo{}, err
 	}
 	if in.ProviderKey == "" || in.ModelIdentifier == "" {
@@ -233,7 +235,7 @@ func (s *Service) UpsertModel(ctx context.Context, ac authctx.AuthContext, in Up
 // cleanup path DeleteProvider offers for a provider, scoped to one model
 // rather than everything under a provider.
 func (s *Service) DeleteModel(ctx context.Context, ac authctx.AuthContext, providerKey, modelIdentifier string) error {
-	if err := rbac.Require(ac, permManage); err != nil {
+	if err := s.platform.Require(ctx, ac, permPlatformAIModelsManage); err != nil {
 		return err
 	}
 	tag, err := s.pool.Exec(ctx, `

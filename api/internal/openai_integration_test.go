@@ -24,6 +24,8 @@ func TestAIChatRoutesToOpenAIProvider(t *testing.T) {
 	ctx := context.Background()
 	h := newHarness(pool)
 	ac, _ := h.newOwnerContext(t, ctx, "openai-owner@nodera.dev")
+	h.grantPlatformPermission(t, ctx, ac.ActorID, "platform.ai.providers.manage")
+	h.grantPlatformPermission(t, ctx, ac.ActorID, "platform.ai.models.manage")
 
 	mockOpenAI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -34,7 +36,7 @@ func TestAIChatRoutesToOpenAIProvider(t *testing.T) {
 	}))
 	defer mockOpenAI.Close()
 
-	aiSvc := ai.New(pool, h.audit, localecho.New(), openai.NewWithBaseURL("openai", "test-api-key", mockOpenAI.URL))
+	aiSvc := ai.New(pool, h.audit, h.platform, localecho.New(), openai.NewWithBaseURL("openai", "test-api-key", mockOpenAI.URL))
 
 	// Register the provider in the platform-wide registry (this is what
 	// cmd/server/main.go does automatically when NODERA_OPENAI_API_KEY is
@@ -85,13 +87,15 @@ func TestAIRestrictedProfileNeverRoutesToOpenAI(t *testing.T) {
 	ctx := context.Background()
 	h := newHarness(pool)
 	ac, _ := h.newOwnerContext(t, ctx, "openai-restricted-owner@nodera.dev")
+	h.grantPlatformPermission(t, ctx, ac.ActorID, "platform.ai.providers.manage")
+	h.grantPlatformPermission(t, ctx, ac.ActorID, "platform.ai.models.manage")
 
 	mockOpenAI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Fatal("a RESTRICTED profile must never reach the cloud provider's HTTP endpoint at all")
 	}))
 	defer mockOpenAI.Close()
 
-	aiSvc := ai.New(pool, h.audit, openai.NewWithBaseURL("openai", "test-api-key", mockOpenAI.URL))
+	aiSvc := ai.New(pool, h.audit, h.platform, openai.NewWithBaseURL("openai", "test-api-key", mockOpenAI.URL))
 
 	if _, err := aiSvc.UpsertProvider(ctx, ac, ai.UpsertProviderInput{
 		Key: "openai", Kind: "cloud", DisplayName: "OpenAI (test)", Status: "active",
