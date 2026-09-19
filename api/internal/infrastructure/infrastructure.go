@@ -186,6 +186,202 @@ func (s *Service) Get(ctx context.Context, ac authctx.AuthContext, id uuid.UUID)
 	return n, nil
 }
 
+type UpdateNodeInput struct {
+	Hostname        *string  `json:"hostname"`
+	Role            *string  `json:"role"`
+	Environment     *string  `json:"environment"`
+	OperatingSystem *string  `json:"operating_system"`
+	CPUCores        *int     `json:"cpu_cores"`
+	MemoryMB        *int     `json:"memory_mb"`
+	StorageGB       *int     `json:"storage_gb"`
+	Capabilities    []string `json:"capabilities"`
+}
+
+// UpdateNode edits a node's editable inventory fields — everything except
+// its identity (organization, provider/provider_resource_id — set once at
+// registration) and its status, which is reported separately by
+// UpdateNodeStatus/DecommissionNode rather than mixed into general
+// inventory edits. Each field is a pointer (nil = leave unchanged) except
+// Capabilities, whose zero value (nil slice) is indistinguishable from
+// "no change" vs. "clear the list" for a []string — callers that want to
+// clear it pass an explicit empty slice; nil truly means "don't touch it."
+func (s *Service) UpdateNode(ctx context.Context, ac authctx.AuthContext, id uuid.UUID, in UpdateNodeInput) (Node, error) {
+	if err := rbac.Require(ac, "infrastructure.manage"); err != nil {
+		return Node{}, err
+	}
+
+	existing, err := s.Get(ctx, ac, id)
+	if err != nil {
+		return Node{}, err
+	}
+	if existing.Status == "decommissioned" {
+		return Node{}, apierr.Conflict("node is decommissioned")
+	}
+
+	hostname := existing.Hostname
+	if in.Hostname != nil {
+		if *in.Hostname == "" {
+			return Node{}, apierr.Validation("hostname cannot be empty")
+		}
+		hostname = *in.Hostname
+	}
+	role := existing.Role
+	if in.Role != nil {
+		role = *in.Role
+	}
+	environment := existing.Environment
+	if in.Environment != nil {
+		environment = *in.Environment
+	}
+	operatingSystem := existing.OperatingSystem
+	if in.OperatingSystem != nil {
+		operatingSystem = *in.OperatingSystem
+	}
+	cpuCores := existing.CPUCores
+	if in.CPUCores != nil {
+		cpuCores = *in.CPUCores
+	}
+	memoryMB := existing.MemoryMB
+	if in.MemoryMB != nil {
+		memoryMB = *in.MemoryMB
+	}
+	storageGB := existing.StorageGB
+	if in.StorageGB != nil {
+		storageGB = *in.StorageGB
+	}
+	capabilities := existing.Capabilities
+	if in.Capabilities != nil {
+		capabilities = in.Capabilities
+	}
+
+	var n Node
+	err = s.pool.QueryRow(ctx, `
+		UPDATE nodes SET hostname = $3, role = $4, environment = $5, operating_system = $6,
+		                 cpu_cores = $7, memory_mb = $8, storage_gb = $9, capabilities = $10,
+		                 updated_at = now()
+		WHERE id = $1 AND organization_id = $2
+		RETURNING id, organization_id, hostname, provider, COALESCE(provider_resource_id, ''),
+		          role, environment, status, COALESCE(operating_system, ''),
+		          COALESCE(cpu_cores, 0), COALESCE(memory_mb, 0), COALESCE(storage_gb, 0),
+		          capabilities, last_seen_at, created_at, updated_at
+	`, id, ac.OrganizationID, hostname, role, environment, operatingSystem, cpuCores, memoryMB, storageGB, capabilities).Scan(
+		&n.ID, &n.OrganizationID, &n.Hostname, &n.Provider, &n.ProviderResourceID,
+		&n.Role, &n.Environment, &n.Status, &n.OperatingSystem,
+		&n.CPUCores, &n.MemoryMB, &n.StorageGB, &n.Capabilities, &n.LastSeenAt, &n.CreatedAt, &n.UpdatedAt,
+	)
+	if err != nil {
+		if isUniqueViolation(err) {
+			return Node{}, apierr.Conflict("a node with this hostname already exists in this organization")
+		}
+		return Node{}, apierr.Wrap(apierr.CodeInternal, "failed to update node", err)
+	}
+
+	if err := s.audit.Record(ctx, ac, audit.Entry{
+		Action: "infrastructure.node.updated", ResourceType: "node", ResourceID: n.ID.String(),
+		Success: true, PreviousState: existing, ResultingState: n,
+	}); err != nil {
+		logAuditFailure(ctx, err)
+	}
+
+	return n, nil
+}
+
+var validNodeStatuses = map[string]bool{"unknown": true, "online": true, "offline": true, "degraded": true}
+
+// UpdateNodeStatus reports a node's current status — what a future Node
+// Agent heartbeat would call (docs/ARCHITECTURE.md §2; no such agent
+// exists yet, so today this is only reachable via a direct API call, not
+// an automatic process). Also stamps last_seen_at, since a status report
+// is itself evidence the node was reachable just now. Does not accept
+// 'decommissioned' — that's DecommissionNode's terminal, one-way action,
+// not a status a routine heartbeat should ever be able to set or clear.
+func (s *Service) UpdateNodeStatus(ctx context.Context, ac authctx.AuthContext, id uuid.UUID, status string) (Node, error) {
+	if err := rbac.Require(ac, "infrastructure.manage"); err != nil {
+		return Node{}, err
+	}
+	if !validNodeStatuses[status] {
+		return Node{}, apierr.Validation("status must be one of: unknown, online, offline, degraded")
+	}
+
+	existing, err := s.Get(ctx, ac, id)
+	if err != nil {
+		return Node{}, err
+	}
+	if existing.Status == "decommissioned" {
+		return Node{}, apierr.Conflict("node is decommissioned")
+	}
+
+	var n Node
+	err = s.pool.QueryRow(ctx, `
+		UPDATE nodes SET status = $3, last_seen_at = now(), updated_at = now()
+		WHERE id = $1 AND organization_id = $2
+		RETURNING id, organization_id, hostname, provider, COALESCE(provider_resource_id, ''),
+		          role, environment, status, COALESCE(operating_system, ''),
+		          COALESCE(cpu_cores, 0), COALESCE(memory_mb, 0), COALESCE(storage_gb, 0),
+		          capabilities, last_seen_at, created_at, updated_at
+	`, id, ac.OrganizationID, status).Scan(
+		&n.ID, &n.OrganizationID, &n.Hostname, &n.Provider, &n.ProviderResourceID,
+		&n.Role, &n.Environment, &n.Status, &n.OperatingSystem,
+		&n.CPUCores, &n.MemoryMB, &n.StorageGB, &n.Capabilities, &n.LastSeenAt, &n.CreatedAt, &n.UpdatedAt,
+	)
+	if err != nil {
+		return Node{}, apierr.Wrap(apierr.CodeInternal, "failed to update node status", err)
+	}
+
+	if err := s.audit.Record(ctx, ac, audit.Entry{
+		Action: "infrastructure.node.status_updated", ResourceType: "node", ResourceID: n.ID.String(),
+		Success: true, PreviousState: existing, ResultingState: n,
+	}); err != nil {
+		logAuditFailure(ctx, err)
+	}
+
+	return n, nil
+}
+
+// DecommissionNode marks a node as permanently retired — a terminal,
+// one-way state (migration 0014). The row is kept, not deleted, so audit
+// history and any historical application/model reference to it stays
+// meaningful. Idempotent: decommissioning an already-decommissioned node
+// is not an error.
+func (s *Service) DecommissionNode(ctx context.Context, ac authctx.AuthContext, id uuid.UUID) (Node, error) {
+	if err := rbac.Require(ac, "infrastructure.manage"); err != nil {
+		return Node{}, err
+	}
+
+	existing, err := s.Get(ctx, ac, id)
+	if err != nil {
+		return Node{}, err
+	}
+
+	var n Node
+	err = s.pool.QueryRow(ctx, `
+		UPDATE nodes SET status = 'decommissioned', updated_at = now()
+		WHERE id = $1 AND organization_id = $2
+		RETURNING id, organization_id, hostname, provider, COALESCE(provider_resource_id, ''),
+		          role, environment, status, COALESCE(operating_system, ''),
+		          COALESCE(cpu_cores, 0), COALESCE(memory_mb, 0), COALESCE(storage_gb, 0),
+		          capabilities, last_seen_at, created_at, updated_at
+	`, id, ac.OrganizationID).Scan(
+		&n.ID, &n.OrganizationID, &n.Hostname, &n.Provider, &n.ProviderResourceID,
+		&n.Role, &n.Environment, &n.Status, &n.OperatingSystem,
+		&n.CPUCores, &n.MemoryMB, &n.StorageGB, &n.Capabilities, &n.LastSeenAt, &n.CreatedAt, &n.UpdatedAt,
+	)
+	if err != nil {
+		return Node{}, apierr.Wrap(apierr.CodeInternal, "failed to decommission node", err)
+	}
+
+	if existing.Status != "decommissioned" {
+		if err := s.audit.Record(ctx, ac, audit.Entry{
+			Action: "infrastructure.node.decommissioned", ResourceType: "node", ResourceID: n.ID.String(),
+			Success: true, PreviousState: existing, ResultingState: n,
+		}); err != nil {
+			logAuditFailure(ctx, err)
+		}
+	}
+
+	return n, nil
+}
+
 // normalizeLimit applies List's default/ceiling independent of whatever
 // cap the HTTP layer enforces (internal/platform/httpserver.MaxPageLimit)
 // — 1000 is a hard safety ceiling, well above any HTTP-layer request, so it

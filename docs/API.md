@@ -92,6 +92,9 @@ tracked in `docs/ROADMAP.md` if that stops being true.
 | GET | `/api/v1/infrastructure/nodes` | session or token + org | List nodes, paginated (`infrastructure.read`) |
 | POST | `/api/v1/infrastructure/nodes` | session or token + org | Register a node (`infrastructure.manage`) |
 | GET | `/api/v1/infrastructure/nodes/{id}` | session or token + org | Get a node |
+| PUT | `/api/v1/infrastructure/nodes/{id}` | session or token + org | Update a node's editable inventory fields (`infrastructure.manage`) — identity fields (provider, provider_resource_id) and status are not editable here |
+| POST | `/api/v1/infrastructure/nodes/{id}/status` | session or token + org | Report a node's current status (`infrastructure.manage`) — what a future Node Agent heartbeat would call; also stamps `last_seen_at` |
+| POST | `/api/v1/infrastructure/nodes/{id}/decommission` | session or token + org | Permanently retire a node (`infrastructure.manage`) — terminal and one-way; the row is kept, not deleted, and idempotent to call again |
 | GET | `/api/v1/applications` | session or token + org | List applications, paginated (`applications.read`) |
 | POST | `/api/v1/applications` | session or token + org | Register an application (`applications.deploy` — see docs/API.md note below) |
 | GET | `/api/v1/applications/{id}` | session or token + org | Get an application |

@@ -30,7 +30,7 @@ schema/interfaces, no production backend yet) · **PLANNED** (not started).
 | Tenancy (organizations, membership) | IMPLEMENTED | |
 | RBAC | IMPLEMENTED | Seeded owner/admin/member roles plus org-scoped custom roles, granular permission catalog; list/create/delete roles, list members, add an existing account as a member, and assign/revoke a member's role via API + UI (`organization.manage`, no privilege escalation) |
 | Audit log | IMPLEMENTED | Append-only, tenant-scoped query |
-| Infrastructure (nodes) | IMPLEMENTED | Provider-agnostic node inventory (register/list/get) |
+| Infrastructure (nodes) | IMPLEMENTED | Provider-agnostic node inventory (register/list/get/update), status reporting (what a future Node Agent heartbeat would call) + decommission (terminal, row kept for history) |
 | Applications/services | IMPLEMENTED | Registration/inventory only — no deployment execution yet |
 | API tokens | IMPLEMENTED | User-owned or service-account-owned, scope-limited (cannot exceed creator's own permissions); org-admin can list/revoke any token in the org |
 | Service accounts | IMPLEMENTED | Create/list/disable, gated by `organization.manage`; hold their own scoped API tokens |

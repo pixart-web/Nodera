@@ -20,6 +20,27 @@ export default function InfrastructurePage() {
   const [role, setRole] = useState("application");
   const [formError, setFormError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [rowError, setRowError] = useState<string | null>(null);
+
+  async function reportStatus(id: string, status: string) {
+    setRowError(null);
+    try {
+      await api.post(`/api/v1/infrastructure/nodes/${id}/status`, { status });
+      nodes.reload();
+    } catch (err) {
+      setRowError(err instanceof ApiError ? err.message : "Failed to update node status");
+    }
+  }
+
+  async function decommission(id: string) {
+    setRowError(null);
+    try {
+      await api.post(`/api/v1/infrastructure/nodes/${id}/decommission`);
+      nodes.reload();
+    } catch (err) {
+      setRowError(err instanceof ApiError ? err.message : "Failed to decommission node");
+    }
+  }
 
   async function registerNode(e: React.FormEvent) {
     e.preventDefault();
@@ -97,6 +118,7 @@ export default function InfrastructurePage() {
       )}
 
       {nodes.error && <ErrorBanner message={nodes.error} />}
+      {rowError && <ErrorBanner message={rowError} />}
 
       <div className="card">
         {nodes.loading ? (
@@ -115,6 +137,7 @@ export default function InfrastructurePage() {
                 <th>Environment</th>
                 <th>Status</th>
                 <th>Capabilities</th>
+                <th></th>
               </tr>
             </thead>
             <tbody>
@@ -128,6 +151,31 @@ export default function InfrastructurePage() {
                     <StatusBadge status={n.status} />
                   </td>
                   <td className="text-xs text-base-400">{n.capabilities.join(", ") || "—"}</td>
+                  <td className="space-x-2">
+                    {n.status !== "decommissioned" && (
+                      <>
+                        <select
+                          className="input inline-block w-28 py-1 text-xs"
+                          value=""
+                          onChange={(e) => e.target.value && reportStatus(n.id, e.target.value)}
+                        >
+                          <option value="" disabled>
+                            Set status…
+                          </option>
+                          <option value="online">online</option>
+                          <option value="offline">offline</option>
+                          <option value="degraded">degraded</option>
+                          <option value="unknown">unknown</option>
+                        </select>
+                        <button
+                          className="text-xs text-base-400 hover:text-danger"
+                          onClick={() => decommission(n.id)}
+                        >
+                          Decommission
+                        </button>
+                      </>
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>

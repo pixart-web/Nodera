@@ -23,7 +23,8 @@ web/
     orgs/page.tsx           organization picker + create
     (org)/layout.tsx        sidebar shell — guards session + org, then renders:
       dashboard/page.tsx     live counts + recent audit activity
-      infrastructure/page.tsx  node list + register form
+      infrastructure/page.tsx  node list + register form + per-node status
+                                  report/decommission controls
       applications/page.tsx    application list + register form
       jobs/page.tsx             job list (status filter), enqueue, cancel
       tools/page.tsx             tool registry + inline execute form + approvals queue
@@ -68,6 +69,26 @@ imports. `lib/types.ts` also defines `Page<T>`, the pagination envelope
 `docs/API.md` Pagination); the pages for those four hold their own
 `visibleLimit` state and a "Load more" button that re-fetches with a
 larger `?limit=`, rather than accumulating pages client-side.
+
+## Infrastructure page
+
+`infrastructure/page.tsx` lists the node inventory and lets a user
+register one, same as before. Each row now also has a "Set status…"
+select (`online`/`offline`/`degraded`/`unknown`, calling `POST
+/infrastructure/nodes/{id}/status`) and a "Decommission" button (`POST
+/infrastructure/nodes/{id}/decommission`) — both hidden once a node is
+`decommissioned`, since that's a terminal state with nothing left to
+report or retire further. `StatusBadge` gained a `decommissioned` color
+(muted grey, distinct from the danger-red `offline`/`failed` family — it's
+not a fault, it's an intentional retirement).
+
+Verified live: registered a real node, set its status to `online` through
+the dropdown and watched the badge update to a real green `online` (not a
+guessed value — a genuine round trip through `UpdateNodeStatus`),
+decommissioned it and watched both controls disappear while the row
+itself stayed in the table (retired, not erased), then confirmed via a
+direct API call that a further status update on it correctly returns a
+real `409 CONFLICT`.
 
 ## Tools & Access pages
 

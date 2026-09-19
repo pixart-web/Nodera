@@ -15,6 +15,7 @@ const COLORS: Record<string, string> = {
   failed: "bg-danger/15 text-danger",
   unavailable: "bg-danger/15 text-danger",
   disabled: "bg-danger/15 text-danger",
+  decommissioned: "bg-base-500/20 text-base-400",
   // approval statuses
   pending: "bg-warn/15 text-warn",
   approved: "bg-ok/15 text-ok",

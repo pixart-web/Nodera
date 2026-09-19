@@ -702,6 +702,60 @@ scanning in CI (`govulncheck`, `npm audit`).
 - [x] Full backend and frontend verification clean
 - [x] Docs (`API.md`, `FRONTEND.md`, `SECURITY.md`, `README.md`) updated
 
+**Phase 28** — this pass:
+- [x] Node update/status-report/decommission — found by auditing
+      `internal/infrastructure` for gaps: nodes could only ever be
+      registered and read, never edited, never reported as online/offline,
+      never retired. Migration `0014` adds a terminal `decommissioned`
+      value to `nodes.status`'s CHECK constraint (the only schema change
+      needed — every other field this phase touches already existed)
+- [x] `UpdateNode` edits a node's editable inventory (hostname, role,
+      environment, operating_system, cpu/memory/storage, capabilities) —
+      everything except identity fields fixed at registration (`provider`,
+      `provider_resource_id`) and `status`, which is reported separately.
+      Each field is a pointer (nil = leave unchanged) except
+      `Capabilities`, whose zero value can't distinguish "no change" from
+      "clear it" for a slice — callers pass an explicit empty slice to
+      clear it
+- [x] `UpdateNodeStatus` is what a future Node Agent heartbeat would call
+      (`docs/INFRASTRUCTURE.md`; no such agent exists yet, so this is only
+      reachable via a direct API call today, not an automatic process) —
+      sets `status` and stamps `last_seen_at` in the same call, since a
+      status report is itself evidence the node was just reachable
+- [x] `DecommissionNode` is a terminal, one-way action — the row is kept,
+      not deleted (both existing FKs, `applications.node_id` and
+      `ai_models.node_id`, use `ON DELETE SET NULL`, so a hard delete
+      would only null those references and silently discard "this
+      application used to run on that node" history). Idempotent to call
+      again; every other mutation on a decommissioned node is refused
+      with `CONFLICT`
+- [x] 5 new integration tests, all passing under `-race`: a partial
+      update touches only the provided fields, an empty hostname is
+      rejected, a status report stamps `last_seen_at`, an unrecognized
+      status value is rejected, and decommissioning is terminal (idempotent
+      to repeat, but blocks further updates/status-reports, and the node
+      still appears in `List` afterward)
+- [x] 3 new HTTP routes (`PUT /infrastructure/nodes/{id}`,
+      `POST .../status`, `POST .../decommission`) and OpenAPI additions,
+      validated with `@redocly/cli lint`; `lib/api-types.generated.ts`
+      regenerated
+- [x] `web/app/(org)/infrastructure/page.tsx`: a "Set status…" select and
+      a "Decommission" button per row, both hidden once a node is
+      decommissioned; `StatusBadge` gained a `decommissioned` color
+- [x] Verified live end to end: registered a real node, set its status to
+      `online` through the dropdown and watched the badge update to a
+      genuine round-tripped value, decommissioned it and watched both
+      controls disappear while the row stayed in the table, then
+      confirmed via a direct API call that a further status update
+      correctly returns a real `409 CONFLICT`. Checked the browser
+      console on a fresh tab afterward — zero errors
+- [x] Full backend and frontend verification clean, including confirming
+      migration `0014` applies cleanly against both the dev database and
+      a fresh test database
+- [x] Docs (`API.md`, `INFRASTRUCTURE.md`, `FRONTEND.md`, `README.md`)
+      updated — `INFRASTRUCTURE.md` also had a stale "nothing updates
+      last_seen_at yet" bullet from an earlier phase, corrected here
+
 ## Next up
 
 1. **Concrete job types**: the worker dispatcher is real but nothing

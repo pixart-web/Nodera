@@ -87,6 +87,9 @@ func newRouter(d apiDeps) http.Handler {
 				r.Get("/infrastructure/nodes", d.handleListNodes)
 				r.Post("/infrastructure/nodes", d.handleRegisterNode)
 				r.Get("/infrastructure/nodes/{id}", d.handleGetNode)
+				r.Put("/infrastructure/nodes/{id}", d.handleUpdateNode)
+				r.Post("/infrastructure/nodes/{id}/status", d.handleUpdateNodeStatus)
+				r.Post("/infrastructure/nodes/{id}/decommission", d.handleDecommissionNode)
 
 				r.Get("/applications", d.handleListApplications)
 				r.Post("/applications", d.handleRegisterApplication)
@@ -378,6 +381,58 @@ func (d apiDeps) handleGetNode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	n, err := d.infra.Get(r.Context(), mustAuthContext(r), id)
+	if err != nil {
+		httpserver.WriteError(w, r, err)
+		return
+	}
+	httpserver.WriteJSON(w, http.StatusOK, n)
+}
+
+func (d apiDeps) handleUpdateNode(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		httpserver.WriteError(w, r, apierr.Validation("invalid node id"))
+		return
+	}
+	var body infrastructure.UpdateNodeInput
+	if !decodeJSON(w, r, &body) {
+		return
+	}
+	n, err := d.infra.UpdateNode(r.Context(), mustAuthContext(r), id, body)
+	if err != nil {
+		httpserver.WriteError(w, r, err)
+		return
+	}
+	httpserver.WriteJSON(w, http.StatusOK, n)
+}
+
+func (d apiDeps) handleUpdateNodeStatus(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		httpserver.WriteError(w, r, apierr.Validation("invalid node id"))
+		return
+	}
+	var body struct {
+		Status string `json:"status"`
+	}
+	if !decodeJSON(w, r, &body) {
+		return
+	}
+	n, err := d.infra.UpdateNodeStatus(r.Context(), mustAuthContext(r), id, body.Status)
+	if err != nil {
+		httpserver.WriteError(w, r, err)
+		return
+	}
+	httpserver.WriteJSON(w, http.StatusOK, n)
+}
+
+func (d apiDeps) handleDecommissionNode(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		httpserver.WriteError(w, r, apierr.Validation("invalid node id"))
+		return
+	}
+	n, err := d.infra.DecommissionNode(r.Context(), mustAuthContext(r), id)
 	if err != nil {
 		httpserver.WriteError(w, r, err)
 		return

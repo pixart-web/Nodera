@@ -419,7 +419,52 @@ export interface paths {
                 404: components["responses"]["NotFound"];
             };
         };
-        put?: never;
+        /** Update a node's editable inventory fields (infrastructure.manage) — identity fields (provider, provider_resource_id) and status are not editable here */
+        put: {
+            parameters: {
+                query?: never;
+                header?: {
+                    /** @description Required for a session token (which org to act within). Optional for an API token, which already embeds one — if present it must match. */
+                    "X-Nodera-Org"?: components["parameters"]["OrgHeader"];
+                };
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        hostname?: string;
+                        role?: string;
+                        environment?: string;
+                        operating_system?: string;
+                        cpu_cores?: number;
+                        memory_mb?: number;
+                        storage_gb?: number;
+                        capabilities?: string[];
+                    };
+                };
+            };
+            responses: {
+                /** @description Node updated */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Node"];
+                    };
+                };
+                /** @description Node is decommissioned */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
         post?: never;
         delete?: never;
         options?: never;
@@ -2702,6 +2747,102 @@ export interface paths {
                 };
             };
         };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/infrastructure/nodes/{id}/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Report a node's current status (infrastructure.manage) — what a future Node Agent heartbeat would call; also stamps last_seen_at */
+        post: {
+            parameters: {
+                query?: never;
+                header?: {
+                    /** @description Required for a session token (which org to act within). Optional for an API token, which already embeds one — if present it must match. */
+                    "X-Nodera-Org"?: components["parameters"]["OrgHeader"];
+                };
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        status: "unknown" | "online" | "offline" | "degraded";
+                    };
+                };
+            };
+            responses: {
+                /** @description Status updated */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Node"];
+                    };
+                };
+                /** @description Node is decommissioned */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/infrastructure/nodes/{id}/decommission": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Permanently retire a node (infrastructure.manage) — terminal and one-way; the row is kept, not deleted, and idempotent to call again */
+        post: {
+            parameters: {
+                query?: never;
+                header?: {
+                    /** @description Required for a session token (which org to act within). Optional for an API token, which already embeds one — if present it must match. */
+                    "X-Nodera-Org"?: components["parameters"]["OrgHeader"];
+                };
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Node decommissioned */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Node"];
+                    };
+                };
+            };
+        };
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;

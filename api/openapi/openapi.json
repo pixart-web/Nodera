@@ -430,6 +430,79 @@
             "$ref": "#/components/responses/NotFound"
           }
         }
+      },
+      "put": {
+        "tags": [
+          "infrastructure"
+        ],
+        "summary": "Update a node's editable inventory fields (infrastructure.manage) \u2014 identity fields (provider, provider_resource_id) and status are not editable here",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OrgHeader"
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "hostname": {
+                    "type": "string"
+                  },
+                  "role": {
+                    "type": "string"
+                  },
+                  "environment": {
+                    "type": "string"
+                  },
+                  "operating_system": {
+                    "type": "string"
+                  },
+                  "cpu_cores": {
+                    "type": "integer"
+                  },
+                  "memory_mb": {
+                    "type": "integer"
+                  },
+                  "storage_gb": {
+                    "type": "integer"
+                  },
+                  "capabilities": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Node updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Node"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Node is decommissioned"
+          }
+        }
       }
     },
     "/api/v1/applications": {
@@ -2494,6 +2567,100 @@
           },
           "404": {
             "description": "Not one of the caller's own active sessions"
+          }
+        }
+      }
+    },
+    "/api/v1/infrastructure/nodes/{id}/status": {
+      "post": {
+        "tags": [
+          "infrastructure"
+        ],
+        "summary": "Report a node's current status (infrastructure.manage) \u2014 what a future Node Agent heartbeat would call; also stamps last_seen_at",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OrgHeader"
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "status"
+                ],
+                "properties": {
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "unknown",
+                      "online",
+                      "offline",
+                      "degraded"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Status updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Node"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Node is decommissioned"
+          }
+        }
+      }
+    },
+    "/api/v1/infrastructure/nodes/{id}/decommission": {
+      "post": {
+        "tags": [
+          "infrastructure"
+        ],
+        "summary": "Permanently retire a node (infrastructure.manage) \u2014 terminal and one-way; the row is kept, not deleted, and idempotent to call again",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OrgHeader"
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Node decommissioned",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Node"
+                }
+              }
+            }
           }
         }
       }
