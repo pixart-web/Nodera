@@ -164,8 +164,12 @@ func TestTools_ApprovingUnimplementedToolReportsNotImplemented(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DecideApproval: %v", err)
 	}
-	if decided.Status != "approved" {
-		t.Fatalf("expected status 'approved', got %q", decided.Status)
+	// NOT_IMPLEMENTED is an execution failure, not an execution success —
+	// the approval decision itself succeeded (a human authorized it), but
+	// the terminal status must honestly reflect that the tool never
+	// actually ran, not collapse into a generic 'approved'.
+	if decided.Status != "execution_failed" {
+		t.Fatalf("expected status 'execution_failed', got %q", decided.Status)
 	}
 	if decided.DecisionReason != "looks fine" {
 		t.Fatalf("unexpected decision reason: %q", decided.DecisionReason)
@@ -230,6 +234,15 @@ func TestTools_ApprovingImplementedToolExecutesIt(t *testing.T) {
 	decided, err := toolsSvc.DecideApproval(ctx, ac, *result.ApprovalID, true, "ok")
 	if err != nil {
 		t.Fatalf("DecideApproval: %v", err)
+	}
+	if decided.Status != "executed" {
+		t.Fatalf("expected status 'executed', got %q", decided.Status)
+	}
+	if decided.RequestedByUserID == nil || *decided.RequestedByUserID != ac.ActorID {
+		t.Fatalf("expected requested_by_user_id to identify the requester, got %+v", decided.RequestedByUserID)
+	}
+	if decided.DecidedByUserID == nil || *decided.DecidedByUserID != ac.ActorID {
+		t.Fatalf("expected decided_by_user_id to identify the approver, got %+v", decided.DecidedByUserID)
 	}
 	var execResult map[string]any
 	if err := json.Unmarshal(decided.ExecutionResult, &execResult); err != nil {

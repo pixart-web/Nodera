@@ -4595,10 +4595,23 @@
             "enum": [
               "pending",
               "approved",
+              "executing",
+              "executed",
+              "execution_failed",
               "rejected",
               "expired",
               "cancelled"
             ]
+          },
+          "requested_by_user_id": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "requested_by_agent_id": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
           },
           "created_at": {
             "type": "string",
@@ -4607,6 +4620,11 @@
           "expires_at": {
             "type": "string",
             "format": "date-time",
+            "nullable": true
+          },
+          "decided_by_user_id": {
+            "type": "string",
+            "format": "uuid",
             "nullable": true
           },
           "decided_at": {

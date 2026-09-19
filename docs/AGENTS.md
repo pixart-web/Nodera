@@ -35,6 +35,90 @@ yet — those are different facts, both recorded truthfully, rule 36).
 Rejecting never executes anything, proven by
 `TestTools_RejectingApprovalNeverExecutes`.
 
+### Approval state machine and execution concurrency
+
+```
+pending → rejected            (DecideApproval, approve=false)
+pending → cancelled           (CancelApproval, requester only)
+pending → expired             (expirePending / RunExpirySweep)
+pending → executing → executed          (DecideApproval, approve=true, handler succeeded)
+pending → executing → execution_failed  (DecideApproval, approve=true, handler errored —
+                                          including a legitimate NOT_IMPLEMENTED outcome)
+```
+
+`approved` remains a legal value in the `approvals_status_check` constraint
+(migration `0017`) for rows written before this state machine existed, but
+no code path produces it anymore — approving now moves straight through
+`executing` to a terminal execution status in the same call.
+
+**The double-execution fix.** Every state transition above is a single
+conditional SQL statement — `UPDATE approvals SET status = <new> WHERE id =
+$1 AND status = 'pending' RETURNING ...` (or `WHERE status = 'executing'`
+for the final `executing → executed/execution_failed` step, which only the
+caller that already owns the row can ever reach). PostgreSQL serializes
+concurrent `UPDATE`s against the same row, so at most one concurrent
+caller's `WHERE status = 'pending'` can match; everyone else gets zero rows
+back and a deterministic `CONFLICT` — before either of them has called the
+tool handler. `Registry.DecideApproval`'s handler invocation happens only
+*after* this atomic claim succeeds, which is what actually makes "one
+approval → at most one execution" true, not just the presence of an
+`executing` state. See `internal/tools/tools.go` (`DecideApproval`'s doc
+comment) and `internal/approvals_concurrency_test.go`:
+
+- `TestApprovals_ConcurrentApprovalsExecuteExactlyOnce` — 20 concurrent
+  `DecideApproval(approve=true)` calls on one pending approval; an atomic
+  counter inside the handler proves it ran exactly once, and exactly 19
+  callers get `CONFLICT`.
+- `TestApprovals_ApproveVsRejectRaceIsDeterministic` /
+  `TestApprovals_ApproveVsCancelRaceIsDeterministic` — approve racing
+  reject/cancel, 15 trials each; exactly one side wins, and the handler
+  runs iff approve won.
+- `TestApprovals_ExpiredApprovalNeverExecutes` — a backdated `expires_at`
+  is flipped to `expired` before the decide call's atomic claim ever sees
+  `pending`.
+- `TestApprovals_SequentialRepeatedDecisionExecutesOnce` — the same
+  invariant holds for two *sequential* (non-racing) decide calls, proving
+  the fix isn't merely papering over concurrency.
+
+Run with `go test ./... -race` (all pass clean under the race detector).
+
+**Crash semantics.** If the process crashes after the `pending → executing`
+transition but before the final `executing → executed/execution_failed`
+transition, the row is left in `executing` permanently — there is no
+automatic reclaim or retry. This is intentional: resuming an
+unknown-outcome privileged/critical operation automatically risks a second,
+uncoordinated execution of something that might restart a service, modify
+DNS, or touch a database, which is strictly worse than requiring an
+operator to inspect and manually resolve a stuck `executing` row. Safety
+over availability for this one state.
+
+### Requester / approver / execution identity
+
+An `Approval` never collapses "who asked" and "who authorized" into one
+actor. The row (and the JSON the API returns) carries them separately:
+
+- `requested_by_user_id` / `requested_by_agent_id` — exactly one is set
+  (or neither, for a service-account-originated call), identifying who
+  actually called `Execute` and triggered the approval requirement. An
+  agent's own scoped identity (`ActorAgent`, its own `ActorID` — see
+  `agents.agentAuthContext`) is preserved here even though execution later
+  runs under the approving human's `AuthContext`, not the agent's.
+- `decided_by_user_id` — the human who called `DecideApproval`, distinct
+  from the requester whenever the two differ (e.g. an agent requests,
+  a human approves).
+- `created_at` / `decided_at` / `decision_reason` / `execution_result` —
+  the rest of the immutable trail: when requested, when decided, why, and
+  what executing it actually produced.
+
+`TestApprovals_PreservesRequesterAndApproverIdentitySeparately` exercises
+exactly the scenario this guards against: an agent (`ActorAgent`) requests
+`restart_container`, a human (`ActorUser`, holding `approvals.decide`)
+approves it, and the test asserts `requested_by_agent_id` still identifies
+the agent and `decided_by_user_id` identifies the human — post-execution,
+not just at request time. No secret values are ever stored in `parameters`
+or `execution_result` beyond what the tool call itself was given; the
+approval record is not a place to route credentials through.
+
 The requester themselves can also withdraw their own pending approval —
 `POST /api/v1/approvals/{id}/cancel` (`Registry.CancelApproval`) —
 without holding `approvals.decide`; that permission is only needed to

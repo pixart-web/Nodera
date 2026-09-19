@@ -332,19 +332,48 @@ func (r *Registry) resolveApprovalTTL(ctx context.Context, orgID uuid.UUID, tool
 	return time.Duration(seconds) * time.Second, nil
 }
 
+// Approval carries enough immutable information to reconstruct the full
+// trust chain behind a privileged/critical tool call: who requested it
+// (RequestedByUserID xor RequestedByAgentID — a human caller or an agent
+// acting under its own scoped identity, never both), what/where
+// (RequestedAction/ResourceType/ResourceID/Parameters), who decided it
+// (DecidedByUserID) and when, and what executing it actually produced
+// (ExecutionResult). The requester and the approver/executor are
+// deliberately distinct fields — an agent-requested, human-approved action
+// must never collapse into looking like the human originated the request
+// (see docs/AGENTS.md "Requester/approver/execution identity").
 type Approval struct {
-	ID              uuid.UUID       `json:"id"`
-	RequestedAction string          `json:"requested_action"`
-	RiskLevel       string          `json:"risk_level"`
-	ResourceType    string          `json:"resource_type"`
-	ResourceID      string          `json:"resource_id"`
-	Parameters      json.RawMessage `json:"parameters"`
-	Status          string          `json:"status"`
-	CreatedAt       time.Time       `json:"created_at"`
-	ExpiresAt       *time.Time      `json:"expires_at,omitempty"`
-	DecidedAt       *time.Time      `json:"decided_at,omitempty"`
-	DecisionReason  string          `json:"decision_reason,omitempty"`
-	ExecutionResult json.RawMessage `json:"execution_result,omitempty"`
+	ID                 uuid.UUID       `json:"id"`
+	RequestedAction    string          `json:"requested_action"`
+	RiskLevel          string          `json:"risk_level"`
+	ResourceType       string          `json:"resource_type"`
+	ResourceID         string          `json:"resource_id"`
+	Parameters         json.RawMessage `json:"parameters"`
+	Status             string          `json:"status"`
+	RequestedByUserID  *uuid.UUID      `json:"requested_by_user_id,omitempty"`
+	RequestedByAgentID *uuid.UUID      `json:"requested_by_agent_id,omitempty"`
+	CreatedAt          time.Time       `json:"created_at"`
+	ExpiresAt          *time.Time      `json:"expires_at,omitempty"`
+	DecidedByUserID    *uuid.UUID      `json:"decided_by_user_id,omitempty"`
+	DecidedAt          *time.Time      `json:"decided_at,omitempty"`
+	DecisionReason     string          `json:"decision_reason,omitempty"`
+	ExecutionResult    json.RawMessage `json:"execution_result,omitempty"`
+}
+
+// approvalColumns is the column list shared by every SELECT/RETURNING that
+// produces a full Approval row — kept in one place so the state-machine
+// transitions below (which each need their own RETURNING) can't drift from
+// each other or from scanApproval.
+const approvalColumns = `id, requested_action, risk_level, COALESCE(resource_type, ''), COALESCE(resource_id, ''),
+	          parameters, status, requesting_user_id, requesting_agent_id, created_at, expires_at,
+	          decided_by_user_id, decided_at, COALESCE(decision_reason, ''), COALESCE(execution_result, 'null')`
+
+func scanApproval(row pgx.Row) (Approval, error) {
+	var a Approval
+	err := row.Scan(&a.ID, &a.RequestedAction, &a.RiskLevel, &a.ResourceType, &a.ResourceID,
+		&a.Parameters, &a.Status, &a.RequestedByUserID, &a.RequestedByAgentID, &a.CreatedAt, &a.ExpiresAt,
+		&a.DecidedByUserID, &a.DecidedAt, &a.DecisionReason, &a.ExecutionResult)
+	return a, err
 }
 
 func (r *Registry) createApproval(ctx context.Context, ac authctx.AuthContext, tool Tool, in ExecuteInput) (Approval, error) {
@@ -353,10 +382,14 @@ func (r *Registry) createApproval(ctx context.Context, ac authctx.AuthContext, t
 		return Approval{}, apierr.Wrap(apierr.CodeInternal, "failed to encode tool parameters", err)
 	}
 
-	var userID *uuid.UUID
-	if ac.ActorType == authctx.ActorUser {
+	var userID, agentID *uuid.UUID
+	switch ac.ActorType {
+	case authctx.ActorUser:
 		id := ac.ActorID
 		userID = &id
+	case authctx.ActorAgent:
+		id := ac.ActorID
+		agentID = &id
 	}
 
 	ttl, err := r.resolveApprovalTTL(ctx, ac.OrganizationID, tool.Key)
@@ -365,16 +398,12 @@ func (r *Registry) createApproval(ctx context.Context, ac authctx.AuthContext, t
 	}
 	expiresAt := time.Now().Add(ttl)
 
-	var a Approval
-	err = r.pool.QueryRow(ctx, `
-		INSERT INTO approvals (organization_id, requested_action, requesting_user_id, risk_level,
-		                        resource_type, resource_id, parameters, expires_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-		RETURNING id, requested_action, risk_level, COALESCE(resource_type, ''), COALESCE(resource_id, ''),
-		          parameters, status, created_at, expires_at
-	`, ac.OrganizationID, tool.Key, userID, tool.RiskLevel, in.ResourceType, in.ResourceID, paramsJSON, expiresAt).Scan(
-		&a.ID, &a.RequestedAction, &a.RiskLevel, &a.ResourceType, &a.ResourceID, &a.Parameters, &a.Status, &a.CreatedAt, &a.ExpiresAt,
-	)
+	a, err := scanApproval(r.pool.QueryRow(ctx, `
+		INSERT INTO approvals (organization_id, requested_action, requesting_user_id, requesting_agent_id,
+		                        risk_level, resource_type, resource_id, parameters, expires_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		RETURNING `+approvalColumns+`
+	`, ac.OrganizationID, tool.Key, userID, agentID, tool.RiskLevel, in.ResourceType, in.ResourceID, paramsJSON, expiresAt))
 	if err != nil {
 		return Approval{}, apierr.Wrap(apierr.CodeInternal, "failed to create approval request", err)
 	}
@@ -431,9 +460,7 @@ func (r *Registry) ListApprovals(ctx context.Context, ac authctx.AuthContext, st
 		return nil, err
 	}
 	rows, err := r.pool.Query(ctx, `
-		SELECT id, requested_action, risk_level, COALESCE(resource_type, ''), COALESCE(resource_id, ''),
-		       parameters, status, created_at, expires_at, decided_at, COALESCE(decision_reason, ''),
-		       COALESCE(execution_result, 'null')
+		SELECT `+approvalColumns+`
 		FROM approvals
 		WHERE organization_id = $1 AND ($2 = '' OR status = $2)
 		ORDER BY created_at DESC
@@ -445,9 +472,8 @@ func (r *Registry) ListApprovals(ctx context.Context, ac authctx.AuthContext, st
 
 	var out []Approval
 	for rows.Next() {
-		var a Approval
-		if err := rows.Scan(&a.ID, &a.RequestedAction, &a.RiskLevel, &a.ResourceType, &a.ResourceID,
-			&a.Parameters, &a.Status, &a.CreatedAt, &a.ExpiresAt, &a.DecidedAt, &a.DecisionReason, &a.ExecutionResult); err != nil {
+		a, err := scanApproval(rows)
+		if err != nil {
 			return nil, apierr.Wrap(apierr.CodeInternal, "failed to scan approval", err)
 		}
 		out = append(out, a)
@@ -488,21 +514,21 @@ func (r *Registry) CancelApproval(ctx context.Context, ac authctx.AuthContext, i
 	if requestingUserID == nil || *requestingUserID != ac.ActorID {
 		return Approval{}, apierr.Forbidden("only the requesting user can cancel an approval")
 	}
+	// This pre-check is purely a fast, friendly error path (distinguishing
+	// "not yours" from "already decided" for the caller) — it is NOT what
+	// makes cancellation safe. The UPDATE below is the atomic guard: its
+	// own `WHERE status = 'pending'` is what actually prevents a cancel
+	// from racing a concurrent DecideApproval/CancelApproval past this
+	// point (see the identical pattern and comment in DecideApproval).
 	if existingStatus != "pending" {
 		return Approval{}, apierr.Conflict("approval is no longer pending (status: " + existingStatus + ")")
 	}
 
-	var a Approval
-	err = r.pool.QueryRow(ctx, `
+	a, err := scanApproval(r.pool.QueryRow(ctx, `
 		UPDATE approvals SET status = 'cancelled', decided_at = now()
 		WHERE id = $1 AND organization_id = $2 AND status = 'pending'
-		RETURNING id, requested_action, risk_level, COALESCE(resource_type, ''), COALESCE(resource_id, ''),
-		          parameters, status, created_at, expires_at, decided_at, COALESCE(decision_reason, ''),
-		          COALESCE(execution_result, 'null')
-	`, id, ac.OrganizationID).Scan(
-		&a.ID, &a.RequestedAction, &a.RiskLevel, &a.ResourceType, &a.ResourceID, &a.Parameters,
-		&a.Status, &a.CreatedAt, &a.ExpiresAt, &a.DecidedAt, &a.DecisionReason, &a.ExecutionResult,
-	)
+		RETURNING `+approvalColumns+`
+	`, id, ac.OrganizationID))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Approval{}, apierr.Conflict("approval is no longer pending")
 	}
@@ -527,6 +553,30 @@ func (r *Registry) CancelApproval(ctx context.Context, ac authctx.AuthContext, i
 // yet, which is a legitimate, honestly-reported result, not an error in the
 // approval process itself (rule 36: the approval succeeded; the tool call
 // it authorized may still not exist).
+//
+// Concurrency: the whole "decide" step (pending -> rejected, or
+// pending -> executing) is a single conditional UPDATE ... WHERE status =
+// 'pending' RETURNING. PostgreSQL serializes concurrent UPDATEs against the
+// same row, so exactly one concurrent caller's UPDATE can match that WHERE
+// clause and return a row; every other concurrent caller (a second
+// DecideApproval, or a concurrent CancelApproval, which uses the identical
+// pattern) matches zero rows and gets a deterministic "already decided"
+// conflict — before either of them has touched the handler. Only the
+// caller that wins this UPDATE ever calls runHandler, so a tool can be
+// executed at most once per approval. This is what actually prevents
+// double execution; the SELECT below (before the UPDATE) is read-only and
+// exists purely to distinguish "not found" from "not pending" in the
+// error message — it grants no ownership and nothing unsafe depends on it.
+//
+// Crash semantics: if the process crashes after the pending -> executing
+// transition but before the handler finishes and the final executing ->
+// executed/execution_failed UPDATE runs, the approval is left stuck in
+// 'executing' forever. This is intentional: automatically resuming or
+// retrying an unknown-outcome privileged/critical operation (was the
+// container actually restarted or not?) risks a second, uncoordinated
+// execution, which is strictly worse than requiring an operator to
+// manually inspect and resolve the stuck row. There is deliberately no
+// code path that reclaims an 'executing' approval.
 func (r *Registry) DecideApproval(ctx context.Context, ac authctx.AuthContext, id uuid.UUID, approve bool, reason string) (Approval, error) {
 	if err := rbac.Require(ac, "approvals.decide"); err != nil {
 		return Approval{}, err
@@ -535,80 +585,129 @@ func (r *Registry) DecideApproval(ctx context.Context, ac authctx.AuthContext, i
 		return Approval{}, err
 	}
 
-	var a Approval
-	var resourceType, resourceID string
-	var paramsJSON json.RawMessage
-	err := r.pool.QueryRow(ctx, `
-		SELECT id, requested_action, risk_level, COALESCE(resource_type, ''), COALESCE(resource_id, ''), parameters, status
-		FROM approvals WHERE id = $1 AND organization_id = $2
-	`, id, ac.OrganizationID).Scan(&a.ID, &a.RequestedAction, &a.RiskLevel, &resourceType, &resourceID, &paramsJSON, &a.Status)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return Approval{}, apierr.NotFound("approval")
-	}
-	if err != nil {
+	var existingStatus string
+	if err := r.pool.QueryRow(ctx, `
+		SELECT status FROM approvals WHERE id = $1 AND organization_id = $2
+	`, id, ac.OrganizationID).Scan(&existingStatus); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return Approval{}, apierr.NotFound("approval")
+		}
 		return Approval{}, apierr.Wrap(apierr.CodeInternal, "failed to load approval", err)
 	}
-	if a.Status != "pending" {
-		return Approval{}, apierr.Conflict("approval is no longer pending (status: " + a.Status + ")")
-	}
-
-	newStatus := "rejected"
-	if approve {
-		newStatus = "approved"
+	if existingStatus != "pending" {
+		return Approval{}, apierr.Conflict("approval is no longer pending (status: " + existingStatus + ")")
 	}
 
 	var decidedByUserID *uuid.UUID
 	if ac.ActorType == authctx.ActorUser {
-		id := ac.ActorID
-		decidedByUserID = &id
+		uid := ac.ActorID
+		decidedByUserID = &uid
 	}
 
-	var params map[string]any
-	if err := json.Unmarshal(paramsJSON, &params); err != nil {
-		params = map[string]any{}
-	}
-
-	var executionResult json.RawMessage
-	if approve {
-		tool, err := r.getTool(ctx, a.RequestedAction)
-		if err != nil {
-			executionResult, _ = json.Marshal(map[string]string{"error": "tool no longer exists in the registry"})
-		} else {
-			result, err := r.runHandler(ctx, ac, tool, ExecuteInput{ResourceType: resourceType, ResourceID: resourceID, Parameters: params})
-			if err != nil {
-				var ae *apierr.Error
-				if errors.As(err, &ae) {
-					executionResult, _ = json.Marshal(map[string]string{"error": string(ae.Code), "message": ae.Message})
-				} else {
-					executionResult, _ = json.Marshal(map[string]string{"error": "INTERNAL_ERROR"})
-				}
-			} else {
-				executionResult, _ = json.Marshal(result)
-			}
+	if !approve {
+		a, err := scanApproval(r.pool.QueryRow(ctx, `
+			UPDATE approvals SET status = 'rejected', decided_by_user_id = $2, decided_at = now(), decision_reason = $3
+			WHERE id = $1 AND status = 'pending'
+			RETURNING `+approvalColumns+`
+		`, id, decidedByUserID, reason))
+		if errors.Is(err, pgx.ErrNoRows) {
+			return Approval{}, apierr.Conflict("approval is no longer pending")
 		}
+		if err != nil {
+			return Approval{}, apierr.Wrap(apierr.CodeInternal, "failed to record approval decision", err)
+		}
+		if err := r.audit.Record(ctx, ac, audit.Entry{
+			Action: "approvals.approval.rejected", ResourceType: "approval", ResourceID: a.ID.String(),
+			Success: true, ResultingState: a,
+		}); err != nil {
+			logger.FromContext(ctx).Error("failed to write audit entry", "error", err)
+		}
+		return a, nil
 	}
 
-	err = r.pool.QueryRow(ctx, `
-		UPDATE approvals SET status = $2, decided_by_user_id = $3, decided_at = now(),
-		                      decision_reason = $4, execution_result = $5
-		WHERE id = $1
-		RETURNING id, requested_action, risk_level, COALESCE(resource_type, ''), COALESCE(resource_id, ''),
-		          parameters, status, created_at, expires_at, decided_at, COALESCE(decision_reason, ''),
-		          COALESCE(execution_result, 'null')
-	`, id, newStatus, decidedByUserID, reason, executionResult).Scan(
-		&a.ID, &a.RequestedAction, &a.RiskLevel, &a.ResourceType, &a.ResourceID,
-		&a.Parameters, &a.Status, &a.CreatedAt, &a.ExpiresAt, &a.DecidedAt, &a.DecisionReason, &a.ExecutionResult,
-	)
+	// Atomically claim sole execution ownership. Only the caller whose
+	// UPDATE matches a row reaches runHandler below.
+	a, err := scanApproval(r.pool.QueryRow(ctx, `
+		UPDATE approvals SET status = 'executing', decided_by_user_id = $2, decided_at = now(), decision_reason = $3
+		WHERE id = $1 AND status = 'pending'
+		RETURNING `+approvalColumns+`
+	`, id, decidedByUserID, reason))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Approval{}, apierr.Conflict("approval is no longer pending")
+	}
 	if err != nil {
 		return Approval{}, apierr.Wrap(apierr.CodeInternal, "failed to record approval decision", err)
 	}
-
 	if err := r.audit.Record(ctx, ac, audit.Entry{
-		Action: "approvals.approval." + newStatus, ResourceType: "approval", ResourceID: a.ID.String(),
+		Action: "approvals.approval.executing", ResourceType: "approval", ResourceID: a.ID.String(),
 		Success: true, ResultingState: a,
 	}); err != nil {
 		logger.FromContext(ctx).Error("failed to write audit entry", "error", err)
 	}
 
-	return a, nil
+	var params map[string]any
+	if err := json.Unmarshal(a.Parameters, &params); err != nil {
+		params = map[string]any{}
+	}
+
+	var executionResult json.RawMessage
+	var handlerErr error
+	tool, toolErr := r.getTool(ctx, a.RequestedAction)
+	if toolErr != nil {
+		executionResult, _ = json.Marshal(map[string]string{"error": "tool no longer exists in the registry"})
+		handlerErr = toolErr
+	} else {
+		result, execErr := r.runHandler(ctx, ac, tool, ExecuteInput{ResourceType: a.ResourceType, ResourceID: a.ResourceID, Parameters: params})
+		handlerErr = execErr
+		if execErr != nil {
+			var ae *apierr.Error
+			if errors.As(execErr, &ae) {
+				executionResult, _ = json.Marshal(map[string]string{"error": string(ae.Code), "message": ae.Message})
+			} else {
+				executionResult, _ = json.Marshal(map[string]string{"error": "INTERNAL_ERROR"})
+			}
+		} else {
+			executionResult, _ = json.Marshal(result)
+		}
+	}
+
+	finalStatus := "executed"
+	if handlerErr != nil {
+		finalStatus = "execution_failed"
+	}
+
+	// This final transition is owned exclusively by this caller (it holds
+	// the only 'executing' row for this approval), so WHERE status =
+	// 'executing' can never lose a race here — it is a safety net against
+	// this same code path somehow running twice, not a contended path.
+	finalApproval, err := scanApproval(r.pool.QueryRow(ctx, `
+		UPDATE approvals SET status = $2, execution_result = $3
+		WHERE id = $1 AND status = 'executing'
+		RETURNING `+approvalColumns+`
+	`, id, finalStatus, executionResult))
+	if err != nil {
+		// The handler already ran — this is a bookkeeping failure, not an
+		// execution failure. Surface what we know rather than losing the
+		// execution result entirely; the row is left in 'executing' for
+		// operator follow-up per the crash-semantics note above.
+		logger.FromContext(ctx).Error("failed to record approval execution outcome", "error", err, "approval_id", id)
+		a.Status = finalStatus
+		a.ExecutionResult = executionResult
+		if err := r.audit.Record(ctx, ac, audit.Entry{
+			Action: "approvals.approval." + finalStatus, ResourceType: "approval", ResourceID: a.ID.String(),
+			Success: handlerErr == nil, ResultingState: a,
+		}); err != nil {
+			logger.FromContext(ctx).Error("failed to write audit entry", "error", err)
+		}
+		return a, nil
+	}
+
+	if err := r.audit.Record(ctx, ac, audit.Entry{
+		Action: "approvals.approval." + finalStatus, ResourceType: "approval", ResourceID: finalApproval.ID.String(),
+		Success: handlerErr == nil, ResultingState: finalApproval,
+	}); err != nil {
+		logger.FromContext(ctx).Error("failed to write audit entry", "error", err)
+	}
+
+	return finalApproval, nil
 }

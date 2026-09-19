@@ -304,7 +304,9 @@ export default function ToolsPage() {
         </div>
         <select className="input w-40" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
           <option value="pending">pending</option>
-          <option value="approved">approved</option>
+          <option value="executing">executing</option>
+          <option value="executed">executed</option>
+          <option value="execution_failed">execution_failed</option>
           <option value="rejected">rejected</option>
           <option value="expired">expired</option>
           <option value="cancelled">cancelled</option>

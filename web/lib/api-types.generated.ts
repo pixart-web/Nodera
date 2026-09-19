@@ -4050,11 +4050,17 @@ export interface components {
             resource_id: string;
             parameters: unknown;
             /** @enum {string} */
-            status: "pending" | "approved" | "rejected" | "expired" | "cancelled";
+            status: "pending" | "approved" | "executing" | "executed" | "execution_failed" | "rejected" | "expired" | "cancelled";
+            /** Format: uuid */
+            requested_by_user_id?: string | null;
+            /** Format: uuid */
+            requested_by_agent_id?: string | null;
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
             expires_at?: string | null;
+            /** Format: uuid */
+            decided_by_user_id?: string | null;
             /** Format: date-time */
             decided_at?: string | null;
             decision_reason?: string;

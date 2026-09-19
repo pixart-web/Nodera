@@ -1655,6 +1655,83 @@ scanning in CI (`govulncheck`, `npm audit`).
       real email delivery) that need their own dedicated, carefully-scoped
       passes rather than being squeezed into this one
 
+## Hardening pass (post-Phase-50): P0 — approval concurrency
+
+An independent review of the Foundation identified a real, unfixed race in
+`Registry.DecideApproval` (`internal/tools/tools.go`): it read the
+approval's status, checked it in Go, ran the tool handler, and only then
+wrote the new status back with an unconditional `UPDATE ... WHERE id = $1`
+— not scoped by status. Two concurrent `DecideApproval` calls on the same
+pending approval could both observe `pending`, both run the handler, and
+both write a final status, with no database-level guarantee that only one
+of them ever should have. For a control plane whose privileged/critical
+tools will eventually mean "restart a service", "roll back a deployment",
+or "modify DNS", double execution is not an acceptable class of bug
+regardless of how unlikely a genuine double-click race is in practice.
+
+- [x] Verified the race against the actual implementation (not assumed
+      from the report) by reading `DecideApproval` line by line — the
+      report's description matched exactly.
+- [x] Redesigned the approval lifecycle as an explicit state machine:
+      `pending → rejected` / `pending → cancelled` / `pending → expired`,
+      or `pending → executing → executed` / `pending → executing →
+      execution_failed`. Migration `0017_approval_execution_states.sql`
+      extends `approvals_status_check` accordingly (keeping `approved`
+      legal for pre-existing rows; no code path produces it anymore).
+- [x] Made every transition a single conditional
+      `UPDATE ... WHERE status = '<expected>' RETURNING ...` — PostgreSQL
+      serializes concurrent `UPDATE`s against one row, so only one
+      concurrent caller's conditional `UPDATE` can ever match, and the
+      tool handler is only invoked after that atomic claim succeeds. This
+      is the actual fix; see `internal/tools/tools.go`'s `DecideApproval`
+      doc comment for the full reasoning, including the deliberate choice
+      to leave a crashed `executing` approval stuck rather than risk an
+      automatic double execution on recovery.
+- [x] Added `requested_by_user_id`/`requested_by_agent_id` (previously
+      tracked in the schema but never exposed on the `Approval` struct/API
+      response at all) and `decided_by_user_id` so the requester, approver,
+      and execution outcome are distinctly reconstructable — an
+      agent-requested, human-approved action no longer looks
+      indistinguishable from a human-originated one.
+- [x] `internal/approvals_concurrency_test.go` — five new tests plus a
+      requester/approver identity test, run against real PostgreSQL:
+      `TestApprovals_ConcurrentApprovalsExecuteExactlyOnce` (20 concurrent
+      decisions, atomic handler counter, exactly 1 success + 19
+      deterministic conflicts), `TestApprovals_ApproveVsRejectRaceIsDeterministic`
+      and `TestApprovals_ApproveVsCancelRaceIsDeterministic` (15 trials
+      each, exactly one side ever wins), `TestApprovals_ExpiredApprovalNeverExecutes`,
+      `TestApprovals_SequentialRepeatedDecisionExecutesOnce`, and
+      `TestApprovals_PreservesRequesterAndApproverIdentitySeparately`. All
+      pass under `go test ./... -race`, alongside the full pre-existing
+      suite (two pre-existing assertions in `tools_integration_test.go`
+      updated for the new terminal status names: NOT_IMPLEMENTED is now
+      `execution_failed`, not a repurposed `approved`).
+- [x] OpenAPI `Approval` schema updated (new status enum values,
+      `requested_by_user_id`/`requested_by_agent_id`/`decided_by_user_id`),
+      spec re-validated (`@redocly/cli lint` — passes, pre-existing
+      warnings only, no new ones), frontend types regenerated
+      (`npm run gen:types`), `tsc --noEmit` and `npm run build` clean.
+- [x] Frontend (`web/app/(org)/tools/page.tsx`) status filter updated for
+      the new terminal statuses; live-verified end to end against the real
+      backend: triggered `restart_container` (privileged, unimplemented)
+      through the real UI, approved it, and watched it land in
+      `execution_failed` (not a fabricated success) — confirming the
+      state machine and the honest-NOT_IMPLEMENTED principle (rule 36)
+      both hold through the real HTTP+DB path, not just in tests. Checked
+      the browser console on a fresh tab — zero errors.
+- [x] Docs: `docs/AGENTS.md` gained a full "Approval state machine and
+      execution concurrency" + "Requester / approver / execution identity"
+      section; `README.md`'s status table updated.
+- [ ] P1/P2 items from the same review (platform-scoped authorization,
+      cookie-based browser auth + CSRF, SSRF/outbound policy, platform
+      audit, platform secrets, HTTP/rate-limit/migration/dependency
+      hardening, OpenAPI contract hardening) are tracked separately below
+      and were not all addressed in this pass — see the deployment
+      assessment this pass's commit message/report gives for exactly
+      which P0 invariants are now guaranteed and which P1/P2 work remains
+      open. Do not treat this entry alone as a deployment-candidate
+      declaration.
+
 ## Next up
 
 1. **Concrete job types**: the worker dispatcher is real but nothing
