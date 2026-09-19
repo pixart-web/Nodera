@@ -116,7 +116,9 @@ func newRouter(d apiDeps) http.Handler {
 
 				r.Get("/service-accounts", d.handleListServiceAccounts)
 				r.Post("/service-accounts", d.handleCreateServiceAccount)
+				r.Put("/service-accounts/{id}", d.handleUpdateServiceAccount)
 				r.Delete("/service-accounts/{id}", d.handleDisableServiceAccount)
+				r.Post("/service-accounts/{id}/enable", d.handleEnableServiceAccount)
 				r.Post("/service-accounts/{id}/api-tokens", d.handleCreateServiceAccountAPIToken)
 
 				r.Get("/jobs", d.handleListJobs)
@@ -797,6 +799,37 @@ func (d apiDeps) handleDisableServiceAccount(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (d apiDeps) handleEnableServiceAccount(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		httpserver.WriteError(w, r, apierr.Validation("invalid service account id"))
+		return
+	}
+	if err := d.identity.EnableServiceAccount(r.Context(), mustAuthContext(r), id); err != nil {
+		httpserver.WriteError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (d apiDeps) handleUpdateServiceAccount(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		httpserver.WriteError(w, r, apierr.Validation("invalid service account id"))
+		return
+	}
+	var body identity.UpdateServiceAccountInput
+	if !decodeJSON(w, r, &body) {
+		return
+	}
+	sa, err := d.identity.UpdateServiceAccount(r.Context(), mustAuthContext(r), id, body)
+	if err != nil {
+		httpserver.WriteError(w, r, err)
+		return
+	}
+	httpserver.WriteJSON(w, http.StatusOK, sa)
 }
 
 func (d apiDeps) handleCreateServiceAccountAPIToken(w http.ResponseWriter, r *http.Request) {

@@ -123,6 +123,46 @@ export default function AccessPage() {
     }
   }
 
+  const [saStatusError, setSaStatusError] = useState<string | null>(null);
+
+  async function enableServiceAccount(id: string) {
+    setSaStatusError(null);
+    try {
+      await api.post(`/api/v1/service-accounts/${id}/enable`);
+      serviceAccounts.reload();
+    } catch (err) {
+      setSaStatusError(err instanceof ApiError ? err.message : "Failed to enable service account");
+    }
+  }
+
+  const [editingSAID, setEditingSAID] = useState<string | null>(null);
+  const [editSAName, setEditSAName] = useState("");
+  const [editSADescription, setEditSADescription] = useState("");
+  const [editSAError, setEditSAError] = useState<string | null>(null);
+  const [editSABusy, setEditSABusy] = useState(false);
+
+  function startEditingSA(sa: ServiceAccount) {
+    setEditingSAID((cur) => (cur === sa.id ? null : sa.id));
+    setEditSAName(sa.name);
+    setEditSADescription(sa.description);
+    setEditSAError(null);
+  }
+
+  async function saveServiceAccount(e: React.FormEvent, id: string) {
+    e.preventDefault();
+    setEditSAError(null);
+    setEditSABusy(true);
+    try {
+      await api.put(`/api/v1/service-accounts/${id}`, { name: editSAName, description: editSADescription });
+      setEditingSAID(null);
+      serviceAccounts.reload();
+    } catch (err) {
+      setEditSAError(err instanceof ApiError ? err.message : "Failed to update service account");
+    } finally {
+      setEditSABusy(false);
+    }
+  }
+
   const [issuingFor, setIssuingFor] = useState<string | null>(null);
   const [saTokenName, setSaTokenName] = useState("");
   const [saTokenScopes, setSaTokenScopes] = useState("");
@@ -268,6 +308,7 @@ export default function AccessPage() {
         )}
 
         {serviceAccounts.error && <ErrorBanner message={serviceAccounts.error} />}
+        {saStatusError && <ErrorBanner message={saStatusError} />}
         <div className="card">
           {serviceAccounts.loading ? (
             <div className="p-4 text-sm text-base-400">Loading…</div>
@@ -293,7 +334,7 @@ export default function AccessPage() {
                         <StatusBadge status={sa.status} />
                       </td>
                       <td className="space-x-3">
-                        {sa.status === "active" && (
+                        {sa.status === "active" ? (
                           <>
                             <button
                               className="text-xs text-accent-400 hover:text-accent-300"
@@ -301,8 +342,23 @@ export default function AccessPage() {
                             >
                               {issuingFor === sa.id ? "Cancel" : "Issue token"}
                             </button>
+                            <button className="text-xs text-base-400 hover:text-base-200" onClick={() => startEditingSA(sa)}>
+                              {editingSAID === sa.id ? "Close" : "Edit"}
+                            </button>
                             <button className="text-xs text-base-400 hover:text-danger" onClick={() => disableServiceAccount(sa.id)}>
                               Disable
+                            </button>
+                          </>
+                        ) : (
+                          <>
+                            <button className="text-xs text-base-400 hover:text-base-200" onClick={() => startEditingSA(sa)}>
+                              {editingSAID === sa.id ? "Close" : "Edit"}
+                            </button>
+                            <button
+                              className="text-xs text-accent-400 hover:text-accent-300"
+                              onClick={() => enableServiceAccount(sa.id)}
+                            >
+                              Enable
                             </button>
                           </>
                         )}
@@ -332,6 +388,42 @@ export default function AccessPage() {
                             <button type="submit" className="btn-primary" disabled={saTokenBusy}>
                               {saTokenBusy ? "Issuing…" : "Issue"}
                             </button>
+                          </form>
+                        </td>
+                      </tr>
+                    )}
+                    {editingSAID === sa.id && (
+                      <tr>
+                        <td colSpan={4} className="bg-base-800/40 p-3">
+                          <form onSubmit={(e) => saveServiceAccount(e, sa.id)} className="space-y-2">
+                            {editSAError && <ErrorBanner message={editSAError} />}
+                            <div className="grid grid-cols-2 gap-3">
+                              <input
+                                className="input"
+                                placeholder="Name"
+                                value={editSAName}
+                                onChange={(e) => setEditSAName(e.target.value)}
+                                required
+                              />
+                              <input
+                                className="input"
+                                placeholder="Description"
+                                value={editSADescription}
+                                onChange={(e) => setEditSADescription(e.target.value)}
+                              />
+                            </div>
+                            <div className="flex items-center gap-3">
+                              <button type="submit" className="btn-primary" disabled={editSABusy}>
+                                {editSABusy ? "Saving…" : "Save changes"}
+                              </button>
+                              <button
+                                type="button"
+                                className="text-xs text-base-400 hover:text-base-200"
+                                onClick={() => setEditingSAID(null)}
+                              >
+                                Cancel
+                              </button>
+                            </div>
                           </form>
                         </td>
                       </tr>

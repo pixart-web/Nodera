@@ -6,6 +6,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/nodera/nodera/internal/identity"
 	"github.com/nodera/nodera/internal/platform/apierr"
 	"github.com/nodera/nodera/internal/testhelpers"
 )
@@ -34,6 +35,120 @@ func TestServiceAccountsCreateListDisable(t *testing.T) {
 
 	if err := h.identity.DisableServiceAccount(ctx, ac, sa.ID); err != nil {
 		t.Fatalf("DisableServiceAccount: %v", err)
+	}
+}
+
+// Enable reverses Disable's status flip but must not resurrect the tokens
+// Disable revoked — that revocation is meant to be permanent, not merely a
+// side effect of the account being temporarily disabled.
+func TestServiceAccountEnableReversesDisableButNotTokenRevocation(t *testing.T) {
+	pool := testhelpers.RequirePool(t)
+	ctx := context.Background()
+	h := newHarness(pool)
+	ac, _ := h.newOwnerContext(t, ctx, "sa-enable-owner@nodera.dev")
+
+	sa, err := h.identity.CreateServiceAccount(ctx, ac, "reactivate-bot", "")
+	if err != nil {
+		t.Fatalf("CreateServiceAccount: %v", err)
+	}
+	raw, _, err := h.identity.CreateAPITokenForServiceAccount(ctx, ac, sa.ID, "old-key", []string{"applications.read"}, nil)
+	if err != nil {
+		t.Fatalf("CreateAPITokenForServiceAccount: %v", err)
+	}
+
+	if err := h.identity.DisableServiceAccount(ctx, ac, sa.ID); err != nil {
+		t.Fatalf("DisableServiceAccount: %v", err)
+	}
+	if err := h.identity.EnableServiceAccount(ctx, ac, sa.ID); err != nil {
+		t.Fatalf("EnableServiceAccount: %v", err)
+	}
+
+	list, err := h.identity.ListServiceAccounts(ctx, ac)
+	if err != nil {
+		t.Fatalf("ListServiceAccounts: %v", err)
+	}
+	var found bool
+	for _, s := range list {
+		if s.ID == sa.ID {
+			found = true
+			if s.Status != "active" {
+				t.Fatalf("expected re-enabled service account to be active, got %q", s.Status)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("expected the service account to still exist after enable")
+	}
+
+	// The pre-disable token must stay dead even after re-enabling.
+	if _, err := h.identity.AuthContextForAPIToken(ctx, raw, "test-correlation"); err == nil {
+		t.Fatal("expected the token revoked at disable-time to remain revoked after re-enabling")
+	}
+
+	// A freshly minted token for the now-active account works normally.
+	newRaw, _, err := h.identity.CreateAPITokenForServiceAccount(ctx, ac, sa.ID, "new-key", []string{"applications.read"}, nil)
+	if err != nil {
+		t.Fatalf("expected minting a new token for a re-enabled service account to succeed: %v", err)
+	}
+	if _, err := h.identity.AuthContextForAPIToken(ctx, newRaw, "test-correlation"); err != nil {
+		t.Fatalf("expected the freshly minted token to authenticate: %v", err)
+	}
+}
+
+func TestServiceAccountUpdateChangesOnlyProvidedFields(t *testing.T) {
+	pool := testhelpers.RequirePool(t)
+	ctx := context.Background()
+	h := newHarness(pool)
+	ac, _ := h.newOwnerContext(t, ctx, "sa-update-owner@nodera.dev")
+
+	sa, err := h.identity.CreateServiceAccount(ctx, ac, "original-name", "original description")
+	if err != nil {
+		t.Fatalf("CreateServiceAccount: %v", err)
+	}
+
+	newName := "renamed-bot"
+	updated, err := h.identity.UpdateServiceAccount(ctx, ac, sa.ID, identity.UpdateServiceAccountInput{Name: &newName})
+	if err != nil {
+		t.Fatalf("UpdateServiceAccount: %v", err)
+	}
+	if updated.Name != "renamed-bot" {
+		t.Fatalf("expected name to be updated, got %q", updated.Name)
+	}
+	if updated.Description != "original description" {
+		t.Fatalf("untouched field Description changed: got %q", updated.Description)
+	}
+	if updated.Status != sa.Status {
+		t.Fatalf("Update must never change status, got %q", updated.Status)
+	}
+}
+
+func TestServiceAccountEnableUpdateRequireOrganizationManage(t *testing.T) {
+	pool := testhelpers.RequirePool(t)
+	ctx := context.Background()
+	h := newHarness(pool)
+	ac, _ := h.newOwnerContext(t, ctx, "sa-enable-perm-owner@nodera.dev")
+
+	sa, err := h.identity.CreateServiceAccount(ctx, ac, "guarded-bot", "")
+	if err != nil {
+		t.Fatalf("CreateServiceAccount: %v", err)
+	}
+	if err := h.identity.DisableServiceAccount(ctx, ac, sa.ID); err != nil {
+		t.Fatalf("DisableServiceAccount: %v", err)
+	}
+
+	memberAC := h.newMemberContext(t, ctx, ac.OrganizationID, "sa-enable-perm-member@nodera.dev")
+
+	if err := h.identity.EnableServiceAccount(ctx, memberAC, sa.ID); err == nil {
+		t.Fatal("expected a member without organization.manage to be forbidden from enabling a service account")
+	} else if ae, ok := err.(*apierr.Error); !ok || ae.Code != apierr.CodeForbidden {
+		t.Fatalf("expected FORBIDDEN, got %v", err)
+	}
+
+	newName := "should-not-apply"
+	if _, err := h.identity.UpdateServiceAccount(ctx, memberAC, sa.ID, identity.UpdateServiceAccountInput{Name: &newName}); err == nil {
+		t.Fatal("expected a member without organization.manage to be forbidden from updating a service account")
+	} else if ae, ok := err.(*apierr.Error); !ok || ae.Code != apierr.CodeForbidden {
+		t.Fatalf("expected FORBIDDEN, got %v", err)
 	}
 }
 

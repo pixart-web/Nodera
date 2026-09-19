@@ -933,6 +933,45 @@ scanning in CI (`govulncheck`, `npm audit`).
 - [x] Full backend test suite re-run clean (`go test ./... -race`)
 - [x] Docs (`API.md`, `FRONTEND.md`, `README.md`) updated
 
+**Phase 33** — this pass:
+- [x] `identity.EnableServiceAccount`/`UpdateServiceAccount` — found by the
+      same CRUD-gap audit style as Phases 31-32, applied to
+      `internal/identity/serviceaccount.go`: `DisableServiceAccount`
+      existed but was one-way (no path back to `active`), and there was no
+      way to rename an account or edit its description after creation
+- [x] `EnableServiceAccount` reverses the status flip but deliberately does
+      **not** restore any token `Disable` revoked — `Disable`'s own
+      guarantee is that a caller never observes a disabled service account
+      whose old tokens still authenticate, and that would be worthless if
+      `Enable` quietly undid it. A re-enabled account mints fresh tokens
+      the same way a newly created one does
+- [x] `UpdateServiceAccount` follows the pointer-based partial-update
+      pattern for `name`/`description` only — `status` stays Enable/
+      Disable's job, since disabling also carries the token-revocation
+      side effect a plain field update must never trigger
+- [x] 3 new integration tests, passing under `-race` alongside the 4
+      pre-existing service-account tests (7 total): enable reverses the
+      status flip but the pre-disable token stays dead while a freshly
+      minted post-enable token works, update touches only the provided
+      field and never changes status, and a `member` without
+      `organization.manage` is forbidden from both
+- [x] 2 new HTTP routes (`PUT /service-accounts/{id}`, `POST
+      /service-accounts/{id}/enable`) and OpenAPI additions, validated
+      with `@redocly/cli lint`; `lib/api-types.generated.ts` regenerated
+- [x] `web/app/(org)/access/page.tsx`: an inline "Edit" panel per service
+      account row (name + description) and an "Enable"/"Disable" pair that
+      swaps based on current status, mirroring "Issue token" also only
+      showing while active
+- [x] Verified live end to end: created a real service account through the
+      UI, renamed it through the real edit form, disabled it and watched
+      "Issue token" disappear and "Enable" appear, re-enabled it through
+      the real UI, and confirmed on a completely fresh tab reload that
+      both the rename and the re-enabled `active` status round-tripped
+      through the real backend. Checked the browser console on that fresh
+      tab — zero errors
+- [x] Full backend test suite re-run clean (`go test ./... -race`)
+- [x] Docs (`API.md`, `FRONTEND.md`, `README.md`) updated
+
 ## Next up
 
 1. **Concrete job types**: the worker dispatcher is real but nothing

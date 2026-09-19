@@ -111,6 +111,77 @@ func (s *Service) DisableServiceAccount(ctx context.Context, ac authctx.AuthCont
 	return nil
 }
 
+// EnableServiceAccount reverses Disable's status flip. It does not restore
+// any token Disable revoked — those stay revoked permanently (Disable's own
+// doc comment explains why: a caller must never observe a disabled service
+// account whose old tokens still authenticate, and that guarantee would be
+// worthless if Enable quietly undid it). A caller mints fresh tokens for a
+// re-enabled service account the same way as for a newly created one.
+func (s *Service) EnableServiceAccount(ctx context.Context, ac authctx.AuthContext, id uuid.UUID) error {
+	if err := rbac.Require(ac, creatingAPITokensRequires); err != nil {
+		return err
+	}
+
+	tag, err := s.pool.Exec(ctx, `
+		UPDATE service_accounts SET status = 'active' WHERE id = $1 AND organization_id = $2
+	`, id, ac.OrganizationID)
+	if err != nil {
+		return apierr.Wrap(apierr.CodeInternal, "failed to enable service account", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return apierr.NotFound("service account")
+	}
+	return nil
+}
+
+// UpdateServiceAccountInput follows the pointer-based partial-update
+// convention used across the codebase: a nil field leaves the existing
+// value untouched. There is no way to change status here — that stays
+// Enable/Disable's job, since disabling also has the token-revocation side
+// effect a plain field update must not trigger.
+type UpdateServiceAccountInput struct {
+	Name        *string `json:"name"`
+	Description *string `json:"description"`
+}
+
+func (s *Service) UpdateServiceAccount(ctx context.Context, ac authctx.AuthContext, id uuid.UUID, in UpdateServiceAccountInput) (ServiceAccount, error) {
+	if err := rbac.Require(ac, creatingAPITokensRequires); err != nil {
+		return ServiceAccount{}, err
+	}
+	if in.Name != nil && *in.Name == "" {
+		return ServiceAccount{}, apierr.Validation("service account name cannot be empty")
+	}
+
+	var existing ServiceAccount
+	if err := s.pool.QueryRow(ctx, `
+		SELECT id, name, description, status, created_at FROM service_accounts WHERE id = $1 AND organization_id = $2
+	`, id, ac.OrganizationID).Scan(&existing.ID, &existing.Name, &existing.Description, &existing.Status, &existing.CreatedAt); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ServiceAccount{}, apierr.NotFound("service account")
+		}
+		return ServiceAccount{}, apierr.Wrap(apierr.CodeInternal, "failed to load service account", err)
+	}
+
+	name := existing.Name
+	if in.Name != nil {
+		name = *in.Name
+	}
+	description := existing.Description
+	if in.Description != nil {
+		description = *in.Description
+	}
+
+	var sa ServiceAccount
+	err := s.pool.QueryRow(ctx, `
+		UPDATE service_accounts SET name = $1, description = $2 WHERE id = $3 AND organization_id = $4
+		RETURNING id, name, description, status, created_at
+	`, name, description, id, ac.OrganizationID).Scan(&sa.ID, &sa.Name, &sa.Description, &sa.Status, &sa.CreatedAt)
+	if err != nil {
+		return ServiceAccount{}, apierr.Wrap(apierr.CodeInternal, "failed to update service account", err)
+	}
+	return sa, nil
+}
+
 func (s *Service) serviceAccountExists(ctx context.Context, orgID, id uuid.UUID) (bool, error) {
 	var status string
 	err := s.pool.QueryRow(ctx, `
