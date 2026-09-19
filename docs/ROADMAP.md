@@ -1870,6 +1870,52 @@ unchanged throughout.
       section; `docs/DECISIONS.md` (ADR-005 amendment) and
       `docs/FRONTEND.md`'s "Auth model" rewritten; `README.md` updated.
 
+## Hardening pass (post-Phase-50): P1 — outbound network / SSRF policy
+
+`check_ssl` (`internal/tools/handlers/checkssl.go`) takes an arbitrary
+caller-supplied hostname and connects to it — reachable by any
+organization member holding `infrastructure.read` (a 'read'-risk tool,
+no approval gate), making it a genuine SSRF primitive: without
+validation, a member could point it at an internal service, a cloud
+metadata endpoint, or the control plane's own loopback interface and use
+the certificate-inspection response as a reachability oracle.
+
+- [x] `internal/platform/netpolicy` — a new, reusable outbound-target
+      validation package (not a one-off check embedded in `checkssl.go`,
+      so a future tool reuses it instead of reimplementing ad hoc):
+      three graduated levels (`PublicOnly`/`RegisteredResources`/
+      `InternalAllowed`), IPv4 and IPv6 address classification
+      (loopback, unspecified, link-local — which is also where the
+      169.254.169.254 cloud metadata endpoint lives, so no separate
+      special case is needed — private RFC1918/RFC4193, multicast), and
+      DNS-rebinding-safe resolution: `Resolve` returns a `ResolvedTarget`
+      bound to one already-validated IP that the caller must dial
+      directly, never re-resolving the hostname at connection time.
+- [x] `checkssl.go` wired to `netpolicy.Resolve` with `PublicOnly`
+      (always — no caller-controlled override) before dialing; the TLS
+      dialer connects to the validated IP while `ServerName` (SNI) stays
+      the original hostname.
+- [x] `internal/platform/netpolicy/netpolicy_test.go` — every blocked
+      address class (IPv4 + IPv6, including IPv4-mapped IPv6), real
+      public addresses correctly allowed (IPv4 + IPv6), the graduated
+      policy paths (`RegisteredResources` with and without a callback,
+      `InternalAllowed`), input validation.
+      `internal/tools/handlers/checkssl_test.go` gained SSRF-specific
+      tests (loopback, IPv6 loopback, the metadata address, a private
+      address all refused with `FORBIDDEN`; a public IPv6 literal
+      correctly *not* blocked) alongside the pre-existing genuine-
+      handshake/unreachable-host/cancellation tests, which needed minor
+      updates: the genuine-handshake test now runs a policy-injectable
+      `checkSSLWithPolicy(ctx, netpolicy.Policy{Level: InternalAllowed},
+      host)` against `httptest`'s (necessarily loopback-bound) TLS
+      server, since the production `CheckSSL` entry point — always
+      `PublicOnly` — would now correctly refuse it; the
+      previously-loopback-based "unreachable host" test moved to a
+      TEST-NET-1 (RFC 5737) address so it tests connection failure, not
+      policy rejection. Full suite passes under `go test ./... -race`.
+- [x] Docs: `docs/SECURITY.md` gained a full "Outbound network / SSRF
+      policy" section; `README.md` updated.
+
 ## Next up
 
 1. **Concrete job types**: the worker dispatcher is real but nothing

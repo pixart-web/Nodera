@@ -175,6 +175,56 @@ independent authorization axis:
   `platform.admins.manage`; the last-admin guard; `BootstrapAdmin`'s
   idempotency.
 
+## Outbound network / SSRF policy — IMPLEMENTED
+
+`check_ssl` (`internal/tools/handlers/checkssl.go`) is reachable by any
+organization member holding `infrastructure.read` and takes an arbitrary
+caller-supplied hostname — an SSRF primitive by construction unless the
+target is validated: without a policy, a caller could point it at an
+internal service, a cloud metadata endpoint, or the control plane's own
+loopback interface and use the certificate-inspection response as an
+oracle for what's reachable on the private network.
+
+`internal/platform/netpolicy` is a reusable outbound-target validation
+component, built once so future diagnostic/integration tools reuse it
+instead of reimplementing ad hoc checks:
+
+- Three graduated levels — `PublicOnly` (rejects loopback, unspecified,
+  link-local, private RFC1918/RFC4193, and multicast addresses outright;
+  what `check_ssl` always uses), `RegisteredResources` (additionally
+  allows an address an `AllowedResource(ip) bool` callback recognizes as
+  one of Nodera's own registered resources — not used by any tool yet,
+  since the Node Agent it would serve doesn't exist, rule 27; exists so
+  adding that tool later doesn't require redesigning this package), and
+  `InternalAllowed` (permits everything — intended only for a future
+  platform-admin-configured integration explicitly meant to reach
+  internal infrastructure, never the default for anything an ordinary
+  member can trigger). This is a policy abstraction, not a blanket
+  "private IPs forbidden forever" hack — Nodera will legitimately need to
+  reach registered infrastructure nodes eventually.
+- The cloud metadata endpoint (`169.254.169.254`, used identically by
+  AWS/GCP/Azure/DigitalOcean) needs no separate special case: it's
+  link-local, so `PublicOnly` already refuses it.
+- **DNS rebinding**: `Resolve` returns a `ResolvedTarget` bound to one
+  specific, already-validated IP address; callers must dial that IP
+  directly (`ResolvedTarget.DialAddr()`), never re-resolve the hostname
+  at connection time. `checkssl.go` does exactly this — the TLS `dialer`
+  connects to `target.DialAddr()` while `ServerName` (SNI) stays the
+  original hostname, so there's no window between validation and
+  connection where a second DNS lookup could hand back a different,
+  unvalidated address.
+- Tested by `internal/platform/netpolicy/netpolicy_test.go` (every
+  blocked address class, IPv4 and IPv6, including IPv4-mapped IPv6
+  addresses; that real public addresses — IPv4 and IPv6 — are correctly
+  allowed; the graduated-policy paths; input validation) and
+  `internal/tools/handlers/checkssl_test.go` (loopback, IPv6 loopback,
+  the metadata address, and a private address are all refused with
+  `FORBIDDEN`; a public IPv6 literal is *not* blocked — proving the
+  policy doesn't over-block IPv6 wholesale; the genuine-TLS-handshake
+  test runs against `InternalAllowed` explicitly, since `httptest`
+  necessarily binds to loopback, without weakening what `CheckSSL` itself
+  — always `PublicOnly` — actually ships).
+
 ## Tenant isolation — IMPLEMENTED
 
 - Every tenant-scoped table has a non-null `organization_id`.
