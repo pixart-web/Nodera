@@ -20,7 +20,7 @@ export class ApiError extends Error {
 }
 
 interface RequestOptions {
-  method?: "GET" | "POST" | "PUT" | "DELETE";
+  method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
   body?: unknown;
   // Most routes are organization-scoped and need X-Nodera-Org; auth routes
   // (signup/login) and the organization list/create routes are not.
@@ -72,6 +72,8 @@ export const api = {
     request<T>(path, { method: "POST", body, withOrg }),
   put: <T>(path: string, body?: unknown, withOrg = true) =>
     request<T>(path, { method: "PUT", body, withOrg }),
+  patch: <T>(path: string, body?: unknown, withOrg = true) =>
+    request<T>(path, { method: "PATCH", body, withOrg }),
   del: <T>(path: string, withOrg = true) => request<T>(path, { method: "DELETE", withOrg }),
   // Auth endpoints take no bearer token and no org header.
   postPublic: <T>(path: string, body?: unknown) =>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { api, ApiError } from "@/lib/api";
 import { useApi } from "@/lib/useApi";
 import { PageHeader } from "@/components/PageHeader";
@@ -42,6 +42,32 @@ export default function SecretsPage() {
       secrets.reload();
     } catch (err) {
       setFormError(err instanceof ApiError ? err.message : "Failed to delete secret");
+    }
+  }
+
+  const [editingKey, setEditingKey] = useState<string | null>(null);
+  const [editDescription, setEditDescription] = useState("");
+  const [editError, setEditError] = useState<string | null>(null);
+  const [editBusy, setEditBusy] = useState(false);
+
+  function startEditing(s: SecretMeta) {
+    setEditingKey((cur) => (cur === s.key ? null : s.key));
+    setEditDescription(s.description);
+    setEditError(null);
+  }
+
+  async function saveDescription(e: React.FormEvent, k: string) {
+    e.preventDefault();
+    setEditError(null);
+    setEditBusy(true);
+    try {
+      await api.patch(`/api/v1/secrets/${encodeURIComponent(k)}/description`, { description: editDescription });
+      setEditingKey(null);
+      secrets.reload();
+    } catch (err) {
+      setEditError(err instanceof ApiError ? err.message : "Failed to update description");
+    } finally {
+      setEditBusy(false);
     }
   }
 
@@ -128,19 +154,55 @@ export default function SecretsPage() {
               </thead>
               <tbody>
                 {secrets.data!.map((s) => (
-                  <tr key={s.id}>
-                    <td className="font-mono text-xs">{s.key}</td>
-                    <td className="text-xs text-base-300">{s.description || "—"}</td>
-                    <td className="text-xs text-base-400">{new Date(s.updated_at).toLocaleString()}</td>
-                    <td>
-                      <button
-                        className="text-xs text-base-400 hover:text-danger"
-                        onClick={() => deleteSecret(s.key)}
-                      >
-                        Delete
-                      </button>
-                    </td>
-                  </tr>
+                  <Fragment key={s.id}>
+                    <tr>
+                      <td className="font-mono text-xs">{s.key}</td>
+                      <td className="text-xs text-base-300">{s.description || "—"}</td>
+                      <td className="text-xs text-base-400">{new Date(s.updated_at).toLocaleString()}</td>
+                      <td className="space-x-3">
+                        <button className="text-xs text-base-400 hover:text-base-200" onClick={() => startEditing(s)}>
+                          {editingKey === s.key ? "Close" : "Edit description"}
+                        </button>
+                        <button
+                          className="text-xs text-base-400 hover:text-danger"
+                          onClick={() => deleteSecret(s.key)}
+                        >
+                          Delete
+                        </button>
+                      </td>
+                    </tr>
+                    {editingKey === s.key && (
+                      <tr>
+                        <td colSpan={4} className="bg-base-800/40 p-3">
+                          <form onSubmit={(e) => saveDescription(e, s.key)} className="space-y-2">
+                            {editError && <ErrorBanner message={editError} />}
+                            <p className="text-xs text-base-400">
+                              Only the description changes here — the secret&apos;s value is never resupplied or
+                              rotated by this form.
+                            </p>
+                            <input
+                              className="input"
+                              value={editDescription}
+                              onChange={(e) => setEditDescription(e.target.value)}
+                              placeholder="Description"
+                            />
+                            <div className="flex items-center gap-3">
+                              <button type="submit" className="btn-primary" disabled={editBusy}>
+                                {editBusy ? "Saving…" : "Save description"}
+                              </button>
+                              <button
+                                type="button"
+                                className="text-xs text-base-400 hover:text-base-200"
+                                onClick={() => setEditingKey(null)}
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          </form>
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
                 ))}
               </tbody>
             </table>

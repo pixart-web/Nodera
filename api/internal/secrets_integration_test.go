@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"testing"
 
+	"github.com/nodera/nodera/internal/platform/apierr"
 	"github.com/nodera/nodera/internal/secrets"
 	"github.com/nodera/nodera/internal/testhelpers"
 )
@@ -71,6 +72,70 @@ func TestSecretsSetListDeleteAndReveal(t *testing.T) {
 	}
 	if _, err := secretsSvc.Reveal(ctx, ac, "ai_provider.openai.api_key"); err == nil {
 		t.Fatal("expected Reveal to fail for a deleted secret")
+	}
+}
+
+// UpdateDescription changes only the description metadata — the plaintext
+// value must survive untouched, proving this path never re-encrypts or
+// otherwise disturbs the stored ciphertext.
+func TestSecretsUpdateDescriptionLeavesValueUntouched(t *testing.T) {
+	pool := testhelpers.RequirePool(t)
+	ctx := context.Background()
+	h := newHarness(pool)
+	ac, _ := h.newOwnerContext(t, ctx, "secrets-update-owner@nodera.dev")
+
+	secretsSvc, err := secrets.New(pool, h.audit, testEncryptionKey(t))
+	if err != nil {
+		t.Fatalf("secrets.New: %v", err)
+	}
+
+	if _, err := secretsSvc.Set(ctx, ac, "update-desc-key", "sk-should-not-change", "original description"); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+
+	updated, err := secretsSvc.UpdateDescription(ctx, ac, "update-desc-key", "corrected description")
+	if err != nil {
+		t.Fatalf("UpdateDescription: %v", err)
+	}
+	if updated.Description != "corrected description" {
+		t.Fatalf("expected description to be updated, got %q", updated.Description)
+	}
+
+	revealed, err := secretsSvc.Reveal(ctx, ac, "update-desc-key")
+	if err != nil {
+		t.Fatalf("Reveal: %v", err)
+	}
+	if revealed != "sk-should-not-change" {
+		t.Fatalf("UpdateDescription must never change the plaintext value, got %q", revealed)
+	}
+
+	if _, err := secretsSvc.UpdateDescription(ctx, ac, "does-not-exist", "x"); err == nil {
+		t.Fatal("expected UpdateDescription on a nonexistent secret to fail")
+	} else if ae, ok := err.(*apierr.Error); !ok || ae.Code != apierr.CodeNotFound {
+		t.Fatalf("expected NOT_FOUND, got %v", err)
+	}
+}
+
+func TestSecretsUpdateDescriptionRequiresManagePermission(t *testing.T) {
+	pool := testhelpers.RequirePool(t)
+	ctx := context.Background()
+	h := newHarness(pool)
+	ac, _ := h.newOwnerContext(t, ctx, "secrets-update-perm-owner@nodera.dev")
+
+	secretsSvc, err := secrets.New(pool, h.audit, testEncryptionKey(t))
+	if err != nil {
+		t.Fatalf("secrets.New: %v", err)
+	}
+	if _, err := secretsSvc.Set(ctx, ac, "guarded-key", "value", ""); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+
+	memberAC := h.newMemberContext(t, ctx, ac.OrganizationID, "secrets-update-perm-member@nodera.dev")
+
+	if _, err := secretsSvc.UpdateDescription(ctx, memberAC, "guarded-key", "should not apply"); err == nil {
+		t.Fatal("expected a member without secrets.manage to be forbidden from updating a secret's description")
+	} else if ae, ok := err.(*apierr.Error); !ok || ae.Code != apierr.CodeForbidden {
+		t.Fatalf("expected FORBIDDEN, got %v", err)
 	}
 }
 

@@ -33,7 +33,8 @@ web/
                                   delete, scoped chat (Run), scoped tool execution
                                   (ExecuteTool)
       ai/page.tsx                 AI Gateway: chat, profiles, providers, models
-      secrets/page.tsx          secret metadata list, set, delete — never values
+      secrets/page.tsx          secret metadata list, set, edit description, delete
+                                  — never values
       access/page.tsx            own API tokens, service accounts + their tokens,
                                   org-wide token listing (organization.manage only)
       settings/page.tsx           roles catalog + member role assignment
@@ -313,6 +314,28 @@ it the same honest way (`no handler registered for job type`, since none
 is registered for that test job type) a few seconds later. Separately
 confirmed via a direct API call that retrying a `queued` (not `failed`)
 job correctly returns a real `409 CONFLICT`.
+
+## Secrets page: edit description
+
+`secrets/page.tsx` gained an inline "Edit description" panel per row
+(`PATCH /api/v1/secrets/{key}/description`) — the only field it can touch
+is `description`; the form explicitly does not ask for the value, and
+says so, since resupplying it would mean either leaving it blank (which
+`Set` rejects — a secret's value is never optional there) or forcing an
+unintended rotation just to fix a typo.
+
+Caught a real bug during live verification (not a mock issue): the PATCH
+request failed in the browser with a raw `net::ERR_FAILED`, not an API
+error — the CORS middleware's `Access-Control-Allow-Methods` list
+(`internal/platform/httpserver/httpserver.go`) only had
+`GET, POST, PUT, DELETE, OPTIONS`, so the browser's own preflight check
+rejected the new `PATCH` method before the request ever reached the
+handler; `curl` wouldn't have shown this since it doesn't enforce CORS.
+Fixed by adding `PATCH` to the allow-list, then re-verified end to end:
+edited a secret's description through the real form, confirmed it
+round-tripped through the real backend on a fresh tab reload, and (per
+the corresponding integration test) confirmed the secret's underlying
+value is untouched by this path.
 
 ## Real-time updates (polling)
 

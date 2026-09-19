@@ -139,6 +139,7 @@ func newRouter(d apiDeps) http.Handler {
 
 				r.Get("/secrets", d.handleListSecrets)
 				r.Put("/secrets/{key}", d.handleSetSecret)
+				r.Patch("/secrets/{key}/description", d.handleUpdateSecretDescription)
 				r.Delete("/secrets/{key}", d.handleDeleteSecret)
 
 				r.Get("/tools", d.handleListTools)
@@ -1083,6 +1084,25 @@ func (d apiDeps) handleSetSecret(w http.ResponseWriter, r *http.Request) {
 	}
 	key := chi.URLParam(r, "key")
 	m, err := d.secrets.Set(r.Context(), mustAuthContext(r), key, body.Value, body.Description)
+	if err != nil {
+		httpserver.WriteError(w, r, err)
+		return
+	}
+	httpserver.WriteJSON(w, http.StatusOK, m)
+}
+
+func (d apiDeps) handleUpdateSecretDescription(w http.ResponseWriter, r *http.Request) {
+	if !d.secretsConfigured(w, r) {
+		return
+	}
+	var body struct {
+		Description string `json:"description"`
+	}
+	if !decodeJSON(w, r, &body) {
+		return
+	}
+	key := chi.URLParam(r, "key")
+	m, err := d.secrets.UpdateDescription(r.Context(), mustAuthContext(r), key, body.Description)
 	if err != nil {
 		httpserver.WriteError(w, r, err)
 		return

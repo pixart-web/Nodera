@@ -1006,6 +1006,48 @@ scanning in CI (`govulncheck`, `npm audit`).
       `SECURITY.md`'s rate-limiting section previously implied
       `agents/{id}/run` was unlimited; corrected
 
+**Phase 35** — this pass:
+- [x] `secrets.UpdateDescription` — found by the same CRUD-gap audit style
+      as Phases 31-34, applied to `internal/secrets`: `Set` upserts by
+      key, but changing only the description meant either resupplying the
+      plaintext value (forcing an unintended rotation) or resupplying the
+      empty string (which `Set` rejects outright, since a secret's value
+      is never optional there)
+- [x] `UpdateDescription` never touches the stored ciphertext, never
+      re-encrypts anything, and never appears anywhere near the
+      plaintext — it's a metadata-only `UPDATE ... SET description`
+- [x] 2 new integration tests, passing under `-race` alongside the 3
+      pre-existing secrets tests (5 total): update-description leaves the
+      revealed value byte-for-byte unchanged (and rejects a nonexistent
+      key with `NOT_FOUND`), and a member without `secrets.manage` is
+      forbidden
+- [x] 1 new HTTP route (`PATCH /secrets/{key}/description`) and an
+      OpenAPI addition, validated with `@redocly/cli lint`;
+      `lib/api-types.generated.ts` regenerated (`web/lib/api.ts` gained a
+      `patch` method alongside its existing get/post/put/del)
+- [x] `web/app/(org)/secrets/page.tsx`: an inline "Edit description" panel
+      per row that only asks for the description, with copy explaining
+      the value is neither shown nor resupplied by this form
+- [x] **Caught a real bug during live verification**: the edit form's
+      `PATCH` request failed in the browser with a raw `net::ERR_FAILED`
+      — the CORS middleware's `Access-Control-Allow-Methods`
+      (`internal/platform/httpserver/httpserver.go`) only listed
+      `GET, POST, PUT, DELETE, OPTIONS`, so the browser's own preflight
+      rejected `PATCH` before the request ever reached the handler.
+      `curl` alone wouldn't have surfaced this, since it doesn't enforce
+      CORS — this is exactly the class of bug the "verify live in a real
+      browser" step in this loop exists to catch. Fixed by adding `PATCH`
+      to the allow-list
+- [x] Re-verified live end to end after the fix: generated a real
+      `NODERA_SECRETS_ENCRYPTION_KEY`, created a real secret through the
+      UI, edited only its description through the real form, confirmed
+      it round-tripped through the real backend on a fresh tab reload,
+      and confirmed via the corresponding integration test that the
+      secret's underlying value is provably untouched by this path.
+      Checked the browser console on the fresh tab — zero errors
+- [x] Full backend test suite re-run clean (`go test ./... -race`)
+- [x] Docs (`API.md`, `FRONTEND.md`, `README.md`) updated
+
 ## Next up
 
 1. **Concrete job types**: the worker dispatcher is real but nothing

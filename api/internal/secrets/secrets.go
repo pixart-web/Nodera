@@ -146,6 +146,43 @@ func (s *Service) Set(ctx context.Context, ac authctx.AuthContext, key, value, d
 	return m, nil
 }
 
+// UpdateDescription changes a secret's description metadata without
+// touching its encrypted value — Set always requires resupplying the
+// plaintext even to fix a typo in the description, which either forces a
+// real rotation the caller didn't intend or means the description just
+// never gets corrected. This never re-encrypts anything and never appears
+// anywhere near the plaintext.
+func (s *Service) UpdateDescription(ctx context.Context, ac authctx.AuthContext, key, description string) (Meta, error) {
+	if err := rbac.Require(ac, permManage); err != nil {
+		return Meta{}, err
+	}
+	if key == "" {
+		return Meta{}, apierr.Validation("secret key is required")
+	}
+
+	var m Meta
+	err := s.pool.QueryRow(ctx, `
+		UPDATE secrets SET description = $1, updated_at = now()
+		WHERE organization_id = $2 AND key = $3
+		RETURNING id, key, description, created_at, updated_at
+	`, description, ac.OrganizationID, key).Scan(&m.ID, &m.Key, &m.Description, &m.CreatedAt, &m.UpdatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Meta{}, apierr.NotFound("secret")
+	}
+	if err != nil {
+		return Meta{}, apierr.Wrap(apierr.CodeInternal, "failed to update secret description", err)
+	}
+
+	if err := s.audit.Record(ctx, ac, audit.Entry{
+		Action: "secrets.secret.description_updated", ResourceType: "secret", ResourceID: m.ID.String(),
+		Success: true, ResultingState: m,
+	}); err != nil {
+		logger.FromContext(ctx).Error("failed to write audit entry", "error", err)
+	}
+
+	return m, nil
+}
+
 func (s *Service) List(ctx context.Context, ac authctx.AuthContext) ([]Meta, error) {
 	if err := rbac.Require(ac, permRead); err != nil {
 		return nil, err

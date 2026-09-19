@@ -137,6 +137,7 @@ tracked in `docs/ROADMAP.md` if that stops being true.
 | POST | `/api/v1/ai/models` | session or token + org | Register/update a model under an existing provider (`ai.manage`) |
 | GET | `/api/v1/secrets` | session or token + org | List secret metadata only — never values (`secrets.read`) |
 | PUT | `/api/v1/secrets/{key}` | session or token + org | Create or rotate a secret (`secrets.manage`) — `503 UNAVAILABLE` if the server has no `NODERA_SECRETS_ENCRYPTION_KEY` configured |
+| PATCH | `/api/v1/secrets/{key}/description` | session or token + org | Update a secret's description without touching its value (`secrets.manage`) |
 | DELETE | `/api/v1/secrets/{key}` | session or token + org | Delete a secret (`secrets.manage`) |
 | GET | `/api/v1/tools` | session or token + org | List the tool registry (`tools.read`) |
 | POST | `/api/v1/tools/{key}/execute` | session or token + org | Execute a tool. `read`/`safe` run immediately (`200`); `privileged`/`critical` return `202` with an `approval_id` instead of running |
