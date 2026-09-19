@@ -98,6 +98,9 @@ tracked in `docs/ROADMAP.md` if that stops being true.
 | GET | `/api/v1/applications` | session or token + org | List applications, paginated (`applications.read`) |
 | POST | `/api/v1/applications` | session or token + org | Register an application (`applications.deploy` — see docs/API.md note below) |
 | GET | `/api/v1/applications/{id}` | session or token + org | Get an application |
+| PUT | `/api/v1/applications/{id}` | session or token + org | Update an application's editable fields (`applications.deploy`) — status is not editable here |
+| POST | `/api/v1/applications/{id}/status` | session or token + org | Report an application's current status (`applications.deploy`) |
+| POST | `/api/v1/applications/{id}/deregister` | session or token + org | Permanently retire an application (`applications.deploy`) — terminal and one-way; the row is kept, not deleted, and idempotent to call again |
 | GET | `/api/v1/api-tokens` | session or token + org | List the caller's own API tokens |
 | POST | `/api/v1/api-tokens` | session or token + org | Create an API token owned by the caller (`organization.manage`); returns the raw token once |
 | DELETE | `/api/v1/api-tokens/{id}` | session or token + org | Revoke one of the caller's own tokens |

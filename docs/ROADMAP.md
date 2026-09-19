@@ -756,6 +756,48 @@ scanning in CI (`govulncheck`, `npm audit`).
       updated — `INFRASTRUCTURE.md` also had a stale "nothing updates
       last_seen_at yet" bullet from an earlier phase, corrected here
 
+**Phase 29** — this pass:
+- [x] The same update/status-report/deregister trio Phase 28 added for
+      nodes, mirrored onto `internal/applications` — its own package doc
+      already said it deliberately mirrors `internal/infrastructure`'s
+      shape, so this closes the gap between the two rather than leaving
+      one domain ahead of the other. Migration `0015` adds a terminal
+      `deregistered` value to `applications.status`'s CHECK constraint,
+      the same pattern as `0014`
+- [x] `Update` edits an application's editable fields (name, kind,
+      node_id, environment, repository_url) — everything except `status`,
+      reported separately. `node_id` needed one extra wrinkle nodes'
+      `UpdateNode` didn't: it's already nullable (an app need not be
+      pinned to a node), so a nil `*uuid.UUID` means "don't touch it" but
+      an explicit pointer to `uuid.Nil` means "clear it" — a real
+      three-state distinction a plain nullable field can't express in one
+      pointer alone
+- [x] `UpdateStatus` and `Deregister` are otherwise exact analogues of
+      `UpdateNodeStatus`/`DecommissionNode` — same terminal-state
+      `CONFLICT` guard, same idempotent-decommission behavior, same
+      row-kept-not-deleted rationale (no FK cascade risk here either)
+- [x] 5 new integration tests, all passing under `-race`, covering the
+      same shapes as Phase 28's plus the extra node_id-clearing case
+- [x] 3 new HTTP routes (`PUT /applications/{id}`, `POST .../status`,
+      `POST .../deregister`) and OpenAPI additions, validated with
+      `@redocly/cli lint`; `lib/api-types.generated.ts` regenerated
+- [x] `web/app/(org)/applications/page.tsx`: the same "Set status…" select
+      and "Deregister" button per row as Infrastructure's equivalent
+      controls; `StatusBadge` gained a matching `deregistered` color
+- [x] Verified live end to end: registered a real application, set its
+      status to `running` through the dropdown and watched a genuine
+      round-tripped green badge, deregistered it and watched both
+      controls disappear while the row stayed in the table, then
+      confirmed via a direct API call that a further status update
+      correctly returns a real `409 CONFLICT`. Checked the browser
+      console on a fresh tab afterward — zero errors
+- [x] Full backend and frontend verification clean, including confirming
+      migration `0015` applies cleanly against both the dev database and
+      a fresh test database
+- [x] Docs (`API.md`, `FRONTEND.md`, `README.md`) updated; also updated
+      `internal/applications`'s own package doc comment, which had gone
+      stale the moment this phase's methods were added
+
 ## Next up
 
 1. **Concrete job types**: the worker dispatcher is real but nothing

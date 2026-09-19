@@ -25,7 +25,8 @@ web/
       dashboard/page.tsx     live counts + recent audit activity
       infrastructure/page.tsx  node list + register form + per-node status
                                   report/decommission controls
-      applications/page.tsx    application list + register form
+      applications/page.tsx    application list + register form + per-app
+                                  status report/deregister controls
       jobs/page.tsx             job list (status filter), enqueue, cancel
       tools/page.tsx             tool registry + inline execute form + approvals queue
       agents/page.tsx             agent definitions: create/enable/disable, scoped
@@ -89,6 +90,22 @@ decommissioned it and watched both controls disappear while the row
 itself stayed in the table (retired, not erased), then confirmed via a
 direct API call that a further status update on it correctly returns a
 real `409 CONFLICT`.
+
+## Applications page
+
+`applications/page.tsx` got the same treatment as Infrastructure, for the
+same reason (the applications domain mirrors infrastructure's shape,
+`internal/applications`'s own package doc says so explicitly): a "Set
+status…" select (`running`/`stopped`/`degraded`/`failed`/`unknown`,
+`POST /applications/{id}/status`) and a "Deregister" button
+(`POST /applications/{id}/deregister`), both hidden once an application is
+`deregistered`. `StatusBadge` gained a matching `deregistered` color.
+
+Verified live: registered a real application, set its status to `running`
+through the dropdown and watched a genuine round-tripped green badge,
+deregistered it and watched both controls disappear while the row stayed
+in the table, then confirmed via a direct API call that a further status
+update on it correctly returns a real `409 CONFLICT`.
 
 ## Tools & Access pages
 

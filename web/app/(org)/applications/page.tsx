@@ -16,6 +16,27 @@ export default function ApplicationsPage() {
   const [kind, setKind] = useState("service");
   const [formError, setFormError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [rowError, setRowError] = useState<string | null>(null);
+
+  async function reportStatus(id: string, status: string) {
+    setRowError(null);
+    try {
+      await api.post(`/api/v1/applications/${id}/status`, { status });
+      apps.reload();
+    } catch (err) {
+      setRowError(err instanceof ApiError ? err.message : "Failed to update application status");
+    }
+  }
+
+  async function deregister(id: string) {
+    setRowError(null);
+    try {
+      await api.post(`/api/v1/applications/${id}/deregister`);
+      apps.reload();
+    } catch (err) {
+      setRowError(err instanceof ApiError ? err.message : "Failed to deregister application");
+    }
+  }
 
   async function registerApp(e: React.FormEvent) {
     e.preventDefault();
@@ -78,6 +99,7 @@ export default function ApplicationsPage() {
       )}
 
       {apps.error && <ErrorBanner message={apps.error} />}
+      {rowError && <ErrorBanner message={rowError} />}
 
       <div className="card">
         {apps.loading ? (
@@ -92,6 +114,7 @@ export default function ApplicationsPage() {
                 <th>Kind</th>
                 <th>Environment</th>
                 <th>Status</th>
+                <th></th>
               </tr>
             </thead>
             <tbody>
@@ -102,6 +125,32 @@ export default function ApplicationsPage() {
                   <td>{a.environment}</td>
                   <td>
                     <StatusBadge status={a.status} />
+                  </td>
+                  <td className="space-x-2">
+                    {a.status !== "deregistered" && (
+                      <>
+                        <select
+                          className="input inline-block w-28 py-1 text-xs"
+                          value=""
+                          onChange={(e) => e.target.value && reportStatus(a.id, e.target.value)}
+                        >
+                          <option value="" disabled>
+                            Set status…
+                          </option>
+                          <option value="running">running</option>
+                          <option value="stopped">stopped</option>
+                          <option value="degraded">degraded</option>
+                          <option value="failed">failed</option>
+                          <option value="unknown">unknown</option>
+                        </select>
+                        <button
+                          className="text-xs text-base-400 hover:text-danger"
+                          onClick={() => deregister(a.id)}
+                        >
+                          Deregister
+                        </button>
+                      </>
+                    )}
                   </td>
                 </tr>
               ))}

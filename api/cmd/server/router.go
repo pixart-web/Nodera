@@ -94,6 +94,9 @@ func newRouter(d apiDeps) http.Handler {
 				r.Get("/applications", d.handleListApplications)
 				r.Post("/applications", d.handleRegisterApplication)
 				r.Get("/applications/{id}", d.handleGetApplication)
+				r.Put("/applications/{id}", d.handleUpdateApplication)
+				r.Post("/applications/{id}/status", d.handleUpdateApplicationStatus)
+				r.Post("/applications/{id}/deregister", d.handleDeregisterApplication)
 
 				r.Get("/api-tokens", d.handleListAPITokens)
 				r.Post("/api-tokens", d.handleCreateAPIToken)
@@ -472,6 +475,58 @@ func (d apiDeps) handleGetApplication(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a, err := d.apps.Get(r.Context(), mustAuthContext(r), id)
+	if err != nil {
+		httpserver.WriteError(w, r, err)
+		return
+	}
+	httpserver.WriteJSON(w, http.StatusOK, a)
+}
+
+func (d apiDeps) handleUpdateApplication(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		httpserver.WriteError(w, r, apierr.Validation("invalid application id"))
+		return
+	}
+	var body applications.UpdateInput
+	if !decodeJSON(w, r, &body) {
+		return
+	}
+	a, err := d.apps.Update(r.Context(), mustAuthContext(r), id, body)
+	if err != nil {
+		httpserver.WriteError(w, r, err)
+		return
+	}
+	httpserver.WriteJSON(w, http.StatusOK, a)
+}
+
+func (d apiDeps) handleUpdateApplicationStatus(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		httpserver.WriteError(w, r, apierr.Validation("invalid application id"))
+		return
+	}
+	var body struct {
+		Status string `json:"status"`
+	}
+	if !decodeJSON(w, r, &body) {
+		return
+	}
+	a, err := d.apps.UpdateStatus(r.Context(), mustAuthContext(r), id, body.Status)
+	if err != nil {
+		httpserver.WriteError(w, r, err)
+		return
+	}
+	httpserver.WriteJSON(w, http.StatusOK, a)
+}
+
+func (d apiDeps) handleDeregisterApplication(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		httpserver.WriteError(w, r, apierr.Validation("invalid application id"))
+		return
+	}
+	a, err := d.apps.Deregister(r.Context(), mustAuthContext(r), id)
 	if err != nil {
 		httpserver.WriteError(w, r, err)
 		return

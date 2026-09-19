@@ -598,6 +598,69 @@
             }
           }
         }
+      },
+      "put": {
+        "tags": [
+          "applications"
+        ],
+        "summary": "Update an application's editable fields (applications.deploy) \u2014 status is not editable here",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OrgHeader"
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "kind": {
+                    "type": "string"
+                  },
+                  "node_id": {
+                    "type": "string",
+                    "format": "uuid",
+                    "description": "Pass the nil UUID to clear it"
+                  },
+                  "environment": {
+                    "type": "string"
+                  },
+                  "repository_url": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Application updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Application"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Application is deregistered"
+          }
+        }
       }
     },
     "/api/v1/api-tokens": {
@@ -2658,6 +2721,101 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Node"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/applications/{id}/status": {
+      "post": {
+        "tags": [
+          "applications"
+        ],
+        "summary": "Report an application's current status (applications.deploy)",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OrgHeader"
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "status"
+                ],
+                "properties": {
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "unknown",
+                      "running",
+                      "stopped",
+                      "degraded",
+                      "failed"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Status updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Application"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Application is deregistered"
+          }
+        }
+      }
+    },
+    "/api/v1/applications/{id}/deregister": {
+      "post": {
+        "tags": [
+          "applications"
+        ],
+        "summary": "Permanently retire an application (applications.deploy) \u2014 terminal and one-way; the row is kept, not deleted, and idempotent to call again",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OrgHeader"
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Application deregistered",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Application"
                 }
               }
             }
