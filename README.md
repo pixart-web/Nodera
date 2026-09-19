@@ -27,7 +27,7 @@ schema/interfaces, no production backend yet) · **PLANNED** (not started).
 | Module | Status | Notes |
 |---|---|---|
 | Identity (signup/login/sessions) | IMPLEMENTED | Argon2id passwords, opaque revocable sessions, self-service profile update + password change (revokes other sessions, not the current one), self-service session listing + individual revocation ("log out that device") |
-| Tenancy (organizations, membership) | IMPLEMENTED | Add/remove members (`organization.manage`); refuses to remove an organization's last remaining `owner` |
+| Tenancy (organizations, membership) | IMPLEMENTED | Rename/change slug, add/remove members (`organization.manage`); refuses to remove an organization's last remaining `owner` |
 | RBAC | IMPLEMENTED | Seeded owner/admin/member roles plus org-scoped custom roles, granular permission catalog; list/create/delete roles, list members, add an existing account as a member, and assign/revoke a member's role via API + UI (`organization.manage`, no privilege escalation) |
 | Audit log | IMPLEMENTED | Append-only, tenant-scoped query |
 | Infrastructure (nodes) | IMPLEMENTED | Provider-agnostic node inventory (register/list/get/update), status reporting (what a future Node Agent heartbeat would call) + decommission (terminal, row kept for history) |

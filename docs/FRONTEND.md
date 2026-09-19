@@ -205,7 +205,17 @@ immediately.
 
 ## Settings page
 
-`settings/page.tsx` covers RBAC: a Roles table (name, description, and
+`settings/page.tsx` also has an "Organization" section at the top (name +
+slug, pre-filled from `GET /api/v1/organization`, saved via `PUT
+/api/v1/organization`) — the only place in the UI the name/slug shown
+read-only everywhere else (the dashboard header, the org switcher) can
+actually be changed. Verified live: renamed a real organization through
+the form, confirmed the dashboard's header and the audit log's
+`tenancy.organization.updated` entry both reflected it immediately, and
+confirmed via a direct API call that renaming to another organization's
+slug returns a real `409 CONFLICT`.
+
+It otherwise covers RBAC: a Roles table (name, description, and
 permission count/list from `GET /api/v1/roles`) and a Members table
 (`GET /api/v1/organization/members`) showing each member's currently
 assigned roles as removable badges, with an "Assign role" control that

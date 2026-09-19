@@ -329,6 +329,49 @@
             }
           }
         }
+      },
+      "put": {
+        "tags": [
+          "organizations"
+        ],
+        "summary": "Rename the current organization and/or change its slug (organization.manage)",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OrgHeader"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "slug": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Organization updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Organization"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "An organization with this slug already exists"
+          }
+        }
       }
     },
     "/api/v1/infrastructure/nodes": {

@@ -89,6 +89,7 @@ tracked in `docs/ROADMAP.md` if that stops being true.
 | GET | `/api/v1/organizations` | session or token | List organizations the caller belongs to |
 | POST | `/api/v1/organizations` | session or token | Create an organization; creator becomes `owner` |
 | GET | `/api/v1/organization` | session or token + org | Get the current organization |
+| PUT | `/api/v1/organization` | session or token + org | Rename the current organization and/or change its slug (`organization.manage`) — `409 CONFLICT` if the slug is already taken |
 | GET | `/api/v1/infrastructure/nodes` | session or token + org | List nodes, paginated (`infrastructure.read`) |
 | POST | `/api/v1/infrastructure/nodes` | session or token + org | Register a node (`infrastructure.manage`) |
 | GET | `/api/v1/infrastructure/nodes/{id}` | session or token + org | Get a node |

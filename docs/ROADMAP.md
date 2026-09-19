@@ -1085,6 +1085,38 @@ scanning in CI (`govulncheck`, `npm audit`).
 - [x] Full backend test suite re-run clean (`go test ./... -race`)
 - [x] Docs (`API.md`, `FRONTEND.md`, `README.md`) updated
 
+**Phase 37** — this pass:
+- [x] `tenancy.UpdateOrganization` — the second finding from the Phase 36
+      domain audit: `CreateOrganization` validates and inserts name/slug,
+      but there was no way to rename an organization or fix a typo'd slug
+      short of a database edit, even though both are shown read-only
+      throughout the UI (dashboard header, org switcher)
+- [x] Pointer-based partial update for `name`/`slug`, reusing
+      `CreateOrganization`'s own validation (non-empty name, the same
+      slug format regex) so the two paths can never disagree about what a
+      valid name/slug looks like; a slug collision with another
+      organization surfaces the same `409 CONFLICT` `CreateOrganization`
+      already gives for a duplicate slug
+- [x] 4 new integration tests, passing under `-race` alongside the 9
+      pre-existing tenancy tests (13 total): partial-update-only-touches-
+      provided-fields (name then slug, independently), a plain member
+      forbidden, an invalid slug rejected, and renaming into another
+      organization's existing slug correctly `CONFLICT`s
+- [x] 1 new HTTP route (`PUT /organization`) and an OpenAPI addition,
+      validated with `@redocly/cli lint`; `lib/api-types.generated.ts`
+      regenerated
+- [x] `web/app/(org)/settings/page.tsx`: a new "Organization" section at
+      the top of the page — the first place in the UI this ever became
+      editable rather than read-only
+- [x] Verified live end to end: renamed a real organization through the
+      form, confirmed the dashboard header and the audit log's
+      `tenancy.organization.updated` entry both reflected the change
+      immediately, and confirmed via a direct API call that renaming to
+      another organization's slug returns a real `409 CONFLICT`. Checked
+      the browser console on a fresh tab — zero errors
+- [x] Full backend test suite re-run clean (`go test ./... -race`)
+- [x] Docs (`API.md`, `FRONTEND.md`, `README.md`) updated
+
 ## Next up
 
 1. **Concrete job types**: the worker dispatcher is real but nothing

@@ -144,6 +144,65 @@ func (s *Service) Get(ctx context.Context, ac authctx.AuthContext) (Organization
 	return o, nil
 }
 
+// UpdateOrganizationInput follows the pointer-based partial-update
+// convention used across the codebase: a nil field leaves the existing
+// value untouched.
+type UpdateOrganizationInput struct {
+	Name *string `json:"name"`
+	Slug *string `json:"slug"`
+}
+
+// UpdateOrganization renames the calling organization and/or changes its
+// slug. Reuses CreateOrganization's own validation (non-empty name, slug
+// format) so the two paths can never disagree about what a valid
+// name/slug looks like.
+func (s *Service) UpdateOrganization(ctx context.Context, ac authctx.AuthContext, in UpdateOrganizationInput) (Organization, error) {
+	if err := rbac.Require(ac, "organization.manage"); err != nil {
+		return Organization{}, err
+	}
+
+	existing, err := s.Get(ctx, ac)
+	if err != nil {
+		return Organization{}, err
+	}
+
+	name := existing.Name
+	if in.Name != nil {
+		if strings.TrimSpace(*in.Name) == "" {
+			return Organization{}, apierr.Validation("organization name is required")
+		}
+		name = *in.Name
+	}
+	slug := existing.Slug
+	if in.Slug != nil {
+		if !slugPattern.MatchString(*in.Slug) {
+			return Organization{}, apierr.Validation("slug must be lowercase alphanumeric with single hyphens")
+		}
+		slug = *in.Slug
+	}
+
+	var org Organization
+	err = s.pool.QueryRow(ctx, `
+		UPDATE organizations SET name = $1, slug = $2 WHERE id = $3
+		RETURNING id, name, slug, created_at
+	`, name, slug, ac.OrganizationID).Scan(&org.ID, &org.Name, &org.Slug, &org.CreatedAt)
+	if err != nil {
+		if isUniqueViolation(err) {
+			return Organization{}, apierr.Conflict("an organization with this slug already exists")
+		}
+		return Organization{}, apierr.Wrap(apierr.CodeInternal, "failed to update organization", err)
+	}
+
+	if err := s.audit.Record(ctx, ac, audit.Entry{
+		Action: "tenancy.organization.updated", ResourceType: "organization", ResourceID: org.ID.String(),
+		Success: true, PreviousState: existing, ResultingState: org,
+	}); err != nil {
+		logger.FromContext(ctx).Error("failed to write audit entry", "error", err)
+	}
+
+	return org, nil
+}
+
 // AddMember adds an existing user (looked up by email) to the calling
 // organization and grants them the system 'member' role — the same
 // starting point CreateOrganization gives itself no special treatment

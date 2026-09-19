@@ -83,6 +83,7 @@ func newRouter(d apiDeps) http.Handler {
 				r.Use(d.requireOrganization)
 
 				r.Get("/organization", d.handleGetOrganization)
+				r.Put("/organization", d.handleUpdateOrganization)
 
 				r.Get("/infrastructure/nodes", d.handleListNodes)
 				r.Post("/infrastructure/nodes", d.handleRegisterNode)
@@ -354,6 +355,19 @@ func (d apiDeps) handleCreateOrganization(w http.ResponseWriter, r *http.Request
 func (d apiDeps) handleGetOrganization(w http.ResponseWriter, r *http.Request) {
 	ac := mustAuthContext(r)
 	org, err := d.tenancy.Get(r.Context(), ac)
+	if err != nil {
+		httpserver.WriteError(w, r, err)
+		return
+	}
+	httpserver.WriteJSON(w, http.StatusOK, org)
+}
+
+func (d apiDeps) handleUpdateOrganization(w http.ResponseWriter, r *http.Request) {
+	var body tenancy.UpdateOrganizationInput
+	if !decodeJSON(w, r, &body) {
+		return
+	}
+	org, err := d.tenancy.UpdateOrganization(r.Context(), mustAuthContext(r), body)
 	if err != nil {
 		httpserver.WriteError(w, r, err)
 		return

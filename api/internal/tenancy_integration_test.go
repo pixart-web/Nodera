@@ -7,6 +7,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/nodera/nodera/internal/platform/apierr"
+	"github.com/nodera/nodera/internal/tenancy"
 	"github.com/nodera/nodera/internal/testhelpers"
 )
 
@@ -105,6 +106,92 @@ func TestTenancy_AddMemberRejectsAlreadyMember(t *testing.T) {
 	}
 	if _, err := h.tenancy.AddMember(ctx, ac, "addmember-dup-invitee@nodera.dev"); err == nil {
 		t.Fatal("expected adding an already-added member to fail")
+	} else if ae, ok := err.(*apierr.Error); !ok || ae.Code != apierr.CodeConflict {
+		t.Fatalf("expected CONFLICT, got %v", err)
+	}
+}
+
+func TestTenancy_UpdateOrganizationChangesOnlyProvidedFields(t *testing.T) {
+	pool := testhelpers.RequirePool(t)
+	ctx := context.Background()
+	h := newHarness(pool)
+	ac, _ := h.newOwnerContext(t, ctx, "updateorg-owner@nodera.dev")
+
+	before, err := h.tenancy.Get(ctx, ac)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+
+	newName := "Renamed Org"
+	updated, err := h.tenancy.UpdateOrganization(ctx, ac, tenancy.UpdateOrganizationInput{Name: &newName})
+	if err != nil {
+		t.Fatalf("UpdateOrganization: %v", err)
+	}
+	if updated.Name != "Renamed Org" {
+		t.Fatalf("expected name to be updated, got %q", updated.Name)
+	}
+	if updated.Slug != before.Slug {
+		t.Fatalf("untouched field Slug changed: got %q, want %q", updated.Slug, before.Slug)
+	}
+
+	newSlug := before.Slug + "-v2"
+	updated, err = h.tenancy.UpdateOrganization(ctx, ac, tenancy.UpdateOrganizationInput{Slug: &newSlug})
+	if err != nil {
+		t.Fatalf("UpdateOrganization (slug): %v", err)
+	}
+	if updated.Slug != newSlug {
+		t.Fatalf("expected slug to be updated, got %q", updated.Slug)
+	}
+	if updated.Name != "Renamed Org" {
+		t.Fatalf("untouched field Name changed on the second call: got %q", updated.Name)
+	}
+}
+
+func TestTenancy_UpdateOrganizationRequiresOrganizationManage(t *testing.T) {
+	pool := testhelpers.RequirePool(t)
+	ctx := context.Background()
+	h := newHarness(pool)
+	ac, _ := h.newOwnerContext(t, ctx, "updateorg-perm-owner@nodera.dev")
+	memberAC := h.newMemberContext(t, ctx, ac.OrganizationID, "updateorg-perm-member@nodera.dev")
+
+	newName := "should-not-apply"
+	if _, err := h.tenancy.UpdateOrganization(ctx, memberAC, tenancy.UpdateOrganizationInput{Name: &newName}); err == nil {
+		t.Fatal("expected a plain member to be forbidden from updating the organization")
+	} else if ae, ok := err.(*apierr.Error); !ok || ae.Code != apierr.CodeForbidden {
+		t.Fatalf("expected FORBIDDEN, got %v", err)
+	}
+}
+
+func TestTenancy_UpdateOrganizationRejectsInvalidSlug(t *testing.T) {
+	pool := testhelpers.RequirePool(t)
+	ctx := context.Background()
+	h := newHarness(pool)
+	ac, _ := h.newOwnerContext(t, ctx, "updateorg-invalid-owner@nodera.dev")
+
+	badSlug := "Not A Valid Slug!"
+	if _, err := h.tenancy.UpdateOrganization(ctx, ac, tenancy.UpdateOrganizationInput{Slug: &badSlug}); err == nil {
+		t.Fatal("expected an invalid slug to fail validation")
+	} else if ae, ok := err.(*apierr.Error); !ok || ae.Code != apierr.CodeValidation {
+		t.Fatalf("expected VALIDATION_ERROR, got %v", err)
+	}
+}
+
+// Renaming to another organization's slug is a real CONFLICT, since slugs
+// are globally unique.
+func TestTenancy_UpdateOrganizationRejectsDuplicateSlug(t *testing.T) {
+	pool := testhelpers.RequirePool(t)
+	ctx := context.Background()
+	h := newHarness(pool)
+	acA, _ := h.newOwnerContext(t, ctx, "updateorg-dup-a@nodera.dev")
+	acB, _ := h.newOwnerContext(t, ctx, "updateorg-dup-b@nodera.dev")
+
+	orgA, err := h.tenancy.Get(ctx, acA)
+	if err != nil {
+		t.Fatalf("Get (org A): %v", err)
+	}
+
+	if _, err := h.tenancy.UpdateOrganization(ctx, acB, tenancy.UpdateOrganizationInput{Slug: &orgA.Slug}); err == nil {
+		t.Fatal("expected renaming to another organization's slug to fail")
 	} else if ae, ok := err.(*apierr.Error); !ok || ae.Code != apierr.CodeConflict {
 		t.Fatalf("expected CONFLICT, got %v", err)
 	}

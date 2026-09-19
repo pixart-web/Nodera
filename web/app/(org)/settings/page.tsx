@@ -1,11 +1,69 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { api, ApiError } from "@/lib/api";
 import { useApi } from "@/lib/useApi";
 import { PageHeader } from "@/components/PageHeader";
 import { ErrorBanner } from "@/components/ErrorBanner";
-import type { Member, Role } from "@/lib/types";
+import type { Member, Organization, Role } from "@/lib/types";
+
+function OrganizationForm({ org, onUpdated }: { org: Organization; onUpdated: () => void }) {
+  const [name, setName] = useState(org.name);
+  const [slug, setSlug] = useState(org.slug);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  // Keep the form in sync if the org reloads with a different value (e.g.
+  // another admin renamed it in another tab).
+  useEffect(() => {
+    setName(org.name);
+    setSlug(org.slug);
+  }, [org.name, org.slug]);
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    setBusy(true);
+    try {
+      await api.put("/api/v1/organization", { name, slug });
+      onUpdated();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Failed to update organization");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form onSubmit={submit} className="card mb-8 space-y-3 p-4">
+      {error && <ErrorBanner message={error} />}
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <label className="label" htmlFor="org-name">
+            Name
+          </label>
+          <input id="org-name" className="input" value={name} onChange={(e) => setName(e.target.value)} required />
+        </div>
+        <div>
+          <label className="label" htmlFor="org-slug">
+            Slug
+          </label>
+          <input
+            id="org-slug"
+            className="input font-mono"
+            value={slug}
+            onChange={(e) => setSlug(e.target.value)}
+            placeholder="lowercase-with-hyphens"
+            required
+          />
+        </div>
+      </div>
+      <button type="submit" className="btn-primary" disabled={busy}>
+        {busy ? "Saving…" : "Save organization"}
+      </button>
+    </form>
+  );
+}
 
 function AssignRoleForm({ member, roles, onDone }: { member: Member; roles: Role[]; onDone: () => void }) {
   const assignable = roles.filter((r) => !member.roles.some((mr) => mr.role_id === r.id));
@@ -218,6 +276,7 @@ function AddMemberForm({ onDone }: { onDone: () => void }) {
 }
 
 export default function SettingsPage() {
+  const org = useApi(() => api.get<Organization>("/api/v1/organization"), []);
   const roles = useApi(() => api.get<Role[]>("/api/v1/roles"), []);
   const members = useApi(() => api.get<Member[]>("/api/v1/organization/members"), []);
   const [error, setError] = useState<string | null>(null);
@@ -266,8 +325,16 @@ export default function SettingsPage() {
     <div>
       <PageHeader
         title="Settings"
-        description="Roles and organization membership. Roles are seeded (owner/admin/member) and not yet creatable from here — this page manages who holds which of them."
+        description="Organization details, roles, and membership. Roles are seeded (owner/admin/member) and not yet creatable from here — this page manages who holds which of them."
       />
+
+      {org.error && <ErrorBanner message={org.error} />}
+      {org.data && (
+        <div className="mb-8">
+          <h2 className="mb-3 text-sm font-medium text-base-100">Organization</h2>
+          <OrganizationForm org={org.data} onUpdated={() => org.reload()} />
+        </div>
+      )}
 
       <div className="mb-8">
         <div className="mb-3 flex items-center justify-between">
