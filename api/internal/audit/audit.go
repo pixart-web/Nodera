@@ -119,12 +119,19 @@ type Record struct {
 }
 
 // QueryFilter narrows a Query call. OrganizationID is required — audit.Query
-// never returns cross-tenant results (ADR-004).
+// never returns cross-tenant results (ADR-004). From/To narrow by
+// created_at, both inclusive at their respective ends; either or both may
+// be zero-valued (time.Time{}) to leave that bound open. Without a
+// time-range filter, investigating "what happened around this incident"
+// on an organization with a lot of history means paging through
+// everything else first.
 type QueryFilter struct {
 	OrganizationID uuid.UUID
 	ResourceType   string // optional
 	ResourceID     string // optional
 	Action         string // optional, exact match
+	From           time.Time
+	To             time.Time
 	Limit          int
 	Offset         int
 }
@@ -142,6 +149,9 @@ func (s *Service) Query(ctx context.Context, ac authctx.AuthContext, f QueryFilt
 	} else if f.Limit > 1000 {
 		f.Limit = 1000
 	}
+	if !f.From.IsZero() && !f.To.IsZero() && f.From.After(f.To) {
+		return nil, apierr.Validation("from must not be after to")
+	}
 
 	rows, err := s.pool.Query(ctx, `
 		SELECT id, organization_id, actor_label, action, resource_type,
@@ -151,9 +161,12 @@ func (s *Service) Query(ctx context.Context, ac authctx.AuthContext, f QueryFilt
 		  AND ($2 = '' OR resource_type = $2)
 		  AND ($3 = '' OR resource_id = $3)
 		  AND ($4 = '' OR action = $4)
+		  AND ($5::timestamptz IS NULL OR created_at >= $5)
+		  AND ($6::timestamptz IS NULL OR created_at <= $6)
 		ORDER BY created_at DESC
-		LIMIT $5 OFFSET $6
-	`, ac.OrganizationID, f.ResourceType, f.ResourceID, f.Action, f.Limit, f.Offset)
+		LIMIT $7 OFFSET $8
+	`, ac.OrganizationID, f.ResourceType, f.ResourceID, f.Action,
+		nullableTime(f.From), nullableTime(f.To), f.Limit, f.Offset)
 	if err != nil {
 		return nil, apierr.Wrap(apierr.CodeInternal, "failed to query audit log", err)
 	}
@@ -193,4 +206,11 @@ func nullableString(s string) *string {
 		return nil
 	}
 	return &s
+}
+
+func nullableTime(t time.Time) *time.Time {
+	if t.IsZero() {
+		return nil
+	}
+	return &t
 }

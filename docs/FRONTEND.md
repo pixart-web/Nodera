@@ -409,6 +409,20 @@ round-tripped through the real backend on a fresh tab reload, and (per
 the corresponding integration test) confirmed the secret's underlying
 value is untouched by this path.
 
+## Audit page: time-range filter
+
+`audit/page.tsx` gained "From"/"To" `datetime-local` inputs above the
+table (`?from=`/`?to=`, RFC3339) — browser `datetime-local` values carry
+no timezone, so the page interprets them in the viewer's own local zone
+and converts to a real RFC3339 timestamp via `new Date(value).
+toISOString()` before building the query string. Changing either input
+resets the pagination limit back to 50, same as changing any other
+filter would. A "Clear" link appears only once at least one bound is set.
+Verified live: set a "From" cutting off everything before the current
+session's activity and watched the table narrow to exactly the rows at
+or after it; confirmed via a direct API call that `from` after `to`
+returns a real `400 VALIDATION_ERROR`.
+
 ## Real-time updates (polling)
 
 `lib/useApi.ts` takes an optional third argument, `{ pollMs }`: when set,

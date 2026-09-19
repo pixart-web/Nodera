@@ -1511,6 +1511,44 @@ scanning in CI (`govulncheck`, `npm audit`).
 - [x] Full backend test suite re-run clean (`go test ./... -race`)
 - [x] Docs (`API.md`, `FRONTEND.md`, `README.md`) updated
 
+**Phase 48** — this pass:
+- [x] `audit.QueryFilter` time-range filter — found in the same domain
+      audit as Phases 41-47: `Query` filters by `resource_type`/
+      `resource_id`/`action`, but nothing narrows by `created_at`, so
+      investigating "what happened around this incident" on an
+      organization with real history meant paging through everything
+      else first
+- [x] Additive: `From`/`To time.Time` fields on the existing
+      `QueryFilter` struct, both optional and independently useful (an
+      open lower or upper bound is a legitimate query); `from` after `to`
+      is rejected with a real `400 VALIDATION_ERROR` rather than silently
+      returning nothing. No migration needed — `created_at` was already
+      indexed for the existing `ORDER BY`
+- [x] 2 new integration tests, passing under `-race`: backdated rows
+      (direct inserts, since a real `Record` call always uses `now()` —
+      the only way to get deterministic, well-separated timestamps to
+      filter against) prove the window genuinely excludes rows outside
+      it, both bounds together and an open-ended `From` alone, plus the
+      from-after-to rejection
+- [x] `GET /api/v1/audit` gained `?from=`/`?to=` (RFC3339) query params,
+      parsed leniently — a missing or unparsable value is treated as
+      unset rather than a `400`, the same "degrade gracefully" philosophy
+      `httpserver.ParsePagination` already applies to `?limit=`/`?offset=`.
+      OpenAPI addition validated with `@redocly/cli lint`;
+      `lib/api-types.generated.ts` regenerated
+- [x] `web/app/(org)/audit/page.tsx`: "From"/"To" `datetime-local` inputs
+      above the table, converted to RFC3339 in the viewer's own local
+      timezone before querying; a "Clear" link once either is set;
+      changing either resets pagination back to 50 rows
+- [x] Verified live end to end: set a real "From" cutoff on the actual
+      Audit page and watched the table narrow to exactly the rows at or
+      after it (everything from earlier phases' activity correctly
+      dropped out); confirmed via a direct API call that `from` after
+      `to` returns a real `400`. Checked the browser console on a fresh
+      tab — zero errors
+- [x] Full backend test suite re-run clean (`go test ./... -race`)
+- [x] Docs (`API.md`, `FRONTEND.md`, `README.md`) updated
+
 ## Next up
 
 1. **Concrete job types**: the worker dispatcher is real but nothing

@@ -1541,6 +1541,8 @@ func (d apiDeps) handleListAudit(w http.ResponseWriter, r *http.Request) {
 		OrganizationID: ac.OrganizationID,
 		ResourceType:   r.URL.Query().Get("resource_type"),
 		Action:         r.URL.Query().Get("action"),
+		From:           parseRFC3339Query(r, "from"),
+		To:             parseRFC3339Query(r, "to"),
 		Limit:          p.Limit + 1,
 		Offset:         p.Offset,
 	})
@@ -1549,6 +1551,22 @@ func (d apiDeps) handleListAudit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpserver.WriteJSON(w, http.StatusOK, httpserver.NewPage(records, p))
+}
+
+// parseRFC3339Query reads an RFC3339 timestamp from a query parameter,
+// treating a missing or unparsable value as unset (zero time.Time) rather
+// than a 400 — same "degrade gracefully" philosophy
+// httpserver.ParsePagination already applies to ?limit/?offset.
+func parseRFC3339Query(r *http.Request, key string) time.Time {
+	v := r.URL.Query().Get(key)
+	if v == "" {
+		return time.Time{}
+	}
+	t, err := time.Parse(time.RFC3339, v)
+	if err != nil {
+		return time.Time{}
+	}
+	return t
 }
 
 // --- helpers ---

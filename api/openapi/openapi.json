@@ -2589,6 +2589,24 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "description": "RFC3339 timestamp; only rows created at or after this time are returned. Unparsable/missing values are ignored, not rejected.",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "description": "RFC3339 timestamp; only rows created at or before this time are returned. Unparsable/missing values are ignored, not rejected.",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
           }
         ],
         "responses": {
@@ -2601,6 +2619,9 @@
                 }
               }
             }
+          },
+          "400": {
+            "description": "from is after to"
           }
         }
       }

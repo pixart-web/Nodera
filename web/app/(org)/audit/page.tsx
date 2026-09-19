@@ -9,11 +9,73 @@ import type { AuditRecord, Page } from "@/lib/types";
 
 export default function AuditPage() {
   const [visibleLimit, setVisibleLimit] = useState(50);
-  const audit = useApi(() => api.get<Page<AuditRecord>>(`/api/v1/audit?limit=${visibleLimit}`), [visibleLimit]);
+  const [fromInput, setFromInput] = useState("");
+  const [toInput, setToInput] = useState("");
+
+  // datetime-local values have no timezone; interpreting them in the
+  // browser's local zone and converting to a real RFC3339 timestamp is
+  // what the API's ?from=/?to= params expect.
+  const from = fromInput ? new Date(fromInput).toISOString() : "";
+  const to = toInput ? new Date(toInput).toISOString() : "";
+
+  const audit = useApi(
+    () =>
+      api.get<Page<AuditRecord>>(
+        `/api/v1/audit?limit=${visibleLimit}${from ? `&from=${encodeURIComponent(from)}` : ""}${
+          to ? `&to=${encodeURIComponent(to)}` : ""
+        }`,
+      ),
+    [visibleLimit, from, to],
+  );
 
   return (
     <div>
       <PageHeader title="Audit log" description="Append-only. Every sensitive operation is recorded here." />
+
+      <div className="mb-4 flex items-end gap-3">
+        <div>
+          <label className="label" htmlFor="audit-from">
+            From
+          </label>
+          <input
+            id="audit-from"
+            type="datetime-local"
+            className="input"
+            value={fromInput}
+            onChange={(e) => {
+              setFromInput(e.target.value);
+              setVisibleLimit(50);
+            }}
+          />
+        </div>
+        <div>
+          <label className="label" htmlFor="audit-to">
+            To
+          </label>
+          <input
+            id="audit-to"
+            type="datetime-local"
+            className="input"
+            value={toInput}
+            onChange={(e) => {
+              setToInput(e.target.value);
+              setVisibleLimit(50);
+            }}
+          />
+        </div>
+        {(fromInput || toInput) && (
+          <button
+            className="text-xs text-base-400 hover:text-base-200"
+            onClick={() => {
+              setFromInput("");
+              setToInput("");
+              setVisibleLimit(50);
+            }}
+          >
+            Clear
+          </button>
+        )}
+      </div>
 
       {audit.error && <ErrorBanner message={audit.error} />}
 

@@ -2624,6 +2624,10 @@ export interface paths {
                     offset?: components["parameters"]["Offset"];
                     resource_type?: string;
                     action?: string;
+                    /** @description RFC3339 timestamp; only rows created at or after this time are returned. Unparsable/missing values are ignored, not rejected. */
+                    from?: string;
+                    /** @description RFC3339 timestamp; only rows created at or before this time are returned. Unparsable/missing values are ignored, not rejected. */
+                    to?: string;
                 };
                 header?: {
                     /** @description Required for a session token (which org to act within). Optional for an API token, which already embeds one — if present it must match. */
@@ -2642,6 +2646,13 @@ export interface paths {
                     content: {
                         "application/json": components["schemas"]["AuditRecordPage"];
                     };
+                };
+                /** @description from is after to */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
                 };
             };
         };
