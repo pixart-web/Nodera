@@ -136,6 +136,48 @@ func (s *Service) insertAPIToken(ctx context.Context, orgID uuid.UUID, userID, s
 	return raw, t, nil
 }
 
+// UpdateAPIToken renames one of the caller's own tokens — metadata only.
+// Scopes are deliberately not editable here: they're fixed at mint time
+// (CreateAPIToken already validates they're a subset of the creator's own
+// permissions at that moment), and letting them change later would mean
+// re-running that same no-privilege-escalation check against whatever the
+// caller's permissions happen to be *now*, a materially different
+// operation from a name fix — if scopes need to change, revoke and
+// reissue. Fixing a typo'd name or clarifying a token's purpose later
+// previously required exactly that: revoke-and-recreate, which loses the
+// prefix and creation date and forces immediate re-authentication of
+// whatever used the old token — this closes that gap the same
+// metadata-only way Phase 35's secrets.UpdateDescription did.
+func (s *Service) UpdateAPIToken(ctx context.Context, ac authctx.AuthContext, id uuid.UUID, name string) (APIToken, error) {
+	if name == "" {
+		return APIToken{}, apierr.Validation("token name is required")
+	}
+
+	var t APIToken
+	err := s.pool.QueryRow(ctx, `
+		UPDATE api_tokens SET name = $1
+		WHERE id = $2 AND organization_id = $3 AND user_id = $4 AND revoked_at IS NULL
+		RETURNING id, name, token_prefix, scopes, created_at, expires_at, last_used_at
+	`, name, id, ac.OrganizationID, ac.ActorID).Scan(
+		&t.ID, &t.Name, &t.TokenPrefix, &t.Scopes, &t.CreatedAt, &t.ExpiresAt, &t.LastUsedAt,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return APIToken{}, apierr.NotFound("API token")
+	}
+	if err != nil {
+		return APIToken{}, apierr.Wrap(apierr.CodeInternal, "failed to update API token", err)
+	}
+
+	if err := s.audit.Record(ctx, ac, audit.Entry{
+		Action: "identity.api_token.updated", ResourceType: "api_token", ResourceID: t.ID.String(),
+		Success: true, ResultingState: t,
+	}); err != nil {
+		logger.FromContext(ctx).Error("failed to write audit entry", "error", err)
+	}
+
+	return t, nil
+}
+
 func (s *Service) ListAPITokens(ctx context.Context, ac authctx.AuthContext) ([]APIToken, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT id, name, token_prefix, scopes, created_at, expires_at, last_used_at

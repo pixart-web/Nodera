@@ -81,6 +81,33 @@ export default function AccessPage() {
     }
   }
 
+  const [renamingTokenID, setRenamingTokenID] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState("");
+  const [renameError, setRenameError] = useState<string | null>(null);
+  const [renameBusy, setRenameBusy] = useState(false);
+
+  function startRenaming(t: APIToken) {
+    setRenamingTokenID((cur) => (cur === t.id ? null : t.id));
+    setRenameValue(t.name);
+    setRenameError(null);
+  }
+
+  async function saveRename(e: React.FormEvent, id: string) {
+    e.preventDefault();
+    setRenameError(null);
+    setRenameBusy(true);
+    try {
+      await api.put(`/api/v1/api-tokens/${id}`, { name: renameValue });
+      setRenamingTokenID(null);
+      myTokens.reload();
+      orgTokens.reload();
+    } catch (err) {
+      setRenameError(err instanceof ApiError ? err.message : "Failed to rename token");
+    } finally {
+      setRenameBusy(false);
+    }
+  }
+
   async function revokeOrgToken(id: string) {
     try {
       await api.del(`/api/v1/organization/api-tokens/${id}`);
@@ -272,17 +299,40 @@ export default function AccessPage() {
               </thead>
               <tbody>
                 {myTokens.data!.map((t) => (
-                  <tr key={t.id}>
-                    <td className="font-mono text-xs">{t.name}</td>
-                    <td className="font-mono text-xs text-base-400">{t.token_prefix}…</td>
-                    <td className="text-xs text-base-300">{t.scopes.join(", ")}</td>
-                    <td className="text-xs text-base-400">{t.last_used_at ? new Date(t.last_used_at).toLocaleString() : "never"}</td>
-                    <td>
-                      <button className="text-xs text-base-400 hover:text-danger" onClick={() => revokeToken(t.id)}>
-                        Revoke
-                      </button>
-                    </td>
-                  </tr>
+                  <Fragment key={t.id}>
+                    <tr>
+                      <td className="font-mono text-xs">{t.name}</td>
+                      <td className="font-mono text-xs text-base-400">{t.token_prefix}…</td>
+                      <td className="text-xs text-base-300">{t.scopes.join(", ")}</td>
+                      <td className="text-xs text-base-400">{t.last_used_at ? new Date(t.last_used_at).toLocaleString() : "never"}</td>
+                      <td className="space-x-3">
+                        <button className="text-xs text-base-400 hover:text-base-200" onClick={() => startRenaming(t)}>
+                          {renamingTokenID === t.id ? "Close" : "Rename"}
+                        </button>
+                        <button className="text-xs text-base-400 hover:text-danger" onClick={() => revokeToken(t.id)}>
+                          Revoke
+                        </button>
+                      </td>
+                    </tr>
+                    {renamingTokenID === t.id && (
+                      <tr>
+                        <td colSpan={5} className="bg-base-800/40 p-3">
+                          <form onSubmit={(e) => saveRename(e, t.id)} className="flex items-center gap-3">
+                            {renameError && <ErrorBanner message={renameError} />}
+                            <input
+                              className="input flex-1"
+                              value={renameValue}
+                              onChange={(e) => setRenameValue(e.target.value)}
+                              required
+                            />
+                            <button type="submit" className="btn-primary" disabled={renameBusy}>
+                              {renameBusy ? "Saving…" : "Save"}
+                            </button>
+                          </form>
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
                 ))}
               </tbody>
             </table>

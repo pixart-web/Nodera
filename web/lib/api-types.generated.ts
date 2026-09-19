@@ -741,7 +741,39 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        put?: never;
+        /** Rename one of the caller's own tokens — metadata only, scopes are fixed at mint time */
+        put: {
+            parameters: {
+                query?: never;
+                header?: {
+                    /** @description Required for a session token (which org to act within). Optional for an API token, which already embeds one — if present it must match. */
+                    "X-Nodera-Org"?: components["parameters"]["OrgHeader"];
+                };
+                path: {
+                    id: components["parameters"]["PathId"];
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        name: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["APIToken"];
+                    };
+                };
+                404: components["responses"]["NotFound"];
+            };
+        };
         post?: never;
         /** Revoke one of the caller's own tokens */
         delete: {

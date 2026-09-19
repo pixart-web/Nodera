@@ -107,6 +107,7 @@ tracked in `docs/ROADMAP.md` if that stops being true.
 | POST | `/api/v1/applications/{id}/deregister` | session or token + org | Permanently retire an application (`applications.deploy`) — terminal and one-way; the row is kept, not deleted, and idempotent to call again |
 | GET | `/api/v1/api-tokens` | session or token + org | List the caller's own API tokens |
 | POST | `/api/v1/api-tokens` | session or token + org | Create an API token owned by the caller (`organization.manage`); returns the raw token once |
+| PUT | `/api/v1/api-tokens/{id}` | session or token + org | Rename one of the caller's own tokens — metadata only, scopes are fixed at mint time |
 | DELETE | `/api/v1/api-tokens/{id}` | session or token + org | Revoke one of the caller's own tokens |
 | GET | `/api/v1/organization/api-tokens` | session or token + org | List every non-revoked token in the org, any owner (`organization.manage`) |
 | DELETE | `/api/v1/organization/api-tokens/{id}` | session or token + org | Revoke any token in the org, regardless of owner (`organization.manage`) |

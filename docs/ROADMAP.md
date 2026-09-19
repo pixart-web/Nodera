@@ -1471,6 +1471,46 @@ scanning in CI (`govulncheck`, `npm audit`).
 - [x] Full backend test suite re-run clean (`go test ./... -race`)
 - [x] Docs (`API.md`, `SECURITY.md`, `README.md`) updated
 
+**Phase 47** — this pass:
+- [x] `identity.UpdateAPIToken` — a real gap found in the same domain
+      audit as Phases 41-46: `CreateAPIToken` takes `name` only at mint
+      time, and there was no way to fix a typo'd name or clarify a
+      token's purpose later without revoking and reissuing — which loses
+      the prefix/creation date and forces immediate re-authentication of
+      whatever used the old token
+- [x] Metadata-only, the same shape Phase 35's `secrets.UpdateDescription`
+      already established — scopes are deliberately not editable here:
+      they're fixed at mint time (`CreateAPIToken` already validated them
+      as a subset of the creator's permissions *at that moment*),
+      re-running that check against whatever the caller's permissions
+      happen to be *now* would be a materially different operation than a
+      name fix. Scoped to the caller's own tokens only, the same
+      ownership-based scoping (no separate `rbac.Require` needed)
+      `RevokeAPIToken` already uses
+- [x] 2 new integration tests, passing under `-race` alongside every
+      existing API-token test: rename changes the name without touching
+      the prefix, scopes, or the token's own ability to authenticate (a
+      real `AuthContextForAPIToken` call post-rename still works), plus
+      an empty name is rejected; and a caller who doesn't own the token
+      gets `NOT_FOUND`, not a silent no-op
+- [x] 1 new HTTP route (`PUT /api-tokens/{id}`) and an OpenAPI addition,
+      validated with `@redocly/cli lint`; `lib/api-types.generated.ts`
+      regenerated
+- [x] `web/app/(org)/access/page.tsx`: an inline "Rename" form per token
+      row, next to "Revoke" — reloads both the caller's own token list
+      and the org-wide admin listing below it, so the two sections never
+      disagree about a token's current name (a real staleness bug caught
+      live during this phase and fixed before commit, not left as a
+      known issue)
+- [x] Verified live end to end: renamed a real token through the UI and
+      confirmed the new name appeared in both "My API tokens" and "All
+      organization tokens" after a fresh reload, with the prefix and
+      scopes untouched; confirmed via a direct API call that an empty
+      name is rejected with a real `400 VALIDATION_ERROR`. Checked the
+      browser console on a fresh tab — zero errors
+- [x] Full backend test suite re-run clean (`go test ./... -race`)
+- [x] Docs (`API.md`, `FRONTEND.md`, `README.md`) updated
+
 ## Next up
 
 1. **Concrete job types**: the worker dispatcher is real but nothing

@@ -104,6 +104,7 @@ func newRouter(d apiDeps) http.Handler {
 
 				r.Get("/api-tokens", d.handleListAPITokens)
 				r.Post("/api-tokens", d.handleCreateAPIToken)
+				r.Put("/api-tokens/{id}", d.handleUpdateAPIToken)
 				r.Delete("/api-tokens/{id}", d.handleRevokeAPIToken)
 				r.Get("/organization/api-tokens", d.handleAdminListAPITokens)
 				r.Delete("/organization/api-tokens/{id}", d.handleAdminRevokeAPIToken)
@@ -627,6 +628,26 @@ func (d apiDeps) handleCreateAPIToken(w http.ResponseWriter, r *http.Request) {
 		"token": raw,
 		"info":  tok,
 	})
+}
+
+func (d apiDeps) handleUpdateAPIToken(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		httpserver.WriteError(w, r, apierr.Validation("invalid token id"))
+		return
+	}
+	var body struct {
+		Name string `json:"name"`
+	}
+	if !decodeJSON(w, r, &body) {
+		return
+	}
+	tok, err := d.identity.UpdateAPIToken(r.Context(), mustAuthContext(r), id, body.Name)
+	if err != nil {
+		httpserver.WriteError(w, r, err)
+		return
+	}
+	httpserver.WriteJSON(w, http.StatusOK, tok)
 }
 
 func (d apiDeps) handleRevokeAPIToken(w http.ResponseWriter, r *http.Request) {

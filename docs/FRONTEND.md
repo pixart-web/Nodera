@@ -139,7 +139,11 @@ it, and confirmed the resulting approval's real `expires_at` was exactly
 15 minutes after `created_at` (not the 24h default); cleared the override
 and confirmed the column reverted to `1d (default)`.
 
-`access/page.tsx` covers the caller's own API tokens (create/revoke),
+`access/page.tsx` covers the caller's own API tokens (create/rename/revoke
+— rename is an inline form, metadata only, scopes stay fixed and the
+prefix/value never change; renaming also reloads the org-wide token
+listing below so the two sections never disagree about a token's current
+name),
 service accounts (create/edit name+description/enable/disable/permanently
 delete, and issuing a token owned by one instead of the caller — "Issue
 token" and "Disable" only show while active, "Enable" and "Delete" only

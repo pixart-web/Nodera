@@ -771,6 +771,53 @@
       }
     },
     "/api/v1/api-tokens/{id}": {
+      "put": {
+        "tags": [
+          "api-tokens"
+        ],
+        "summary": "Rename one of the caller's own tokens \u2014 metadata only, scopes are fixed at mint time",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OrgHeader"
+          },
+          {
+            "$ref": "#/components/parameters/PathId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "name"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIToken"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      },
       "delete": {
         "tags": [
           "api-tokens"
