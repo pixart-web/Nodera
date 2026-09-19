@@ -63,6 +63,125 @@ func TestAIProfileCreateAndChatRoundTrip(t *testing.T) {
 	}
 }
 
+// Every Chat call writes an ai_usage_records row (recordUsage), but until
+// now there was no way to ever read them back. ListUsage surfaces the
+// exact records a real Chat call produces — both the success case and the
+// error path (resolve failure still records a row, with empty
+// provider/model and status "error").
+func TestAIListUsageReflectsRealChatCalls(t *testing.T) {
+	pool := testhelpers.RequirePool(t)
+	ctx := context.Background()
+	h := newHarness(pool)
+	ac, _ := h.newOwnerContext(t, ctx, "ai-usage-owner@nodera.dev")
+
+	aiSvc := ai.New(pool, h.audit, localecho.New())
+
+	profile, err := aiSvc.CreateProfile(ctx, ac, ai.CreateProfileInput{
+		Key:                "test.usage",
+		PrivacyLevel:       "internal",
+		PreferredModelRefs: []string{"local-echo/echo-1"},
+	})
+	if err != nil {
+		t.Fatalf("CreateProfile: %v", err)
+	}
+
+	if _, err := aiSvc.Chat(ctx, ac, "test.usage", []providers.Message{{Role: "user", Content: "hello"}}); err != nil {
+		t.Fatalf("Chat: %v", err)
+	}
+
+	// A resolve-failure Chat call (restricted profile, no compliant
+	// provider) also records a usage row — of the error, not silently.
+	restricted, err := aiSvc.CreateProfile(ctx, ac, ai.CreateProfileInput{
+		Key:                "test.usage-restricted",
+		PrivacyLevel:       "restricted",
+		PreferredModelRefs: []string{"openai/gpt-fake"},
+	})
+	if err != nil {
+		t.Fatalf("CreateProfile (restricted): %v", err)
+	}
+	if _, err := aiSvc.Chat(ctx, ac, restricted.Key, []providers.Message{{Role: "user", Content: "x"}}); err == nil {
+		t.Fatal("expected the restricted Chat call to fail")
+	}
+
+	records, err := aiSvc.ListUsage(ctx, ac, 50, 0)
+	if err != nil {
+		t.Fatalf("ListUsage: %v", err)
+	}
+	if len(records) != 2 {
+		t.Fatalf("expected 2 usage records, got %d: %+v", len(records), records)
+	}
+
+	// Most recent first: the restricted (error) call was second.
+	if records[0].ProfileKey != restricted.Key || records[0].Status != "error" {
+		t.Fatalf("expected the most recent record to be the failed restricted call, got %+v", records[0])
+	}
+	if records[0].ProviderKey != "" || records[0].ModelIdentifier != "" {
+		t.Fatalf("expected empty provider/model on a resolve-failure record, got %+v", records[0])
+	}
+
+	if records[1].ProfileKey != profile.Key || records[1].Status != "success" {
+		t.Fatalf("expected the earlier record to be the successful call, got %+v", records[1])
+	}
+	if records[1].ProviderKey != "local-echo" || records[1].ModelIdentifier != "echo-1" {
+		t.Fatalf("expected the successful record to name the real provider/model, got %+v", records[1])
+	}
+	if records[1].Classification != "local" {
+		t.Fatalf("expected local-echo to classify as 'local', got %q", records[1].Classification)
+	}
+}
+
+func TestAIListUsageIsTenantIsolated(t *testing.T) {
+	pool := testhelpers.RequirePool(t)
+	ctx := context.Background()
+	h := newHarness(pool)
+	acA, _ := h.newOwnerContext(t, ctx, "ai-usage-a@nodera.dev")
+	acB, _ := h.newOwnerContext(t, ctx, "ai-usage-b@nodera.dev")
+
+	aiSvc := ai.New(pool, h.audit, localecho.New())
+
+	profile, err := aiSvc.CreateProfile(ctx, acA, ai.CreateProfileInput{
+		Key:                "test.usage-isolated",
+		PrivacyLevel:       "internal",
+		PreferredModelRefs: []string{"local-echo/echo-1"},
+	})
+	if err != nil {
+		t.Fatalf("CreateProfile: %v", err)
+	}
+	if _, err := aiSvc.Chat(ctx, acA, profile.Key, []providers.Message{{Role: "user", Content: "hi"}}); err != nil {
+		t.Fatalf("Chat: %v", err)
+	}
+
+	recordsB, err := aiSvc.ListUsage(ctx, acB, 50, 0)
+	if err != nil {
+		t.Fatalf("ListUsage (org B): %v", err)
+	}
+	if len(recordsB) != 0 {
+		t.Fatalf("expected org B to see zero usage records, got %d", len(recordsB))
+	}
+}
+
+func TestAIListUsageRequiresAIUsePermission(t *testing.T) {
+	pool := testhelpers.RequirePool(t)
+	ctx := context.Background()
+	h := newHarness(pool)
+	ac, _ := h.newOwnerContext(t, ctx, "ai-usage-perm-owner@nodera.dev")
+
+	aiSvc := ai.New(pool, h.audit, localecho.New())
+
+	// The seeded 'member' role already holds ai.use, so a plain member
+	// can't exercise this guard — construct a caller with an empty
+	// permission set directly, the same as any other permission-guard
+	// test needs a caller who genuinely lacks the permission in question.
+	noPermsAC := ac
+	noPermsAC.Permissions = map[string]struct{}{}
+
+	if _, err := aiSvc.ListUsage(ctx, noPermsAC, 50, 0); err == nil {
+		t.Fatal("expected a caller without ai.use to be forbidden from listing usage")
+	} else if ae, ok := err.(*apierr.Error); !ok || ae.Code != apierr.CodeForbidden {
+		t.Fatalf("expected FORBIDDEN, got %v", err)
+	}
+}
+
 func TestAIChatUnknownProfileIsNotFound(t *testing.T) {
 	pool := testhelpers.RequirePool(t)
 	ctx := context.Background()

@@ -502,6 +502,60 @@ func (s *Service) recordUsage(ctx context.Context, ac authctx.AuthContext, profi
 	}
 }
 
+// UsageRecord is one row from ai_usage_records — the operational metrics
+// every Chat call already writes via recordUsage, but that (until now) had
+// no way to ever be read back through the API. No prompt/response content
+// is ever included (section 15) — only counts, timing, and outcome.
+type UsageRecord struct {
+	ID              uuid.UUID `json:"id"`
+	ProfileKey      string    `json:"profile_key"`
+	ProviderKey     string    `json:"provider_key"`
+	ModelIdentifier string    `json:"model_identifier"`
+	Classification  string    `json:"classification"` // "local" | "cloud"
+	InputTokens     int       `json:"input_tokens"`
+	OutputTokens    int       `json:"output_tokens"`
+	TotalTokens     int       `json:"total_tokens"`
+	LatencyMs       *int      `json:"latency_ms"`
+	Status          string    `json:"status"` // "success" | "error" | "timeout"
+	CorrelationID   string    `json:"correlation_id"`
+	CreatedAt       time.Time `json:"created_at"`
+}
+
+// ListUsage returns the calling organization's own AI usage history, most
+// recent first. Tenant-scoped like every other list method (ADR-004) —
+// unlike the provider/model registry above, ai_usage_records does carry
+// organization_id, so this needs no platform-wide-vs-tenant-scoped caveat.
+func (s *Service) ListUsage(ctx context.Context, ac authctx.AuthContext, limit, offset int) ([]UsageRecord, error) {
+	if err := rbac.Require(ac, permUse); err != nil {
+		return nil, err
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT id, profile_key, provider_key, model_identifier, classification,
+		       input_tokens, output_tokens, total_tokens, latency_ms, status,
+		       COALESCE(correlation_id, ''), created_at
+		FROM ai_usage_records
+		WHERE organization_id = $1
+		ORDER BY created_at DESC
+		LIMIT $2 OFFSET $3
+	`, ac.OrganizationID, limit, offset)
+	if err != nil {
+		return nil, apierr.Wrap(apierr.CodeInternal, "failed to list AI usage records", err)
+	}
+	defer rows.Close()
+
+	var out []UsageRecord
+	for rows.Next() {
+		var u UsageRecord
+		if err := rows.Scan(&u.ID, &u.ProfileKey, &u.ProviderKey, &u.ModelIdentifier, &u.Classification,
+			&u.InputTokens, &u.OutputTokens, &u.TotalTokens, &u.LatencyMs, &u.Status,
+			&u.CorrelationID, &u.CreatedAt); err != nil {
+			return nil, apierr.Wrap(apierr.CodeInternal, "failed to scan AI usage record", err)
+		}
+		out = append(out, u)
+	}
+	return out, rows.Err()
+}
+
 func isUniqueViolation(err error) bool {
 	var pgErr interface{ SQLState() string }
 	if errors.As(err, &pgErr) {

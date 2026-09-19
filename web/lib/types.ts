@@ -228,6 +228,23 @@ export interface AIProfile {
   created_at: string;
 }
 
+// One row per Chat call (internal/ai.recordUsage) — operational metrics
+// only, never prompt/response content (docs/AI_ARCHITECTURE.md section 15).
+export interface AIUsageRecord {
+  id: string;
+  profile_key: string;
+  provider_key: string;
+  model_identifier: string;
+  classification: string;
+  input_tokens: number;
+  output_tokens: number;
+  total_tokens: number;
+  latency_ms: number | null;
+  status: string;
+  correlation_id: string;
+  created_at: string;
+}
+
 // Platform-wide, not org-scoped (docs/AI_ARCHITECTURE.md) — the registry
 // row makes a provider/model discoverable; whether it's actually callable
 // depends on a matching Go adapter being registered at server boot.

@@ -1198,6 +1198,44 @@ scanning in CI (`govulncheck`, `npm audit`).
 - [x] Full backend test suite re-run clean (`go test ./... -race`)
 - [x] Docs (`API.md`, `FRONTEND.md`, `README.md`) updated
 
+**Phase 40** — this pass:
+- [x] `ai.ListUsage` — the last finding from widening the CRUD-gap audit
+      to the AI domain (Phase 39's sibling): every `Chat` call has always
+      written a real `ai_usage_records` row via `recordUsage` (tokens,
+      latency, status, classification), but there was no method, route,
+      or UI to ever read one back — genuine cost/usage blindness despite
+      the README already claiming "real usage tracking"
+- [x] Tenant-scoped like every other list method (`ai_usage_records` does
+      carry `organization_id`, unlike the provider/model registry), most
+      recent first, paginated the same `limit`/`offset`/`has_more` way as
+      `infrastructure/nodes`/`applications`/`jobs`/`audit` — the fifth
+      endpoint to get that envelope
+- [x] 3 new integration tests, passing under `-race` alongside every
+      other AI test (20 total for the package): a real `Chat` call (both
+      the success path and a resolve-failure path, which still records a
+      row with empty provider/model and `status: error`) produces exactly
+      the rows `ListUsage` then returns, in the right order, with the
+      right fields; tenant isolation (org B sees zero of org A's usage);
+      and a caller without `ai.use` is forbidden
+- [x] 1 new HTTP route (`GET /ai/usage`) and OpenAPI additions (a new
+      `AIUsageRecord`/`AIUsageRecordPage` schema pair, the fifth
+      paginated endpoint documented in `docs/API.md`'s pagination
+      section), validated with `@redocly/cli lint`;
+      `lib/api-types.generated.ts` regenerated
+- [x] `web/app/(org)/ai/page.tsx`: a new "Usage" section directly below
+      Chat, paginated the same "Load more" way the Audit log page is.
+      `ChatPanel` gained an `onSent` callback the page wires to
+      `usage.reload()`, so sending a message refreshes Usage in the same
+      render as the response rather than needing a manual reload
+- [x] Verified live end to end: created a real profile, sent two real
+      chat messages through it, and watched both appear in Usage
+      immediately with the real token counts and `local` classification,
+      most recent first; confirmed via a direct API call that the
+      paginated envelope is correct. Checked the browser console on a
+      fresh tab — zero errors
+- [x] Full backend test suite re-run clean (`go test ./... -race`)
+- [x] Docs (`API.md`, `FRONTEND.md`, `README.md`) updated
+
 ## Next up
 
 1. **Concrete job types**: the worker dispatcher is real but nothing

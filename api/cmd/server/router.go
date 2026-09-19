@@ -130,6 +130,7 @@ func newRouter(d apiDeps) http.Handler {
 				r.Post("/jobs/{id}/cancel", d.handleCancelJob)
 				r.Post("/jobs/{id}/retry", d.handleRetryJob)
 
+				r.Get("/ai/usage", d.handleListAIUsage)
 				r.Get("/ai/profiles", d.handleListAIProfiles)
 				r.Post("/ai/profiles", d.handleCreateAIProfile)
 				r.Put("/ai/profiles/{id}", d.handleUpdateAIProfile)
@@ -965,6 +966,16 @@ func (d apiDeps) handleRetryJob(w http.ResponseWriter, r *http.Request) {
 }
 
 // --- AI gateway ---
+
+func (d apiDeps) handleListAIUsage(w http.ResponseWriter, r *http.Request) {
+	p := httpserver.ParsePagination(r)
+	records, err := d.ai.ListUsage(r.Context(), mustAuthContext(r), p.Limit+1, p.Offset)
+	if err != nil {
+		httpserver.WriteError(w, r, err)
+		return
+	}
+	httpserver.WriteJSON(w, http.StatusOK, httpserver.NewPage(records, p))
+}
 
 func (d apiDeps) handleListAIProfiles(w http.ResponseWriter, r *http.Request) {
 	profiles, err := d.ai.ListProfiles(r.Context(), mustAuthContext(r))

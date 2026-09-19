@@ -3560,6 +3560,48 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/ai/usage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List the calling organization's own AI usage history, most recent first (ai.use) — no prompt/response content, operational metrics only */
+        get: {
+            parameters: {
+                query?: {
+                    limit?: components["parameters"]["Limit"];
+                    offset?: components["parameters"]["Offset"];
+                };
+                header?: {
+                    /** @description Required for a session token (which org to act within). Optional for an API token, which already embeds one — if present it must match. */
+                    "X-Nodera-Org"?: components["parameters"]["OrgHeader"];
+                };
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AIUsageRecordPage"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -3932,6 +3974,27 @@ export interface components {
             ip_address?: string;
             user_agent?: string;
             is_current?: boolean;
+        };
+        AIUsageRecord: {
+            /** Format: uuid */
+            id?: string;
+            profile_key?: string;
+            provider_key?: string;
+            model_identifier?: string;
+            /** @enum {string} */
+            classification?: "local" | "cloud";
+            input_tokens?: number;
+            output_tokens?: number;
+            total_tokens?: number;
+            latency_ms?: number | null;
+            /** @enum {string} */
+            status?: "success" | "error" | "timeout";
+            correlation_id?: string;
+            /** Format: date-time */
+            created_at?: string;
+        };
+        AIUsageRecordPage: components["schemas"]["Page"] & {
+            items?: components["schemas"]["AIUsageRecord"][];
         };
     };
     responses: {

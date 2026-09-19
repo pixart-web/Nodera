@@ -6,7 +6,7 @@ import { useApi } from "@/lib/useApi";
 import { PageHeader } from "@/components/PageHeader";
 import { ErrorBanner } from "@/components/ErrorBanner";
 import { StatusBadge } from "@/components/StatusBadge";
-import type { AIModel, AIProfile, AIProvider, ChatResult } from "@/lib/types";
+import type { AIModel, AIProfile, AIProvider, AIUsageRecord, ChatResult, Page } from "@/lib/types";
 
 function parseList(raw: string): string[] {
   return raw
@@ -15,7 +15,7 @@ function parseList(raw: string): string[] {
     .filter(Boolean);
 }
 
-function ChatPanel({ profiles }: { profiles: AIProfile[] }) {
+function ChatPanel({ profiles, onSent }: { profiles: AIProfile[]; onSent: () => void }) {
   const [profileKey, setProfileKey] = useState("");
   const [message, setMessage] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -37,6 +37,9 @@ function ChatPanel({ profiles }: { profiles: AIProfile[] }) {
       setError(err instanceof ApiError ? err.message : "Failed to reach the AI gateway");
     } finally {
       setBusy(false);
+      // Chat.ai.chat writes a usage record whether it succeeds or fails
+      // (a resolve failure still records the error) — reload either way.
+      onSent();
     }
   }
 
@@ -566,6 +569,8 @@ export default function AIPage() {
   const profiles = useApi(() => api.get<AIProfile[]>("/api/v1/ai/profiles"), []);
   const providers = useApi(() => api.get<AIProvider[]>("/api/v1/ai/providers"), []);
   const models = useApi(() => api.get<AIModel[]>("/api/v1/ai/models"), []);
+  const [usageLimit, setUsageLimit] = useState(20);
+  const usage = useApi(() => api.get<Page<AIUsageRecord>>(`/api/v1/ai/usage?limit=${usageLimit}`), [usageLimit]);
 
   const [showProfileForm, setShowProfileForm] = useState(false);
   const [showProviderForm, setShowProviderForm] = useState(false);
@@ -631,7 +636,53 @@ export default function AIPage() {
       <div className="mb-8">
         <h2 className="mb-3 text-sm font-medium text-base-100">Chat</h2>
         {profiles.error && <ErrorBanner message={profiles.error} />}
-        {!profiles.loading && <ChatPanel profiles={profiles.data ?? []} />}
+        {!profiles.loading && <ChatPanel profiles={profiles.data ?? []} onSent={() => usage.reload()} />}
+      </div>
+
+      <div className="mb-8">
+        <h2 className="mb-3 text-sm font-medium text-base-100">Usage</h2>
+        {usage.error && <ErrorBanner message={usage.error} />}
+        <div className="card">
+          {usage.loading ? (
+            <div className="p-4 text-sm text-base-400">Loading…</div>
+          ) : (usage.data?.items ?? []).length === 0 ? (
+            <div className="p-4 text-sm text-base-400">No AI usage recorded yet — this fills in as Chat is used.</div>
+          ) : (
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Profile</th>
+                  <th>Provider / model</th>
+                  <th>Tokens</th>
+                  <th>Latency</th>
+                  <th>Status</th>
+                  <th>When</th>
+                </tr>
+              </thead>
+              <tbody>
+                {usage.data!.items.map((u) => (
+                  <tr key={u.id}>
+                    <td className="font-mono text-xs">{u.profile_key}</td>
+                    <td className="font-mono text-xs text-base-300">
+                      {u.provider_key ? `${u.provider_key}/${u.model_identifier}` : "—"}
+                    </td>
+                    <td className="text-xs text-base-400">
+                      {u.total_tokens} <span className="text-base-500">({u.classification})</span>
+                    </td>
+                    <td className="text-xs text-base-400">{u.latency_ms !== null ? `${u.latency_ms}ms` : "—"}</td>
+                    <td className={`text-xs ${u.status === "success" ? "text-ok" : "text-danger"}`}>{u.status}</td>
+                    <td className="text-xs text-base-400">{new Date(u.created_at).toLocaleString()}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+        {usage.data?.has_more && (
+          <button className="btn-secondary mt-3" onClick={() => setUsageLimit((n) => n + 20)}>
+            Load more
+          </button>
+        )}
       </div>
 
       <div className="mb-8">

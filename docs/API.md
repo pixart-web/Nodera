@@ -54,10 +54,11 @@ Two bearer token types are accepted on `Authorization: Bearer <token>`, and
 
 ## Pagination
 
-Four list endpoints are paginated: `GET /infrastructure/nodes`,
-`GET /applications`, `GET /jobs`, `GET /audit`. Each accepts `?limit=`
-(default 50, capped at 200) and `?offset=`, and returns the standard
-envelope (`internal/platform/httpserver.Page`) instead of a bare array:
+Five list endpoints are paginated: `GET /infrastructure/nodes`,
+`GET /applications`, `GET /jobs`, `GET /audit`, `GET /ai/usage`. Each
+accepts `?limit=` (default 50, capped at 200) and `?offset=`, and returns
+the standard envelope (`internal/platform/httpserver.Page`) instead of a
+bare array:
 
 ```json
 { "items": [...], "limit": 50, "offset": 0, "has_more": true }
@@ -129,6 +130,7 @@ tracked in `docs/ROADMAP.md` if that stops being true.
 | GET | `/api/v1/jobs/{id}` | session or token + org | Get a job |
 | POST | `/api/v1/jobs/{id}/cancel` | session or token + org | Cancel a queued job |
 | POST | `/api/v1/jobs/{id}/retry` | session or token + org | Re-queue a failed job for another full attempt cycle (`jobs.manage`) — attempts/progress/error reset, same job ID |
+| GET | `/api/v1/ai/usage` | session or token + org | List the calling organization's own AI usage history, most recent first, paginated (`ai.use`) — operational metrics only, never prompt/response content |
 | GET | `/api/v1/ai/profiles` | session or token + org | List AI profiles (`ai.use`) |
 | POST | `/api/v1/ai/profiles` | session or token + org | Create an AI profile (`ai.manage`) |
 | PUT | `/api/v1/ai/profiles/{id}` | session or token + org | Update an AI profile (`ai.manage`) — partial update, `key` is immutable; only reaches org-owned profiles (`404` for a system-defined one) |

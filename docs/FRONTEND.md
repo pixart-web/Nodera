@@ -179,7 +179,19 @@ it. Also verified `Run` against the `local-echo` provider returns real
 
 `ai/page.tsx` covers the whole AI Gateway surface: a Chat panel (pick a
 profile, send a message, see the real `ChatResult` including provider key,
-model, and token counts), a Profiles section (list + create + edit +
+model, and token counts), a Usage section right below it (`GET
+/api/v1/ai/usage`, paginated the same "Load more" way the Audit log page
+is) showing every `ai_usage_records` row this organization has produced —
+profile, provider/model, tokens, latency, status, timestamp — the first
+place any of that data was ever visible outside a direct database query.
+`ChatPanel` takes an `onSent` callback the page wires to `usage.reload()`,
+so sending a message refreshes the Usage table in the same render as the
+response, rather than requiring a manual page reload to see it. Verified
+live: sent two real chat messages through a test profile and watched both
+show up in Usage immediately, most recent first, with the real token
+counts and `local` classification; confirmed via a direct API call that
+the paginated envelope (`items`/`limit`/`offset`/`has_more`) is correct.
+A Profiles section (list + create + edit +
 delete, with `privacy_level` as a `<select>` and `preferred_model_ids`/
 `fallback_model_ids`/`required_capabilities` as comma-separated inputs
 matching the Tools/Agents pages' convention — the inline Edit form shows
