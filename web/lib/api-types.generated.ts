@@ -2856,6 +2856,7 @@ export interface paths {
                     };
                     content?: never;
                 };
+                429: components["responses"]["RateLimited"];
             };
         };
         delete?: never;

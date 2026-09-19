@@ -189,9 +189,12 @@ and `POST /api/v1/agents/{id}/run` share one per-organization budget
 (60 requests / minute combined) — an agent's scoped chat drives the same
 AI-gateway cost path `ai/chat` does, so it draws from the same limiter
 rather than a separate one an agent could use to bypass it; `POST
-/api/v1/organizations` is rate limited per user (10 organizations / hour).
-Exceeding any of them returns `429` with code `RATE_LIMITED` — see
-`docs/SECURITY.md`.
+/api/v1/organizations` is rate limited per user (10 organizations / hour);
+`POST /api/v1/account/password` is rate limited per user (5 attempts / 5
+minutes) — it re-verifies the caller's current password on every call, so
+without a throttle a stolen/leaked session token would let an attacker
+brute-force the account's real password with no friction. Exceeding any
+of them returns `429` with code `RATE_LIMITED` — see `docs/SECURITY.md`.
 
 ## Not yet implemented
 

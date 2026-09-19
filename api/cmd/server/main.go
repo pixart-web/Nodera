@@ -137,7 +137,7 @@ func run() error {
 
 	agentsSvc := agents.New(pool, auditSvc, aiSvc, toolsSvc)
 
-	loginRate, signupRate, aiChatRate, createOrgRate, closeRateLimiting, err := newRateLimiters(ctx, cfg, log)
+	loginRate, signupRate, aiChatRate, createOrgRate, changePasswordRate, closeRateLimiting, err := newRateLimiters(ctx, cfg, log)
 	if err != nil {
 		return err
 	}
@@ -152,24 +152,25 @@ func run() error {
 	log.Info("job worker started")
 
 	deps := apiDeps{
-		log:           log,
-		identity:      identitySvc,
-		tenancy:       tenancySvc,
-		audit:         auditSvc,
-		infra:         infraSvc,
-		apps:          appsSvc,
-		jobs:          jobsSvc,
-		ai:            aiSvc,
-		secrets:       secretsSvc,
-		tools:         toolsSvc,
-		agents:        agentsSvc,
-		rbac:          rbacSvc,
-		pool:          pool,
-		loginRate:     loginRate,
-		signupRate:    signupRate,
-		aiChatRate:    aiChatRate,
-		createOrgRate: createOrgRate,
-		corsOrigins:   cfg.HTTP.CORSOrigins,
+		log:                log,
+		identity:           identitySvc,
+		tenancy:            tenancySvc,
+		audit:              auditSvc,
+		infra:              infraSvc,
+		apps:               appsSvc,
+		jobs:               jobsSvc,
+		ai:                 aiSvc,
+		secrets:            secretsSvc,
+		tools:              toolsSvc,
+		agents:             agentsSvc,
+		rbac:               rbacSvc,
+		pool:               pool,
+		loginRate:          loginRate,
+		signupRate:         signupRate,
+		aiChatRate:         aiChatRate,
+		createOrgRate:      createOrgRate,
+		changePasswordRate: changePasswordRate,
+		corsOrigins:        cfg.HTTP.CORSOrigins,
 	}
 
 	handler := newRouter(deps)
@@ -214,35 +215,37 @@ func autoRegisterProvider(ctx context.Context, log *slog.Logger, aiSvc *ai.Servi
 	}
 }
 
-// newRateLimiters builds the login/signup/AI-chat rate limiters. When
-// NODERA_REDIS_URL is configured it connects to Redis (verified with a
-// PING so a misconfigured URL fails startup loudly rather than silently
-// falling back — rule 36: don't quietly degrade a limiter the operator
-// explicitly asked to be shared) and returns Redis-backed limiters, safe
-// across multiple API process instances. Otherwise it falls back to the
-// in-process limiter, correct for a single instance but not shared across
-// one (docs/ROADMAP.md). The returned close func closes the Redis client,
-// if one was opened; it is always safe to call.
-func newRateLimiters(ctx context.Context, cfg config.Config, log *slog.Logger) (login, signup, aiChat, createOrg ratelimit.Allower, closeFn func(), err error) {
+// newRateLimiters builds the login/signup/AI-chat/change-password rate
+// limiters. When NODERA_REDIS_URL is configured it connects to Redis
+// (verified with a PING so a misconfigured URL fails startup loudly
+// rather than silently falling back — rule 36: don't quietly degrade a
+// limiter the operator explicitly asked to be shared) and returns
+// Redis-backed limiters, safe across multiple API process instances.
+// Otherwise it falls back to the in-process limiter, correct for a single
+// instance but not shared across one (docs/ROADMAP.md). The returned
+// close func closes the Redis client, if one was opened; it is always
+// safe to call.
+func newRateLimiters(ctx context.Context, cfg config.Config, log *slog.Logger) (login, signup, aiChat, createOrg, changePassword ratelimit.Allower, closeFn func(), err error) {
 	if cfg.Redis.URL == "" {
 		log.Warn("rate limiting is in-process only: NODERA_REDIS_URL is not set — limits are per-instance, not shared across a multi-instance deployment")
 		return ratelimit.New(5, 5*time.Minute),
 			ratelimit.New(3, time.Hour),
 			ratelimit.New(60, time.Minute),
 			ratelimit.New(10, time.Hour),
+			ratelimit.New(5, 5*time.Minute),
 			func() {}, nil
 	}
 
 	opts, err := redis.ParseURL(cfg.Redis.URL)
 	if err != nil {
-		return nil, nil, nil, nil, nil, fmt.Errorf("config: NODERA_REDIS_URL is not a valid redis URL: %w", err)
+		return nil, nil, nil, nil, nil, nil, fmt.Errorf("config: NODERA_REDIS_URL is not a valid redis URL: %w", err)
 	}
 	client := redis.NewClient(opts)
 	pingCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	if err := client.Ping(pingCtx).Err(); err != nil {
 		_ = client.Close()
-		return nil, nil, nil, nil, nil, fmt.Errorf("redis: could not connect using NODERA_REDIS_URL: %w", err)
+		return nil, nil, nil, nil, nil, nil, fmt.Errorf("redis: could not connect using NODERA_REDIS_URL: %w", err)
 	}
 	log.Info("rate limiting is Redis-backed, shared across instances")
 
@@ -250,6 +253,7 @@ func newRateLimiters(ctx context.Context, cfg config.Config, log *slog.Logger) (
 		ratelimit.NewRedis(client, "ratelimit:signup", 3, time.Hour, log),
 		ratelimit.NewRedis(client, "ratelimit:ai_chat", 60, time.Minute, log),
 		ratelimit.NewRedis(client, "ratelimit:create_org", 10, time.Hour, log),
+		ratelimit.NewRedis(client, "ratelimit:change_password", 5, 5*time.Minute, log),
 		func() { _ = client.Close() }, nil
 }
 

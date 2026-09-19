@@ -1431,6 +1431,46 @@ scanning in CI (`govulncheck`, `npm audit`).
 - [x] Full backend test suite re-run clean (`go test ./... -race`)
 - [x] Docs (`API.md`, `FRONTEND.md`, `README.md`) updated
 
+**Phase 46** — this pass:
+- [x] Closed a concrete rate-limiting gap found in the same domain audit
+      as Phases 41-45: `POST /account/password` re-verifies the caller's
+      current password on every call — the same credential-verification
+      shape `/auth/login` has — but had no throttle at all, unlike every
+      other credential-verification surface (login, signup). A
+      stolen/leaked session token let an attacker brute-force the
+      account's real password (useful for credential reuse elsewhere)
+      with no friction
+- [x] New `changePasswordRate` limiter (`newRateLimiters` now returns 5
+      limiters instead of 4; both the in-process and Redis-backed
+      branches updated), keyed by user ID rather than IP — the caller is
+      already authenticated by the time this endpoint is reachable, so an
+      IP-keyed limit would just let an attacker spread attempts across
+      many IPs against the same account; 5 attempts / 5 minutes, matching
+      `/auth/login`'s own budget
+- [x] No new domain logic, migration, or Go unit test — `cmd/server` has
+      no test harness for router-level HTTP wiring (same situation Phase
+      34's rate-limit fix hit), so this was verified live against the
+      real running server, the same way Phase 34 and `/ai/chat`'s
+      original rollout were
+- [x] OpenAPI addition (documenting the existing `429`/`RATE_LIMITED`
+      response on `POST /account/password`, mirroring how `/ai/chat` and
+      `/agents/{id}/run` already document it), validated with
+      `@redocly/cli lint`; `lib/api-types.generated.ts` regenerated. No
+      frontend code change needed — the existing form already surfaces
+      any `ApiError.message`, including a `429`
+- [x] Verified live end to end: fired 7 real HTTP requests with a wrong
+      current password at `POST /account/password` for a real account —
+      the first 5 returned a real `401` (wrong password, correctly
+      checked), the 6th and 7th returned a real `429`; confirmed a
+      different account's own budget was unaffected (a fresh account
+      hitting the same endpoint immediately afterward got a normal `401`,
+      not `429`); then reproduced the exact same `429` through the real
+      Account page form and watched "too many password change attempts,
+      try again shortly" render inline. Checked the browser console on a
+      fresh tab — zero errors
+- [x] Full backend test suite re-run clean (`go test ./... -race`)
+- [x] Docs (`API.md`, `SECURITY.md`, `README.md`) updated
+
 ## Next up
 
 1. **Concrete job types**: the worker dispatcher is real but nothing

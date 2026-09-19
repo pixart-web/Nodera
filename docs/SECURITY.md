@@ -129,7 +129,7 @@ self-contained implementation.
   surface — writing unverifiable, effectively invisible rows was judged
   worse than not writing them (`docs/ROADMAP.md` Phase 41).
 
-## Rate limiting — IMPLEMENTED (login, signup, AI chat, org creation)
+## Rate limiting — IMPLEMENTED (login, signup, AI chat, org creation, password change)
 
 `internal/platform/ratelimit` applies fixed-window limits
 (`cmd/server/router.go`) to:
@@ -138,6 +138,7 @@ self-contained implementation.
 - `POST /api/v1/ai/chat` and `POST /api/v1/agents/{id}/run` — 60 requests
   / minute **per organization, sharing one budget between the two**
 - `POST /api/v1/organizations` — 10 organizations / hour **per user**
+- `POST /api/v1/account/password` — 5 attempts / 5 minutes **per user**
 
 Login/signup are keyed by IP rather than the submitted email, so an
 attacker can't use either endpoint to lock out a victim account/address by
@@ -158,6 +159,16 @@ tolerating 60 of their own. Organization creation
 is keyed by the calling user's ID rather than IP — unlike login/signup,
 it's only reachable once authenticated, so the actor is already known and
 stable; bounds spam-organization creation by any single account.
+`account/password` is likewise keyed by user ID: it re-verifies the
+caller's current password on every call, so without a throttle a
+stolen/leaked session token would let an attacker brute-force the
+account's real password (useful for credential reuse elsewhere) with no
+friction — the only credential-verification endpoint that had no rate
+limit until this pass. Verified live: 5 rapid attempts with a wrong
+current password each return a real `401`, the 6th returns a real `429`,
+and a different account's own budget is unaffected (confirmed with a
+fresh account hitting the same endpoint immediately afterward and getting
+a normal `401`, not `429`).
 
 Two interchangeable implementations exist behind the same `Allower`
 interface, chosen at startup (`cmd/server/main.go: newRateLimiters`):
@@ -221,9 +232,9 @@ not taken during this foundation-building pass; tracked in
   session token is a bearer token, not a cookie, so CSRF is out of scope
   until a cookie-based web session flow is added)
 - Rate limiting on endpoints beyond `/auth/login`, `/auth/signup`,
-  `/ai/chat` (shared with `/agents/{id}/run`), and `/organizations` —
-  every other endpoint remains unlimited (most mutations beyond these are
-  already `organization.manage`-gated,
+  `/ai/chat` (shared with `/agents/{id}/run`), `/organizations`, and
+  `/account/password` — every other endpoint remains unlimited (most
+  mutations beyond these are already `organization.manage`-gated,
   which meaningfully narrows who can even attempt abuse)
 - Upload validation (no upload endpoints exist yet)
 - External KMS/vault integration for secrets (current implementation is a

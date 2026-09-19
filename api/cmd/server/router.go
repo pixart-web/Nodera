@@ -29,24 +29,25 @@ import (
 )
 
 type apiDeps struct {
-	log           *slog.Logger
-	identity      *identity.Service
-	tenancy       *tenancy.Service
-	audit         *audit.Service
-	infra         *infrastructure.Service
-	apps          *applications.Service
-	jobs          *jobs.Service
-	ai            *ai.Service
-	secrets       *secrets.Service // nil if NODERA_SECRETS_ENCRYPTION_KEY is not configured — see main.go
-	tools         *tools.Registry
-	agents        *agents.Service
-	rbac          *rbac.Service
-	pool          *pgxpool.Pool
-	loginRate     ratelimit.Allower
-	signupRate    ratelimit.Allower
-	aiChatRate    ratelimit.Allower
-	createOrgRate ratelimit.Allower
-	corsOrigins   []string
+	log                *slog.Logger
+	identity           *identity.Service
+	tenancy            *tenancy.Service
+	audit              *audit.Service
+	infra              *infrastructure.Service
+	apps               *applications.Service
+	jobs               *jobs.Service
+	ai                 *ai.Service
+	secrets            *secrets.Service // nil if NODERA_SECRETS_ENCRYPTION_KEY is not configured — see main.go
+	tools              *tools.Registry
+	agents             *agents.Service
+	rbac               *rbac.Service
+	pool               *pgxpool.Pool
+	loginRate          ratelimit.Allower
+	signupRate         ratelimit.Allower
+	aiChatRate         ratelimit.Allower
+	createOrgRate      ratelimit.Allower
+	changePasswordRate ratelimit.Allower
+	corsOrigins        []string
 }
 
 func newRouter(d apiDeps) http.Handler {
@@ -282,6 +283,20 @@ func (d apiDeps) handleUpdateProfile(w http.ResponseWriter, r *http.Request) {
 }
 
 func (d apiDeps) handleChangePassword(w http.ResponseWriter, r *http.Request) {
+	userID := userIDFromRequest(r)
+
+	// Rate limit by user ID rather than IP — this endpoint re-verifies the
+	// caller's current password on every call with no prior throttle, so a
+	// stolen/leaked session token let an attacker brute-force the
+	// account's real password (useful for credential reuse elsewhere)
+	// with no friction at all. Keyed by user ID, not IP, since the caller
+	// is already authenticated (an IP-keyed limit would let an attacker
+	// spread attempts across many IPs against the same account).
+	if d.changePasswordRate != nil && !d.changePasswordRate.Allow(userID.String()) {
+		httpserver.WriteError(w, r, apierr.New(apierr.CodeRateLimited, "too many password change attempts, try again shortly"))
+		return
+	}
+
 	var body struct {
 		CurrentPassword string `json:"current_password"`
 		NewPassword     string `json:"new_password"`
@@ -290,7 +305,7 @@ func (d apiDeps) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sessionToken, _ := r.Context().Value(ctxKeySessionToken{}).(string)
-	if err := d.identity.ChangePassword(r.Context(), userIDFromRequest(r), sessionToken, body.CurrentPassword, body.NewPassword); err != nil {
+	if err := d.identity.ChangePassword(r.Context(), userID, sessionToken, body.CurrentPassword, body.NewPassword); err != nil {
 		httpserver.WriteError(w, r, err)
 		return
 	}

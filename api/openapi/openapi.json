@@ -2773,6 +2773,9 @@
           },
           "401": {
             "description": "current_password is incorrect"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
           }
         }
       }
