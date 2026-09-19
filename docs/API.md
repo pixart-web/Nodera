@@ -145,6 +145,8 @@ tracked in `docs/ROADMAP.md` if that stops being true.
 | GET | `/api/v1/agents` | session or token + org | List agent definitions (`agents.execute`) |
 | POST | `/api/v1/agents` | session or token + org | Create an agent definition (`agents.manage`) — `permission_scope` must be a subset of the caller's own permissions |
 | GET | `/api/v1/agents/{id}` | session or token + org | Get an agent definition (`agents.execute`) |
+| PUT | `/api/v1/agents/{id}` | session or token + org | Update an agent definition (`agents.manage`) — partial update, omitted fields untouched; `permission_scope` must be a subset of the caller's own permissions, re-checked on every call |
+| DELETE | `/api/v1/agents/{id}` | session or token + org | Permanently delete an agent (`agents.manage`) — hard delete, requires the agent to already be `disabled` (`409 CONFLICT` otherwise) |
 | POST | `/api/v1/agents/{id}/enable` | session or token + org | Enable an agent (`agents.manage`) |
 | POST | `/api/v1/agents/{id}/disable` | session or token + org | Disable an agent (`agents.manage`) |
 | POST | `/api/v1/agents/{id}/run` | session or token + org | Send a message through the agent's scoped AI chat (`agents.execute`, and the agent's own `permission_scope` must include `ai.use`) |

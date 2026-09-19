@@ -148,6 +148,8 @@ func newRouter(d apiDeps) http.Handler {
 				r.Get("/agents", d.handleListAgents)
 				r.Post("/agents", d.handleCreateAgent)
 				r.Get("/agents/{id}", d.handleGetAgent)
+				r.Put("/agents/{id}", d.handleUpdateAgent)
+				r.Delete("/agents/{id}", d.handleDeleteAgent)
 				r.Post("/agents/{id}/enable", d.handleEnableAgent)
 				r.Post("/agents/{id}/disable", d.handleDisableAgent)
 				r.Post("/agents/{id}/run", d.handleRunAgent)
@@ -1185,6 +1187,37 @@ func (d apiDeps) handleGetAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpserver.WriteJSON(w, http.StatusOK, a)
+}
+
+func (d apiDeps) handleUpdateAgent(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		httpserver.WriteError(w, r, apierr.Validation("invalid agent id"))
+		return
+	}
+	var body agents.UpdateAgentInput
+	if !decodeJSON(w, r, &body) {
+		return
+	}
+	a, err := d.agents.Update(r.Context(), mustAuthContext(r), id, body)
+	if err != nil {
+		httpserver.WriteError(w, r, err)
+		return
+	}
+	httpserver.WriteJSON(w, http.StatusOK, a)
+}
+
+func (d apiDeps) handleDeleteAgent(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		httpserver.WriteError(w, r, apierr.Validation("invalid agent id"))
+		return
+	}
+	if err := d.agents.Delete(r.Context(), mustAuthContext(r), id); err != nil {
+		httpserver.WriteError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (d apiDeps) handleEnableAgent(w http.ResponseWriter, r *http.Request) {

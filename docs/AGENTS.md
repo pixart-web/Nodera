@@ -149,6 +149,23 @@ A freshly created agent starts `disabled`; `SetStatus` is the only way to
 `active`/`disabled` it, and both `Run` and `ExecuteTool` refuse a disabled
 agent (`TestAgents_CreateEnableRun`, `TestAgents_DisabledAgentCannotExecuteTool`).
 
+`Update` edits an agent's configuration after creation — name, description,
+system instructions, AI profile key, allowed tool keys, permission scope,
+timeout — via the same pointer-based partial-update pattern used elsewhere
+(nil scalar = don't touch; `AllowedToolKeys`/`PermissionScope` nil = don't
+touch, `[]` = clear). `PermissionScope` is re-validated against the
+*caller's own currently-held* permissions on every update, not grandfathered
+from the agent's existing scope (`TestAgents_UpdateRejectsPermissionEscalation`)
+— the same rule `CreateAgent` enforces, closed for the update path too.
+
+`Delete` permanently removes the row — a hard delete, unlike nodes'/
+applications' terminal-status-with-row-kept pattern, because an agent is
+closer to an access-scoped config object (an API token or role) than
+physical/operational infrastructure, and its only FK reference
+(`approvals.requesting_agent_id`) uses `ON DELETE SET NULL`. It requires
+the agent to already be `disabled` — a real precondition check, returning
+`CONFLICT` otherwise (`TestAgents_DeleteRequiresDisabledFirst`).
+
 **What this is not:** the agent never decides on its own which tool to
 call, or calls `Run` and `ExecuteTool` in a loop by itself. A caller (human
 via the HTTP API, or another service) directs each `ExecuteTool` call

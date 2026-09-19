@@ -29,8 +29,9 @@ web/
                                   status report/deregister controls
       jobs/page.tsx             job list (status filter), enqueue, cancel, retry
       tools/page.tsx             tool registry + inline execute form + approvals queue
-      agents/page.tsx             agent definitions: create/enable/disable, scoped
-                                  chat (Run), scoped tool execution (ExecuteTool)
+      agents/page.tsx             agent definitions: create/edit/enable/disable/
+                                  delete, scoped chat (Run), scoped tool execution
+                                  (ExecuteTool)
       ai/page.tsx                 AI Gateway: chat, profiles, providers, models
       secrets/page.tsx          secret metadata list, set, delete — never values
       access/page.tsx            own API tokens, service accounts + their tokens,
@@ -155,7 +156,12 @@ through it (same resource type/id + JSON parameters shape as the Tools
 page, restricted to a `<select>` of that agent's own `allowed_tool_keys`).
 A new agent starts disabled, matching the API (`docs/AGENTS.md`); Run and
 Execute are both disabled in the UI until enabled, rather than left to fail
-server-side.
+server-side. An "Edit" button opens an inline form (mirroring Settings'
+`EditRoleForm` pattern) pre-filled with the agent's current values for a
+partial update; a "Delete" button stays disabled, with an explanatory
+tooltip, unless the agent's status is already `disabled` — the UI enforces
+the same precondition the backend does (`409 CONFLICT` otherwise) rather
+than just surfacing the resulting error after the fact.
 
 Verified live end to end: created an agent scoped to only `ai.use` +
 `tools.read`, confirmed executing `check_ssl` through it correctly failed

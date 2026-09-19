@@ -137,6 +137,148 @@ func (s *Service) CreateAgent(ctx context.Context, ac authctx.AuthContext, in Cr
 	return a, nil
 }
 
+type UpdateAgentInput struct {
+	Name               *string  `json:"name"`
+	Description        *string  `json:"description"`
+	SystemInstructions *string  `json:"system_instructions"`
+	AIProfileKey       *string  `json:"ai_profile_key"`
+	AllowedToolKeys    []string `json:"allowed_tool_keys"`
+	PermissionScope    []string `json:"permission_scope"`
+	TimeoutSeconds     *int     `json:"timeout_seconds"`
+}
+
+// Update edits an agent's configuration. Each field is a pointer/nil-slice
+// (nil = leave unchanged) except AllowedToolKeys/PermissionScope, whose
+// zero value (nil) can't distinguish "no change" from "clear it" for a
+// slice — callers pass an explicit empty slice to clear either. The same
+// no-privilege-escalation check CreateAgent applies to PermissionScope
+// applies here too: a caller can never grant an agent a permission they
+// don't themselves hold, including when editing one that already has it
+// (re-validated against the caller's *current* permissions, not
+// grandfathered from whoever created it).
+func (s *Service) Update(ctx context.Context, ac authctx.AuthContext, id uuid.UUID, in UpdateAgentInput) (Agent, error) {
+	if err := rbac.Require(ac, permManage); err != nil {
+		return Agent{}, err
+	}
+	existing, err := s.get(ctx, ac.OrganizationID, id)
+	if err != nil {
+		return Agent{}, err
+	}
+
+	name := existing.Name
+	if in.Name != nil {
+		if *in.Name == "" {
+			return Agent{}, apierr.Validation("agent name cannot be empty")
+		}
+		name = *in.Name
+	}
+	description := existing.Description
+	if in.Description != nil {
+		description = *in.Description
+	}
+	systemInstructions := existing.SystemInstructions
+	if in.SystemInstructions != nil {
+		systemInstructions = *in.SystemInstructions
+	}
+	aiProfileKey := existing.AIProfileKey
+	if in.AIProfileKey != nil {
+		if *in.AIProfileKey == "" {
+			return Agent{}, apierr.Validation("ai_profile_key cannot be empty")
+		}
+		aiProfileKey = *in.AIProfileKey
+	}
+	allowedToolKeys := existing.AllowedToolKeys
+	if in.AllowedToolKeys != nil {
+		if err := s.validateToolKeys(ctx, in.AllowedToolKeys); err != nil {
+			return Agent{}, err
+		}
+		allowedToolKeys = in.AllowedToolKeys
+	}
+	permissionScope := existing.PermissionScope
+	if in.PermissionScope != nil {
+		for _, perm := range in.PermissionScope {
+			if !ac.HasPermission(perm) {
+				return Agent{}, apierr.Forbidden("cannot grant an agent a permission you do not hold: " + perm)
+			}
+		}
+		permissionScope = in.PermissionScope
+	}
+	timeoutSeconds := existing.TimeoutSeconds
+	if in.TimeoutSeconds != nil {
+		if *in.TimeoutSeconds <= 0 {
+			return Agent{}, apierr.Validation("timeout_seconds must be positive")
+		}
+		timeoutSeconds = *in.TimeoutSeconds
+	}
+
+	var a Agent
+	err = s.pool.QueryRow(ctx, `
+		UPDATE agents SET name = $3, description = $4, system_instructions = $5, ai_profile_key = $6,
+		                   allowed_tool_keys = $7, permission_scope = $8, timeout_seconds = $9, updated_at = now()
+		WHERE id = $1 AND organization_id = $2
+		RETURNING id, name, description, system_instructions, ai_profile_key,
+		          allowed_tool_keys, permission_scope, status, timeout_seconds, created_at, updated_at
+	`, id, ac.OrganizationID, name, description, systemInstructions, aiProfileKey,
+		allowedToolKeys, permissionScope, timeoutSeconds).Scan(
+		&a.ID, &a.Name, &a.Description, &a.SystemInstructions, &a.AIProfileKey,
+		&a.AllowedToolKeys, &a.PermissionScope, &a.Status, &a.TimeoutSeconds, &a.CreatedAt, &a.UpdatedAt,
+	)
+	if err != nil {
+		if isUniqueViolation(err) {
+			return Agent{}, apierr.Conflict("an agent with this name already exists in this organization")
+		}
+		return Agent{}, apierr.Wrap(apierr.CodeInternal, "failed to update agent", err)
+	}
+
+	if err := s.audit.Record(ctx, ac, audit.Entry{
+		Action: "agents.agent.updated", ResourceType: "agent", ResourceID: a.ID.String(),
+		Success: true, PreviousState: existing, ResultingState: a,
+	}); err != nil {
+		logger.FromContext(ctx).Error("failed to write audit entry", "error", err)
+	}
+
+	return a, nil
+}
+
+// Delete permanently removes an agent definition. It must be disabled
+// first (SetStatus) — deleting a still-active agent out from under a
+// concurrent Run/ExecuteTool call is an avoidable footgun; requiring
+// disable-then-delete makes the two-step nature of the destructive action
+// explicit rather than implicit. Safe to hard-delete (unlike nodes/
+// applications, which are soft-retired to preserve history): the only
+// foreign key referencing agents.id (approvals.requesting_agent_id) uses
+// ON DELETE SET NULL, so no approval history is lost, only its agent
+// attribution.
+func (s *Service) Delete(ctx context.Context, ac authctx.AuthContext, id uuid.UUID) error {
+	if err := rbac.Require(ac, permManage); err != nil {
+		return err
+	}
+	existing, err := s.get(ctx, ac.OrganizationID, id)
+	if err != nil {
+		return err
+	}
+	if existing.Status != "disabled" {
+		return apierr.Conflict("agent must be disabled before it can be deleted")
+	}
+
+	tag, err := s.pool.Exec(ctx, `DELETE FROM agents WHERE id = $1 AND organization_id = $2`, id, ac.OrganizationID)
+	if err != nil {
+		return apierr.Wrap(apierr.CodeInternal, "failed to delete agent", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return apierr.NotFound("agent")
+	}
+
+	if err := s.audit.Record(ctx, ac, audit.Entry{
+		Action: "agents.agent.deleted", ResourceType: "agent", ResourceID: id.String(),
+		Success: true, PreviousState: existing,
+	}); err != nil {
+		logger.FromContext(ctx).Error("failed to write audit entry", "error", err)
+	}
+
+	return nil
+}
+
 func (s *Service) validateToolKeys(ctx context.Context, keys []string) error {
 	for _, key := range keys {
 		var exists bool

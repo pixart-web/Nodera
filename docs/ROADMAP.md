@@ -841,6 +841,55 @@ scanning in CI (`govulncheck`, `npm audit`).
 - [x] Full backend and frontend verification clean
 - [x] Docs (`API.md`, `FRONTEND.md`, `README.md`) updated
 
+**Phase 31** — this pass:
+- [x] `agents.Update`/`agents.Delete` — found by auditing `internal/agents`
+      for gaps against the CRUD/lifecycle shape every other domain already
+      has: only Create/List/Get/SetStatus existed, no way to edit an
+      agent's configuration or remove one once genuinely retired
+- [x] `Update` follows the established pointer-based partial-update
+      pattern (`*string`/`*int` fields nil = don't touch; `AllowedToolKeys`
+      and `PermissionScope` stay plain `[]string`, nil = don't touch,
+      explicit `[]` = clear). `PermissionScope` is re-validated against the
+      *caller's own currently-held* permissions on every update, not
+      grandfathered from the agent's existing scope — the same
+      no-privilege-escalation rule Create already enforces, now closed for
+      the update path too
+- [x] `Delete` is a hard delete, not a status flip — unlike nodes/
+      applications (kept for operational history, FKs use
+      `ON DELETE SET NULL`), an agent is judged more like an access-scoped
+      config object (closer to an API token or role than physical
+      infrastructure), and its only FK reference
+      (`approvals.requesting_agent_id`) also uses `ON DELETE SET NULL`. It
+      requires the agent to already be `disabled` — a real precondition
+      check, not just a schema default — returning `CONFLICT` otherwise
+- [x] 3 new integration tests, passing under `-race` alongside the 6
+      pre-existing agent tests (9 total, 4.238s): partial-update-only-
+      touches-provided-fields, a plain member rejected for attempting to
+      grant a scope beyond their own permissions, and delete correctly
+      refused while active (after an explicit enable, to prove the check
+      is real and not just relying on the disabled-by-default schema
+      value) then succeeding once disabled
+- [x] 2 new HTTP routes (`PUT /agents/{id}`, `DELETE /agents/{id}`) and
+      OpenAPI additions, validated with `@redocly/cli lint`;
+      `lib/api-types.generated.ts` regenerated
+- [x] `web/app/(org)/agents/page.tsx`: an inline "Edit" panel (mirroring
+      Settings' `EditRoleForm` pattern) pre-filled with the agent's current
+      values, and a "Delete" button that stays disabled (with an
+      explanatory tooltip) unless the agent's status is already `disabled`
+      — the UI enforces the same precondition the backend does rather than
+      just surfacing the resulting error
+- [x] Verified live end to end: created a real agent via the UI, edited
+      only its description through the real form, reloaded on a fresh tab
+      and confirmed the change round-tripped through the real backend
+      while the name stayed untouched; enabled the agent and watched
+      Delete grey itself out, then confirmed via a direct API call that
+      deleting an active agent correctly returns a real `409 CONFLICT`;
+      disabled it, deleted it through the real UI, and watched it
+      disappear from the list. Checked the browser console on a
+      completely fresh tab afterward — zero errors
+- [x] Full backend test suite re-run clean (`go test ./... -race`)
+- [x] Docs (`API.md`, `FRONTEND.md`, `AGENTS.md`, `README.md`) updated
+
 ## Next up
 
 1. **Concrete job types**: the worker dispatcher is real but nothing

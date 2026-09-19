@@ -274,13 +274,132 @@ function ExecuteAgentToolForm({ agent, onDone }: { agent: Agent; onDone: () => v
   );
 }
 
-type PanelKind = "run" | "execute";
+function EditAgentForm({ agent, onDone }: { agent: Agent; onDone: () => void }) {
+  const [name, setName] = useState(agent.name);
+  const [description, setDescription] = useState(agent.description);
+  const [systemInstructions, setSystemInstructions] = useState(agent.system_instructions);
+  const [aiProfileKey, setAiProfileKey] = useState(agent.ai_profile_key);
+  const [allowedToolKeys, setAllowedToolKeys] = useState(agent.allowed_tool_keys.join(", "));
+  const [permissionScope, setPermissionScope] = useState(agent.permission_scope.join(", "));
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    setBusy(true);
+    try {
+      await api.put<Agent>(`/api/v1/agents/${agent.id}`, {
+        name,
+        description,
+        system_instructions: systemInstructions,
+        ai_profile_key: aiProfileKey,
+        allowed_tool_keys: parseList(allowedToolKeys),
+        permission_scope: parseList(permissionScope),
+      });
+      onDone();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Failed to update agent");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form onSubmit={submit} className="space-y-3">
+      {error && <ErrorBanner message={error} />}
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <label className="label" htmlFor="edit-agent-name">
+            Name
+          </label>
+          <input id="edit-agent-name" className="input" value={name} onChange={(e) => setName(e.target.value)} required />
+        </div>
+        <div>
+          <label className="label" htmlFor="edit-agent-profile">
+            AI profile key
+          </label>
+          <input
+            id="edit-agent-profile"
+            className="input font-mono"
+            value={aiProfileKey}
+            onChange={(e) => setAiProfileKey(e.target.value)}
+            required
+          />
+        </div>
+      </div>
+      <div>
+        <label className="label" htmlFor="edit-agent-description">
+          Description
+        </label>
+        <input
+          id="edit-agent-description"
+          className="input"
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+        />
+      </div>
+      <div>
+        <label className="label" htmlFor="edit-agent-instructions">
+          System instructions
+        </label>
+        <textarea
+          id="edit-agent-instructions"
+          className="input font-mono"
+          rows={2}
+          value={systemInstructions}
+          onChange={(e) => setSystemInstructions(e.target.value)}
+        />
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <label className="label" htmlFor="edit-agent-tools">
+            Allowed tool keys (comma-separated)
+          </label>
+          <input
+            id="edit-agent-tools"
+            className="input font-mono"
+            value={allowedToolKeys}
+            onChange={(e) => setAllowedToolKeys(e.target.value)}
+          />
+        </div>
+        <div>
+          <label className="label" htmlFor="edit-agent-scope">
+            Permission scope (comma-separated)
+          </label>
+          <input
+            id="edit-agent-scope"
+            className="input font-mono"
+            value={permissionScope}
+            onChange={(e) => setPermissionScope(e.target.value)}
+          />
+        </div>
+      </div>
+      <p className="text-xs text-base-400">
+        permission_scope can never exceed your own held permissions — the API rejects anything broader (no
+        privilege escalation).
+      </p>
+      <div className="flex items-center gap-3">
+        <button type="submit" className="btn-primary" disabled={busy}>
+          {busy ? "Saving…" : "Save changes"}
+        </button>
+        <button type="button" className="text-xs text-base-400 hover:text-base-200" onClick={onDone}>
+          Cancel
+        </button>
+      </div>
+    </form>
+  );
+}
+
+type PanelKind = "run" | "execute" | "edit";
 
 export default function AgentsPage() {
   const agents = useApi(() => api.get<Agent[]>("/api/v1/agents"), []);
   const [showCreate, setShowCreate] = useState(false);
   const [openPanel, setOpenPanel] = useState<{ id: string; kind: PanelKind } | null>(null);
   const [statusError, setStatusError] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [deletingID, setDeletingID] = useState<string | null>(null);
 
   async function toggleStatus(agent: Agent) {
     setStatusError(null);
@@ -290,6 +409,19 @@ export default function AgentsPage() {
       agents.reload();
     } catch (err) {
       setStatusError(err instanceof ApiError ? err.message : "Failed to change agent status");
+    }
+  }
+
+  async function deleteAgent(agent: Agent) {
+    setDeleteError(null);
+    setDeletingID(agent.id);
+    try {
+      await api.del(`/api/v1/agents/${agent.id}`);
+      agents.reload();
+    } catch (err) {
+      setDeleteError(err instanceof ApiError ? err.message : "Failed to delete agent");
+    } finally {
+      setDeletingID(null);
     }
   }
 
@@ -322,6 +454,7 @@ export default function AgentsPage() {
 
       {agents.error && <ErrorBanner message={agents.error} />}
       {statusError && <ErrorBanner message={statusError} />}
+      {deleteError && <ErrorBanner message={deleteError} />}
 
       <div className="card">
         {agents.loading ? (
@@ -373,6 +506,20 @@ export default function AgentsPage() {
                       <button className="text-xs text-base-400 hover:text-base-200" onClick={() => toggleStatus(a)}>
                         {a.status === "active" ? "Disable" : "Enable"}
                       </button>
+                      <button
+                        className="text-xs text-base-400 hover:text-base-200"
+                        onClick={() => togglePanel(a.id, "edit")}
+                      >
+                        {openPanel?.id === a.id && openPanel.kind === "edit" ? "Close" : "Edit"}
+                      </button>
+                      <button
+                        className="text-xs text-base-400 hover:text-danger disabled:text-base-600"
+                        disabled={a.status !== "disabled" || deletingID === a.id}
+                        title={a.status !== "disabled" ? "Disable the agent before deleting it" : undefined}
+                        onClick={() => deleteAgent(a)}
+                      >
+                        {deletingID === a.id ? "Deleting…" : "Delete"}
+                      </button>
                     </td>
                   </tr>
                   {openPanel?.id === a.id && (
@@ -380,8 +527,16 @@ export default function AgentsPage() {
                       <td colSpan={6} className="bg-base-800/40 p-3">
                         {openPanel.kind === "run" ? (
                           <RunAgentForm agent={a} onDone={() => setOpenPanel(null)} />
-                        ) : (
+                        ) : openPanel.kind === "execute" ? (
                           <ExecuteAgentToolForm agent={a} onDone={() => setOpenPanel(null)} />
+                        ) : (
+                          <EditAgentForm
+                            agent={a}
+                            onDone={() => {
+                              setOpenPanel(null);
+                              agents.reload();
+                            }}
+                          />
                         )}
                       </td>
                     </tr>

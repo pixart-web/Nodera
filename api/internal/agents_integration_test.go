@@ -228,3 +228,106 @@ func TestAgents_DisabledAgentCannotExecuteTool(t *testing.T) {
 		t.Fatal("expected ExecuteTool to fail for a disabled agent")
 	}
 }
+
+// Update changes only the fields provided, and re-validates a new
+// permission_scope against the caller's current permissions (same
+// no-privilege-escalation rule CreateAgent enforces).
+func TestAgents_UpdateChangesOnlyProvidedFields(t *testing.T) {
+	pool := testhelpers.RequirePool(t)
+	ctx := context.Background()
+	h := newHarness(pool)
+	ac, _ := h.newOwnerContext(t, ctx, "agent-update-owner@nodera.dev")
+	agentsSvc, _, _ := newAgentsServices(h)
+
+	a, err := agentsSvc.CreateAgent(ctx, ac, agents.CreateAgentInput{
+		Name:            "update-test-agent",
+		Description:     "original description",
+		AIProfileKey:    "unused.profile",
+		PermissionScope: []string{"ai.use"},
+	})
+	if err != nil {
+		t.Fatalf("CreateAgent: %v", err)
+	}
+
+	newDescription := "updated description"
+	updated, err := agentsSvc.Update(ctx, ac, a.ID, agents.UpdateAgentInput{Description: &newDescription})
+	if err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	if updated.Description != "updated description" {
+		t.Fatalf("expected description to be updated, got %q", updated.Description)
+	}
+	if updated.Name != "update-test-agent" || updated.AIProfileKey != "unused.profile" {
+		t.Fatalf("expected untouched fields to remain unchanged, got %+v", updated)
+	}
+}
+
+func TestAgents_UpdateRejectsPermissionEscalation(t *testing.T) {
+	pool := testhelpers.RequirePool(t)
+	ctx := context.Background()
+	h := newHarness(pool)
+	ac, _ := h.newOwnerContext(t, ctx, "agent-update-escalate-owner@nodera.dev")
+	memberAC := h.newMemberContext(t, ctx, ac.OrganizationID, "agent-update-escalate-member@nodera.dev")
+	agentsSvc, _, _ := newAgentsServices(h)
+
+	a, err := agentsSvc.CreateAgent(ctx, ac, agents.CreateAgentInput{
+		Name:            "escalation-target-agent",
+		AIProfileKey:    "unused.profile",
+		PermissionScope: []string{"ai.use"},
+	})
+	if err != nil {
+		t.Fatalf("CreateAgent: %v", err)
+	}
+
+	escalated := []string{"organization.manage"}
+	if _, err := agentsSvc.Update(ctx, memberAC, a.ID, agents.UpdateAgentInput{PermissionScope: escalated}); err == nil {
+		t.Fatal("expected a member to be forbidden from granting a permission they don't hold")
+	} else if ae, ok := err.(*apierr.Error); !ok || ae.Code != apierr.CodeForbidden {
+		t.Fatalf("expected FORBIDDEN, got %v", err)
+	}
+}
+
+// Delete requires the agent to be disabled first, and is a genuine hard
+// delete afterward — a subsequent Get returns NOT_FOUND, not a
+// soft-deleted row.
+func TestAgents_DeleteRequiresDisabledFirst(t *testing.T) {
+	pool := testhelpers.RequirePool(t)
+	ctx := context.Background()
+	h := newHarness(pool)
+	ac, _ := h.newOwnerContext(t, ctx, "agent-delete-owner@nodera.dev")
+	agentsSvc, _, _ := newAgentsServices(h)
+
+	a, err := agentsSvc.CreateAgent(ctx, ac, agents.CreateAgentInput{
+		Name:         "delete-test-agent",
+		AIProfileKey: "unused.profile",
+	})
+	if err != nil {
+		t.Fatalf("CreateAgent: %v", err)
+	}
+
+	// A freshly created agent starts disabled, so this should actually
+	// succeed immediately — but exercise the explicit guard by enabling
+	// it first, to prove Delete actively checks status rather than just
+	// relying on the schema default.
+	if _, err := agentsSvc.SetStatus(ctx, ac, a.ID, true); err != nil {
+		t.Fatalf("SetStatus: %v", err)
+	}
+	if err := agentsSvc.Delete(ctx, ac, a.ID); err == nil {
+		t.Fatal("expected deleting an active agent to fail")
+	} else if ae, ok := err.(*apierr.Error); !ok || ae.Code != apierr.CodeConflict {
+		t.Fatalf("expected CONFLICT, got %v", err)
+	}
+
+	if _, err := agentsSvc.SetStatus(ctx, ac, a.ID, false); err != nil {
+		t.Fatalf("SetStatus (disable): %v", err)
+	}
+	if err := agentsSvc.Delete(ctx, ac, a.ID); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+
+	if _, err := agentsSvc.Get(ctx, ac, a.ID); err == nil {
+		t.Fatal("expected the deleted agent to no longer be retrievable")
+	} else if ae, ok := err.(*apierr.Error); !ok || ae.Code != apierr.CodeNotFound {
+		t.Fatalf("expected NOT_FOUND, got %v", err)
+	}
+}
