@@ -1801,6 +1801,75 @@ mutually-untrusting organizations.
       `/settings`' role management) remains deferred — the API is real
       and tested; the UI is a follow-up.
 
+## Hardening pass (post-Phase-50): P1 — browser authentication + CSRF
+
+The review's most invasive P1 finding: the frontend stored the human
+session's bearer token in `localStorage`, readable by any JavaScript
+running on the page — a real credential-theft surface for a
+security-sensitive infrastructure control plane (an XSS bug anywhere,
+including in a future third-party widget, would leak a fully-privileged,
+long-lived session). Machine/API-token clients needed to keep working
+unchanged throughout.
+
+- [x] `internal/platform/httpserver/cookies.go`: `SetSessionCookie`
+      (`HttpOnly`, `Secure` in production only, `SameSite=Lax`, `Path=/`,
+      `MaxAge` = session TTL) / `ClearSessionCookie`, and the CSRF
+      double-submit pair `SetCSRFCookie` (deliberately not `HttpOnly` —
+      the frontend must read it) / `ClearCSRFCookie` / `VerifyCSRF`
+      (constant-time comparison of the cookie value against the
+      `X-CSRF-Token` header).
+- [x] `cmd/server/middleware.go`'s `requireSession` now resolves either
+      an `Authorization: Bearer` header (checked first — unchanged
+      behavior and priority for machine/API-token clients) or, failing
+      that, the `nodera_session` cookie. A cookie-authenticated mutating
+      request additionally must pass `requireCSRF` (skipped for
+      GET/HEAD/OPTIONS, and never applied to a Bearer-authenticated
+      request, which carries no CSRF surface to begin with since nothing
+      attaches `Authorization` automatically the way a browser attaches
+      cookies).
+- [x] `handleLogin` sets both cookies (still also returns `session_token`
+      in the JSON body — needed by non-browser callers that authenticate
+      directly against the HTTP API); `handleLogout` resolves the token
+      from either source and clears both cookies.
+- [x] CORS (`internal/platform/httpserver/httpserver.go`) gained
+      `Access-Control-Allow-Credentials: true` and `X-CSRF-Token` in the
+      allowed headers — still never a wildcard origin, which is invalid
+      combined with `Allow-Credentials` per the Fetch spec regardless.
+- [x] Frontend (`web/lib/session.ts`, `web/lib/api.ts`,
+      `web/app/login/page.tsx`, `web/app/(org)/layout.tsx`,
+      `web/app/orgs/page.tsx`, `web/app/page.tsx`): removed
+      `getSessionToken`/`setSessionToken` and all `localStorage` session-token
+      storage entirely; `lib/api.ts` sends `credentials: "include"` and
+      attaches `X-CSRF-Token` (read from the non-`HttpOnly` CSRF cookie)
+      on mutating requests; a central `401 UNAUTHENTICATED` handler clears
+      the local "logged in" hint and redirects to `/login`; logout now
+      calls the real `/auth/logout` endpoint (previously it only cleared
+      local state) so the server-side session/cookies are actually
+      revoked/cleared, not just forgotten client-side.
+- [x] `cmd/server/cookie_csrf_test.go` — eight new tests driving the real
+      HTTP router end to end (`httptest.Server` + a cookie-jar client):
+      login sets both cookies; a cookie-authenticated mutating request
+      without `X-CSRF-Token` is `403`; the same request with the correct
+      header is `204`; a wrong token is `403`; `GET` needs no CSRF header;
+      a Bearer-token request needs no CSRF header and still works
+      (backward compatibility, explicitly tested, not just assumed);
+      logout clears both cookies from the jar; CORS reflects the exact
+      origin with `Allow-Credentials: true`. Full backend suite passes
+      under `go test ./... -race`.
+- [x] Live-verified through the real browser UI end to end: signed up,
+      logged in, confirmed `document.cookie` shows only the CSRF cookie
+      (the session cookie is genuinely invisible to JS — `HttpOnly`
+      verified live, not just by reading the Set-Cookie flags), confirmed
+      `localStorage` holds only the non-sensitive user hint, created a
+      real organization (a mutating POST) and watched it succeed via the
+      cookie + CSRF-header flow (network log showed the CORS preflight +
+      `201 Created`), signed out and confirmed both cookies were actually
+      cleared, and checked the console on a completely fresh tab for zero
+      errors.
+- [x] Docs: `docs/SECURITY.md` gained a full "Browser authentication"
+      section; `docs/DECISIONS.md` (ADR-005 amendment) and
+      `docs/FRONTEND.md`'s "Auth model" rewritten; `README.md` updated.
+
 ## Next up
 
 1. **Concrete job types**: the worker dispatcher is real but nothing

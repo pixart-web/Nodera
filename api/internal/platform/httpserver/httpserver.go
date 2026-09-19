@@ -65,11 +65,16 @@ func Recover(next http.Handler) http.Handler {
 
 // CORS returns middleware that permits cross-origin browser requests from
 // an allow-listed set of origins (the web/ frontend). It reflects a
-// matching origin back (never "*", since Authorization headers are in use)
-// and answers preflight OPTIONS requests directly. An empty allow-list
-// permits nothing cross-origin — same-origin and non-browser callers are
-// unaffected either way, since CORS is enforced by the browser, not this
-// server (rule 28).
+// matching origin back (never "*" — required both because Authorization
+// headers are in use and because Access-Control-Allow-Credentials: true
+// is never legal combined with a wildcard origin per the Fetch spec) and
+// answers preflight OPTIONS requests directly. Access-Control-Allow-
+// Credentials is required so the browser will actually send/accept the
+// HttpOnly session cookie (docs/SECURITY.md "Browser authentication")
+// cross-origin; it has no effect on Bearer-token callers, who don't rely
+// on cookies at all. An empty allow-list permits nothing cross-origin —
+// same-origin and non-browser callers are unaffected either way, since
+// CORS is enforced by the browser, not this server (rule 28).
 func CORS(allowedOrigins []string) func(http.Handler) http.Handler {
 	allowed := make(map[string]struct{}, len(allowedOrigins))
 	for _, o := range allowedOrigins {
@@ -82,9 +87,10 @@ func CORS(allowedOrigins []string) func(http.Handler) http.Handler {
 			if _, ok := allowed[origin]; ok {
 				h := w.Header()
 				h.Set("Access-Control-Allow-Origin", origin)
+				h.Set("Access-Control-Allow-Credentials", "true")
 				h.Set("Vary", "Origin")
 				h.Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
-				h.Set("Access-Control-Allow-Headers", "Authorization, Content-Type, X-Nodera-Org, X-Request-ID")
+				h.Set("Access-Control-Allow-Headers", "Authorization, Content-Type, X-Nodera-Org, X-Request-ID, "+CSRFHeaderName)
 				h.Set("Access-Control-Max-Age", "600")
 			}
 

@@ -29,6 +29,79 @@ tests. Everything else is FOUNDATION ONLY or PLANNED — see `README.md`.
   that device"), scoped so one user can never revoke another user's
   session even by guessing/enumerating a session ID.
 
+## Browser authentication — IMPLEMENTED
+
+The opaque session token from ADR-005 is unchanged; what changed is how
+the **human browser** carries it, versus how a machine/API client does.
+
+**Human browser session: HttpOnly cookie.** `POST /auth/login` sets the
+session token as an `HttpOnly`, `Path=/`, `SameSite=Lax` cookie
+(`nodera_session` — `internal/platform/httpserver/cookies.go`), `Secure`
+whenever `NODERA_ENV=production` (a plain-HTTP dev server cannot set a
+browser-honored `Secure` cookie — a deliberate, documented dev-mode
+exception, rule 23). `HttpOnly` means no JavaScript running on the page —
+including an XSS payload — can ever read it via `document.cookie`; the
+`web/` frontend (`lib/api.ts`) never reads or stores the raw token at all,
+relying entirely on the browser attaching the cookie automatically.
+`SameSite=Lax` (not `Strict`) still lets the cookie ride along on the
+frontend's own top-level navigations and same-site `fetch`/XHR calls — the
+API and the web app are meant to share a registrable domain in production
+(e.g. `api.nodera.io` / `app.nodera.io`), which the `SameSite` spec treats
+as "same-site" despite being different origins, and `localhost` at any
+port is likewise treated as same-site by browsers in dev — while
+withholding the cookie from genuinely cross-site requests.
+
+**Machine/API client: `Authorization: Bearer`, unchanged.** `POST
+/auth/login`'s JSON response still includes `session_token` in the body,
+specifically for a non-browser caller (CLI, script) that needs the raw
+value to send as `Authorization: Bearer <token>`. `cmd/server/middleware.go`'s
+`requireSession` checks the `Authorization` header first and only falls
+back to the cookie when no bearer header is present, so a machine client
+is completely unaffected by any of this. An API token
+(`POST /api-tokens`) was always Bearer-only and stays that way; it never
+gets a cookie.
+
+**CSRF protection: double-submit cookie, not just `SameSite`.** `SameSite`
+alone is not treated as sufficient protection here — a subdomain
+takeover, a misconfigured proxy, or a browser with a nonstandard
+`SameSite` implementation would otherwise be a single point of failure.
+Login also sets a second cookie, `nodera_csrf` (deliberately **not**
+`HttpOnly` — the frontend must be able to read it), containing a fresh
+random token. Every cookie-authenticated state-changing request
+(`POST`/`PUT`/`PATCH`/`DELETE` — `GET`/`HEAD`/`OPTIONS` are exempt, since
+those must have no side effects to begin with) must echo that value back
+in an `X-CSRF-Token` header (`httpserver.VerifyCSRF`, a constant-time
+comparison); a mismatch or missing header is a `403 FORBIDDEN`. This is
+checked *only* for cookie-authenticated requests — a Bearer-authenticated
+request is inherently immune to CSRF (nothing attaches an `Authorization`
+header automatically the way a browser attaches cookies), so it never
+needs one and is unaffected. The security property: an attacker's
+cross-site page can trigger the browser to send a forged request with the
+session/CSRF cookies attached automatically, but same-origin policy
+prevents that page's JavaScript from ever reading the CSRF cookie's
+*value* to put in the header — so it cannot produce a request that passes
+the check.
+
+**CORS.** `Access-Control-Allow-Credentials: true` is required for the
+browser to send/accept the cookie cross-origin, which the Fetch spec
+only permits paired with an exact reflected origin, never `"*"`
+(`internal/platform/httpserver/httpserver.go`'s `CORS` middleware already
+only ever reflects an allow-listed origin — see "CORS" below — so this
+was a safe addition, not a new relaxation).
+
+**Tested by** `cmd/server/cookie_csrf_test.go` end to end against the real
+HTTP router (not just at the unit level): login sets both cookies; a
+cookie-authenticated mutating request without `X-CSRF-Token` is
+`403`-rejected; the same request with the correct header succeeds; a
+wrong token is rejected; `GET` needs no CSRF header; a Bearer-token
+request needs no CSRF header either and still works; logout clears both
+cookies; CORS reflects the exact origin with credentials enabled. Also
+live-verified through the real browser UI: `document.cookie` after login
+shows only the CSRF cookie (the session cookie is genuinely invisible to
+JS), `localStorage` holds only a non-sensitive "who's logged in" hint,
+and a real mutating request (creating an organization) succeeds end to
+end through the cookie + CSRF-header flow.
+
 ## Authorization — IMPLEMENTED
 
 - All permission checks go through `rbac.Require(ac, permission)`
@@ -271,9 +344,11 @@ to restrict yet; one will be added if/when the API ever serves any HTML.
 
 `internal/platform/httpserver.CORS` reflects back only an allow-listed
 origin (`NODERA_CORS_ORIGINS`, default `http://localhost:3000` for the
-`web/` dev server) — never `*`, since `Authorization` headers are in play.
-Production deployments must set this explicitly to their real frontend
-origin(s) (`docs/DEPLOYMENT.md`).
+`web/` dev server) and sets `Access-Control-Allow-Credentials: true` —
+never `*`, both because `Authorization` headers are in play and because
+`Allow-Credentials: true` combined with a wildcard origin is invalid per
+the Fetch spec (the browser would refuse it). Production deployments must
+set this explicitly to their real frontend origin(s) (`docs/DEPLOYMENT.md`).
 
 ## Known dependency finding: `web/` transitive PostCSS advisories
 

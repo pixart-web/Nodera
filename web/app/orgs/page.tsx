@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { api, ApiError } from "@/lib/api";
-import { clearSession, getSessionToken, setCurrentOrgId } from "@/lib/session";
+import { clearSession, getStoredUser, setCurrentOrgId } from "@/lib/session";
 import type { Organization } from "@/lib/types";
 
 export default function OrgsPage() {
@@ -15,7 +15,7 @@ export default function OrgsPage() {
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    if (!getSessionToken()) {
+    if (!getStoredUser()) {
       router.replace("/login");
       return;
     }
@@ -45,7 +45,12 @@ export default function OrgsPage() {
     }
   }
 
-  function logout() {
+  async function logout() {
+    try {
+      await api.post("/api/v1/auth/logout", undefined, false);
+    } catch {
+      // Best-effort — see the (org)/layout.tsx logout handler.
+    }
     clearSession();
     router.replace("/login");
   }

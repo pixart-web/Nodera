@@ -108,6 +108,28 @@ behind the same `identity` module interface, not a phase-1 requirement.
 avoiding a DB lookup per request at this stage, and audit/session-management
 requirements (section 6, 41) need a queryable session record.
 
+**Amendment (2026-09-19, browser-authentication hardening pass):** the
+opaque session token itself is unchanged, but how the *browser* carries it
+changed. Originally the frontend stored the session token in
+`localStorage` and sent it as `Authorization: Bearer` like any other API
+client — simple, but it put a long-lived, fully-privileged credential
+somewhere any JavaScript running on the page (including an XSS payload)
+could read and exfiltrate. The API now also sets the session token as an
+`HttpOnly` cookie on login (`internal/platform/httpserver/cookies.go`),
+and the web frontend (`web/lib/api.ts`) stopped reading/storing the raw
+token entirely, relying on the browser to attach the cookie automatically.
+Machine/API-token clients are unaffected — `Authorization: Bearer`
+continues to work exactly as before (`cmd/server/middleware.go`'s
+`requireSession` checks it first, falling back to the cookie only when no
+bearer header is present); `POST /auth/login`'s JSON body still returns
+`session_token` for exactly that use case. A cookie-authenticated
+mutating request now also requires a matching `X-CSRF-Token` header
+(double-submit pattern against a second, non-`HttpOnly` cookie) — a
+Bearer-authenticated request never needs one, since nothing attaches that
+header automatically the way a browser attaches cookies. See
+docs/SECURITY.md "Browser authentication" for the full design and
+`cmd/server/cookie_csrf_test.go` for the tests proving it.
+
 ---
 
 ## ADR-006: AI Gateway, Agent Runtime, and Tool Gateway ship as interfaces + deterministic stubs in phase 1

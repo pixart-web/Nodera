@@ -18,28 +18,61 @@ type ctxKeySessionToken struct{}
 type ctxKeyUserID struct{}
 type ctxKeyAuthContext struct{}
 
-// requireSession resolves the Authorization: Bearer <token> header to a
-// caller identity. It accepts either a session token (from POST
-// /auth/login) or an API token (from POST /api-tokens) — see
-// docs/API.md. A session token resolves only a user ID here; the
-// organization and permissions are resolved later by requireOrganization
-// once X-Nodera-Org is known. An API token already carries its organization
-// and permission scopes, so it resolves a full AuthContext immediately.
+// ctxKeyCookieAuth marks a request as authenticated via the browser
+// session cookie rather than an Authorization: Bearer header — the only
+// signal requireCSRF (below) uses to decide whether CSRF verification
+// applies, since a Bearer credential is never attached by the browser
+// automatically and therefore carries no CSRF surface to begin with.
+type ctxKeyCookieAuth struct{}
+
+// requireSession resolves the caller identity from either an
+// Authorization: Bearer <token> header (a session token from POST
+// /auth/login, or an API token from POST /api-tokens — see docs/API.md)
+// or, if no bearer header is present, the HttpOnly nodera_session cookie
+// a browser sent automatically (docs/SECURITY.md "Browser
+// authentication"). Bearer takes priority when both are present, so an
+// API-token client sharing cookies from an unrelated browser session
+// (unlikely, but not impossible for a tool built on top of a browser
+// context) is never silently downgraded to a different identity. A
+// session token/cookie resolves only a user ID here; the organization and
+// permissions are resolved later by requireOrganization once X-Nodera-Org
+// is known. An API token already carries its organization and permission
+// scopes, so it resolves a full AuthContext immediately.
 func (d apiDeps) requireSession(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		token := bearerToken(r)
+		viaCookie := false
+		if token == "" {
+			if cookie, err := r.Cookie(httpserver.SessionCookieName); err == nil && cookie.Value != "" {
+				token = cookie.Value
+				viaCookie = true
+			}
+		}
 		if token == "" {
 			httpserver.WriteError(w, r, apierr.Unauthenticated("missing bearer token"))
 			return
 		}
 
 		if userID, err := d.identity.UserIDForSession(r.Context(), token); err == nil {
+			if viaCookie && !d.requireCSRF(w, r) {
+				return
+			}
 			ctx := context.WithValue(r.Context(), ctxKeySessionToken{}, token)
 			ctx = context.WithValue(ctx, ctxKeyUserID{}, userID)
+			if viaCookie {
+				ctx = context.WithValue(ctx, ctxKeyCookieAuth{}, true)
+			}
 			next.ServeHTTP(w, r.WithContext(ctx))
 			return
 		} else if !errors.Is(err, identity.ErrSessionInvalid) {
 			httpserver.WriteError(w, r, err)
+			return
+		} else if viaCookie {
+			// A cookie value only ever carries a session token (never an
+			// API token — see handleLogin), so a cookie that fails
+			// session lookup is simply invalid/expired, not worth a
+			// fallback API-token lookup below.
+			httpserver.WriteError(w, r, apierr.Unauthenticated("session expired"))
 			return
 		}
 
@@ -53,6 +86,24 @@ func (d apiDeps) requireSession(next http.Handler) http.Handler {
 		ctx = context.WithValue(ctx, ctxKeyUserID{}, ac.ActorID)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+// requireCSRF enforces the double-submit CSRF check
+// (httpserver.VerifyCSRF) for state-changing methods on a
+// cookie-authenticated request. GET/HEAD/OPTIONS are exempt — the
+// standard CSRF scoping, since those must not have side effects to begin
+// with. Writes a normalized 403 and returns false if the check fails, so
+// callers can `if !d.requireCSRF(w, r) { return }`.
+func (d apiDeps) requireCSRF(w http.ResponseWriter, r *http.Request) bool {
+	switch r.Method {
+	case http.MethodGet, http.MethodHead, http.MethodOptions:
+		return true
+	}
+	if !httpserver.VerifyCSRF(r) {
+		httpserver.WriteError(w, r, apierr.Forbidden("missing or invalid CSRF token"))
+		return false
+	}
+	return true
 }
 
 // requireOrganization additionally resolves the X-Nodera-Org header into a
@@ -101,6 +152,23 @@ func bearerToken(r *http.Request) string {
 		return ""
 	}
 	return strings.TrimPrefix(h, prefix)
+}
+
+// sessionTokenFromRequest returns the caller's session token from either
+// the Authorization header or, failing that, the nodera_session cookie —
+// the same resolution order requireSession uses. handleLogout needs this
+// directly (rather than reading ctxKeySessionToken, which requireSession
+// only ever populates for the session-token path, not the API-token
+// path) since a cookie-authenticated browser session never sends an
+// Authorization header at all.
+func sessionTokenFromRequest(r *http.Request) string {
+	if t := bearerToken(r); t != "" {
+		return t
+	}
+	if cookie, err := r.Cookie(httpserver.SessionCookieName); err == nil {
+		return cookie.Value
+	}
+	return ""
 }
 
 func userIDFromRequest(r *http.Request) uuid.UUID {

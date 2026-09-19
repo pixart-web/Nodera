@@ -50,6 +50,14 @@ type apiDeps struct {
 	createOrgRate      ratelimit.Allower
 	changePasswordRate ratelimit.Allower
 	corsOrigins        []string
+	sessionTTL         time.Duration
+	// secureCookies is true in production — see config.Config.Env. It
+	// gates the Secure flag on the session/CSRF cookies; a development
+	// server over plain HTTP cannot set a browser-honored Secure cookie,
+	// which is a deliberate, documented dev-mode exception (rule 23), not
+	// a silently-degraded production default (this field is never true by
+	// accident: main.go sets it explicitly from cfg.Env).
+	secureCookies bool
 }
 
 func newRouter(d apiDeps) http.Handler {
@@ -262,6 +270,19 @@ func (d apiDeps) handleLogin(w http.ResponseWriter, r *http.Request) {
 		httpserver.WriteError(w, r, err)
 		return
 	}
+
+	// Set the browser session as an HttpOnly cookie the frontend never
+	// touches (docs/SECURITY.md "Browser authentication") — session_token
+	// stays in the JSON body too, for a non-browser client (CLI, script)
+	// that authenticates directly against the HTTP API and needs the raw
+	// value to send as Authorization: Bearer later; the web/ frontend
+	// itself must never read or store this field (see web/lib/api.ts).
+	httpserver.SetSessionCookie(w, token, d.sessionTTL, d.secureCookies)
+	if _, err := httpserver.SetCSRFCookie(w, d.sessionTTL, d.secureCookies); err != nil {
+		httpserver.WriteError(w, r, apierr.Wrap(apierr.CodeInternal, "failed to issue CSRF token", err))
+		return
+	}
+
 	httpserver.WriteJSON(w, http.StatusOK, map[string]any{
 		"session_token": token,
 		"user":          map[string]any{"id": u.ID, "email": u.Email, "display_name": u.DisplayName},
@@ -270,11 +291,13 @@ func (d apiDeps) handleLogin(w http.ResponseWriter, r *http.Request) {
 }
 
 func (d apiDeps) handleLogout(w http.ResponseWriter, r *http.Request) {
-	token := bearerToken(r)
+	token := sessionTokenFromRequest(r)
 	if err := d.identity.Logout(r.Context(), token); err != nil {
 		httpserver.WriteError(w, r, err)
 		return
 	}
+	httpserver.ClearSessionCookie(w, d.secureCookies)
+	httpserver.ClearCSRFCookie(w, d.secureCookies)
 	w.WriteHeader(http.StatusNoContent)
 }
 

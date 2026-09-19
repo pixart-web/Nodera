@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { api, ApiError } from "@/lib/api";
-import { setCurrentOrgId, setSessionToken, setStoredUser } from "@/lib/session";
+import { setCurrentOrgId, setStoredUser } from "@/lib/session";
 import type { Organization, User } from "@/lib/types";
 
 interface LoginResponse {
@@ -40,8 +40,12 @@ export default function LoginPage() {
         });
       }
 
+      // The API also sets the real session as an HttpOnly cookie on this
+      // response (docs/SECURITY.md) — this client deliberately never
+      // reads or stores res.session_token; setStoredUser below is only a
+      // non-sensitive "who's probably logged in" hint for client-side
+      // routing (see lib/session.ts).
       const res = await api.postPublic<LoginResponse>("/api/v1/auth/login", { email, password });
-      setSessionToken(res.session_token);
       setStoredUser(res.user);
 
       const orgs = res.organizations ?? [];

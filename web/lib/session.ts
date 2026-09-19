@@ -1,9 +1,16 @@
-// Client-only session storage. The Nodera API uses bearer tokens, not
-// cookies (ADR-005), so there is no CSRF surface here — storing the token
-// in localStorage is the correct tradeoff for a bearer-token API, not a
-// workaround. This module is only ever imported from client components.
+// Client-only session storage. As of the browser-authentication hardening
+// pass, the human session itself lives in an HttpOnly cookie the API sets
+// on login (docs/SECURITY.md "Browser authentication") — this module
+// never stores the raw session token, and no client code can read it via
+// document.cookie either, since HttpOnly cookies are invisible to
+// JavaScript by design. What's stored here is a non-sensitive "who's
+// probably logged in" hint used only for immediate client-side routing
+// (e.g. "skip the login page") — the server-side cookie is the actual
+// source of truth for every real authorization decision; a stale/cleared
+// hint just means an API call 404s/401s and lib/api.ts's fetch wrapper
+// redirects to /login, same as an expired cookie would. This module is
+// only ever imported from client components.
 
-const SESSION_TOKEN_KEY = "nodera.session_token";
 const ORG_ID_KEY = "nodera.org_id";
 const USER_KEY = "nodera.user";
 
@@ -17,14 +24,17 @@ function isBrowser(): boolean {
   return typeof window !== "undefined";
 }
 
-export function getSessionToken(): string | null {
+// getCSRFToken reads the (deliberately non-HttpOnly) CSRF cookie the API
+// sets alongside the session cookie on login — see lib/api.ts, which
+// echoes this value back as the X-CSRF-Token header on every
+// state-changing request (the double-submit CSRF pattern). It is not a
+// secret: its security property comes from same-origin policy preventing
+// a different origin's JavaScript from reading it, not from hiding it
+// from this origin's own code.
+export function getCSRFToken(): string | null {
   if (!isBrowser()) return null;
-  return window.localStorage.getItem(SESSION_TOKEN_KEY);
-}
-
-export function setSessionToken(token: string): void {
-  if (!isBrowser()) return;
-  window.localStorage.setItem(SESSION_TOKEN_KEY, token);
+  const match = document.cookie.match(/(?:^|;\s*)nodera_csrf=([^;]+)/);
+  return match?.[1] ? decodeURIComponent(match[1]) : null;
 }
 
 export function getStoredUser(): StoredUser | null {
@@ -55,7 +65,6 @@ export function setCurrentOrgId(orgId: string): void {
 
 export function clearSession(): void {
   if (!isBrowser()) return;
-  window.localStorage.removeItem(SESSION_TOKEN_KEY);
   window.localStorage.removeItem(ORG_ID_KEY);
   window.localStorage.removeItem(USER_KEY);
 }

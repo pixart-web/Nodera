@@ -43,8 +43,11 @@ web/
                                   not organization-scoped
       audit/page.tsx            full audit log
   lib/
-    api.ts                 fetch wrapper: bearer token + X-Nodera-Org headers, normalized ApiError
-    session.ts               localStorage-backed session/org/user state (client-only)
+    api.ts                 fetch wrapper: credentials:"include" (HttpOnly session cookie) +
+                                  X-CSRF-Token (mutating requests) + X-Nodera-Org headers,
+                                  normalized ApiError, central 401→/login redirect
+    session.ts               localStorage-backed non-sensitive "logged in as" hint + org id
+                                  (client-only) — the real session token is never stored here
     useApi.ts                 shared data-fetching hook: explicit loading/error, never a guessed
                                   value; optional `{ pollMs }` for background auto-refresh
     types.ts                   hand-written TS types mirroring the Go API's JSON shapes
@@ -53,12 +56,25 @@ web/
 
 ## Auth model
 
-The API is bearer-token based, not cookie-based (ADR-005), so there is no
-CSRF surface here — the session token lives in `localStorage`
-(`lib/session.ts`) and is attached as `Authorization: Bearer <token>` on
-every request. The organization a user is currently acting within is also
-client state (`X-Nodera-Org` header), matching the API's own design (one
-session, many organizations — see `docs/API.md`).
+As of the browser-authentication hardening pass, the human session lives
+in an `HttpOnly` cookie the API sets on login — this frontend never reads
+or stores the raw session token (see docs/SECURITY.md "Browser
+authentication" and [ADR-005's amendment](DECISIONS.md#adr-005-sessionstokens-via-first-party-identity-module-no-external-idp-dependency-in-the-foundation)).
+`lib/api.ts` sends `credentials: "include"` on every request so the
+browser attaches the cookie automatically, and attaches `X-CSRF-Token`
+(read from the separate, non-`HttpOnly` `nodera_csrf` cookie via
+`lib/session.ts`'s `getCSRFToken()`) on every mutating request — the
+double-submit CSRF check the API enforces for cookie-authenticated
+requests. A `401 UNAUTHENTICATED` response centrally clears the local
+"logged in" hint and redirects to `/login`, since the cookie itself
+(expired/revoked) is the real source of truth, not anything this code
+tracks. `lib/session.ts` still stores a non-sensitive user/org hint in
+`localStorage` purely for immediate client-side routing (skip the login
+page) — never the credential itself. The organization a user is currently
+acting within is also client state (`X-Nodera-Org` header), matching the
+API's own design (one session, many organizations — see `docs/API.md`).
+Machine/API-token clients are unaffected: `Authorization: Bearer` keeps
+working exactly as before, and this frontend simply doesn't use it.
 
 ## Generated types, `lib/types.ts` as a thin alias layer
 

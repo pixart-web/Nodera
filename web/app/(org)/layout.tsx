@@ -3,7 +3,8 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { clearSession, getCurrentOrgId, getSessionToken, getStoredUser } from "@/lib/session";
+import { api } from "@/lib/api";
+import { clearSession, getCurrentOrgId, getStoredUser } from "@/lib/session";
 
 const NAV = [
   { href: "/dashboard", label: "Dashboard" },
@@ -25,7 +26,7 @@ export default function OrgLayout({ children }: { children: React.ReactNode }) {
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    if (!getSessionToken()) {
+    if (!getStoredUser()) {
       router.replace("/login");
       return;
     }
@@ -42,7 +43,15 @@ export default function OrgLayout({ children }: { children: React.ReactNode }) {
 
   const user = getStoredUser();
 
-  function logout() {
+  async function logout() {
+    try {
+      await api.post("/api/v1/auth/logout", undefined, false);
+    } catch {
+      // Best-effort — even if the request fails, clear the local hint and
+      // send the user to /login; a stale server-side session left behind
+      // is bounded by its own TTL and every subsequent request from this
+      // browser will simply 401 with no cookie to send.
+    }
     clearSession();
     router.replace("/login");
   }

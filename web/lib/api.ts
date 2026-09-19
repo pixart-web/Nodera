@@ -1,10 +1,12 @@
 import type { ApiErrorBody } from "./types";
-import { getCurrentOrgId, getSessionToken } from "./session";
+import { clearSession, getCSRFToken, getCurrentOrgId } from "./session";
 
 // Defaults to the local dev API — override with NEXT_PUBLIC_NODERA_API_URL
 // for any other environment (see docs/DEPLOYMENT.md; no production URL is
 // assumed here per rule 30).
 const API_BASE = process.env.NEXT_PUBLIC_NODERA_API_URL ?? "http://localhost:8080";
+
+const MUTATING_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 
 export class ApiError extends Error {
   code: string;
@@ -30,10 +32,19 @@ interface RequestOptions {
 
 async function request<T>(path: string, opts: RequestOptions = {}): Promise<T> {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
+  const method = opts.method ?? "GET";
 
-  if (!opts.skipAuth) {
-    const token = getSessionToken();
-    if (token) headers["Authorization"] = `Bearer ${token}`;
+  // The human session lives in an HttpOnly cookie the browser attaches
+  // automatically (docs/SECURITY.md "Browser authentication") — this
+  // client never reads or sends a bearer token itself. `credentials:
+  // "include"` is what makes fetch actually send/accept that cookie on a
+  // cross-origin request (the API and the web app are different origins
+  // in dev, and typically different subdomains in production); the API's
+  // CORS layer must (and does) pair this with an exact-origin allow-list
+  // and Access-Control-Allow-Credentials, never a wildcard.
+  if (!opts.skipAuth && MUTATING_METHODS.has(method)) {
+    const csrf = getCSRFToken();
+    if (csrf) headers["X-CSRF-Token"] = csrf;
   }
   if (opts.withOrg) {
     const orgId = getCurrentOrgId();
@@ -41,8 +52,9 @@ async function request<T>(path: string, opts: RequestOptions = {}): Promise<T> {
   }
 
   const res = await fetch(`${API_BASE}${path}`, {
-    method: opts.method ?? "GET",
+    method,
     headers,
+    credentials: "include",
     body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
   });
 
@@ -55,9 +67,19 @@ async function request<T>(path: string, opts: RequestOptions = {}): Promise<T> {
 
   if (!res.ok) {
     const body = data as ApiErrorBody | undefined;
+    const code = body?.error?.code ?? "UNKNOWN_ERROR";
+    // The session cookie expired/was revoked server-side (not a CSRF
+    // failure, which is FORBIDDEN, not UNAUTHENTICATED) — the client-side
+    // "probably logged in" hint (lib/session.ts) is now stale. Clear it
+    // and send the user back to /login rather than leaving them staring
+    // at a page that will fail every subsequent call the same way.
+    if (res.status === 401 && code === "UNAUTHENTICATED" && !opts.skipAuth && typeof window !== "undefined") {
+      clearSession();
+      window.location.href = "/login";
+    }
     throw new ApiError(
       res.status,
-      body?.error?.code ?? "UNKNOWN_ERROR",
+      code,
       body?.error?.message ?? `request failed with status ${res.status}`,
       body?.error?.request_id,
     );

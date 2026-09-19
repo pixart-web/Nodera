@@ -180,6 +180,8 @@ func run() error {
 		createOrgRate:      createOrgRate,
 		changePasswordRate: changePasswordRate,
 		corsOrigins:        cfg.HTTP.CORSOrigins,
+		sessionTTL:         cfg.Auth.SessionTTL,
+		secureCookies:      cfg.Env == "production",
 	}
 
 	handler := newRouter(deps)
