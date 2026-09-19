@@ -136,8 +136,10 @@ tracked in `docs/ROADMAP.md` if that stops being true.
 | POST | `/api/v1/ai/chat` | session or token + org | Call the AI gateway with a profile key + messages (`ai.use`) |
 | GET | `/api/v1/ai/providers` | session or token + org | List the platform-wide provider registry (`ai.use`) |
 | POST | `/api/v1/ai/providers` | session or token + org | Register/update a provider (`ai.manage`) — platform-wide, see note below |
+| DELETE | `/api/v1/ai/providers/{key}` | session or token + org | Permanently delete a provider (`ai.manage`) — cascades to every model registered under it |
 | GET | `/api/v1/ai/models` | session or token + org | List the platform-wide model registry (`ai.use`) |
 | POST | `/api/v1/ai/models` | session or token + org | Register/update a model under an existing provider (`ai.manage`) |
+| DELETE | `/api/v1/ai/providers/{providerKey}/models/{modelIdentifier}` | session or token + org | Permanently delete a single model (`ai.manage`) |
 | GET | `/api/v1/secrets` | session or token + org | List secret metadata only — never values (`secrets.read`) |
 | PUT | `/api/v1/secrets/{key}` | session or token + org | Create or rotate a secret (`secrets.manage`) — `503 UNAVAILABLE` if the server has no `NODERA_SECRETS_ENCRYPTION_KEY` configured |
 | PATCH | `/api/v1/secrets/{key}/description` | session or token + org | Update a secret's description without touching its value (`secrets.manage`) |

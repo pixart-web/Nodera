@@ -1161,6 +1161,43 @@ scanning in CI (`govulncheck`, `npm audit`).
 - [x] Full backend test suite re-run clean (`go test ./... -race`)
 - [x] Docs (`API.md`, `FRONTEND.md`, `README.md`) updated
 
+**Phase 39** — this pass:
+- [x] `ai.DeleteProvider`/`DeleteModel` — found while widening the CRUD-gap
+      audit beyond tenancy (Phases 36-38) to `internal/ai/registry.go`:
+      `UpsertProvider`/`UpsertModel` can correct every other field of an
+      existing row, but nothing could ever remove one, so a mis-typed key
+      or a registration that's never going to be used stays in the
+      registry forever
+- [x] `DeleteProvider` cascades to every model registered under it
+      (`ai_models.provider_id` is `ON DELETE CASCADE`, migration 0006);
+      `DeleteModel` removes a single row. Neither touches
+      `ai_profiles.preferred_model_ids`/`fallback_model_ids` — those are
+      free-form `"provider_key/model_identifier"` text with no FK, so a
+      profile referencing a deleted provider/model fails closed at
+      resolve time (the router's existing behavior for any unresolvable
+      reference) rather than via a cascading delete or a dangling FK
+- [x] 5 new integration tests, passing under `-race` alongside the 2
+      pre-existing registry tests (7 total): delete-then-relist for both
+      a model and a provider (plus a second delete on each correctly
+      `NOT_FOUND`), the provider-delete-cascades-to-its-models case, and
+      a plain member without `ai.manage` forbidden from both
+- [x] 2 new HTTP routes (`DELETE /ai/providers/{key}`, `DELETE
+      /ai/providers/{providerKey}/models/{modelIdentifier}`) and OpenAPI
+      additions, validated with `@redocly/cli lint`;
+      `lib/api-types.generated.ts` regenerated
+- [x] `web/app/(org)/ai/page.tsx`: a "Delete" button per row in both the
+      Providers and Models tables; deleting a provider also reloads the
+      Models list so a cascaded row disappears in the same render rather
+      than needing a manual refresh
+- [x] Verified live end to end: registered a real test provider and a
+      model under it through the UI, deleted the model alone and
+      confirmed only it vanished, re-registered a model, then deleted the
+      provider and watched both the provider row and its model row
+      disappear together in one reload. Checked the browser console on a
+      fresh tab afterward — zero errors
+- [x] Full backend test suite re-run clean (`go test ./... -race`)
+- [x] Docs (`API.md`, `FRONTEND.md`, `README.md`) updated
+
 ## Next up
 
 1. **Concrete job types**: the worker dispatcher is real but nothing

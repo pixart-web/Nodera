@@ -137,8 +137,10 @@ func newRouter(d apiDeps) http.Handler {
 				r.Post("/ai/chat", d.handleAIChat)
 				r.Get("/ai/providers", d.handleListAIProviders)
 				r.Post("/ai/providers", d.handleUpsertAIProvider)
+				r.Delete("/ai/providers/{key}", d.handleDeleteAIProvider)
 				r.Get("/ai/models", d.handleListAIModels)
 				r.Post("/ai/models", d.handleUpsertAIModel)
+				r.Delete("/ai/providers/{providerKey}/models/{modelIdentifier}", d.handleDeleteAIModel)
 
 				r.Get("/secrets", d.handleListSecrets)
 				r.Put("/secrets/{key}", d.handleSetSecret)
@@ -1068,6 +1070,15 @@ func (d apiDeps) handleUpsertAIProvider(w http.ResponseWriter, r *http.Request) 
 	httpserver.WriteJSON(w, http.StatusOK, p)
 }
 
+func (d apiDeps) handleDeleteAIProvider(w http.ResponseWriter, r *http.Request) {
+	key := chi.URLParam(r, "key")
+	if err := d.ai.DeleteProvider(r.Context(), mustAuthContext(r), key); err != nil {
+		httpserver.WriteError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (d apiDeps) handleListAIModels(w http.ResponseWriter, r *http.Request) {
 	list, err := d.ai.ListModels(r.Context(), mustAuthContext(r))
 	if err != nil {
@@ -1088,6 +1099,16 @@ func (d apiDeps) handleUpsertAIModel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpserver.WriteJSON(w, http.StatusOK, m)
+}
+
+func (d apiDeps) handleDeleteAIModel(w http.ResponseWriter, r *http.Request) {
+	providerKey := chi.URLParam(r, "providerKey")
+	modelIdentifier := chi.URLParam(r, "modelIdentifier")
+	if err := d.ai.DeleteModel(r.Context(), mustAuthContext(r), providerKey, modelIdentifier); err != nil {
+		httpserver.WriteError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // --- secrets ---

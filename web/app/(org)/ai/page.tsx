@@ -587,6 +587,40 @@ export default function AIPage() {
     }
   }
 
+  const [deleteProviderError, setDeleteProviderError] = useState<string | null>(null);
+  const [deletingProviderKey, setDeletingProviderKey] = useState<string | null>(null);
+
+  async function deleteProvider(key: string) {
+    setDeleteProviderError(null);
+    setDeletingProviderKey(key);
+    try {
+      await api.del(`/api/v1/ai/providers/${encodeURIComponent(key)}`);
+      providers.reload();
+      models.reload();
+    } catch (err) {
+      setDeleteProviderError(err instanceof ApiError ? err.message : "Failed to delete provider");
+    } finally {
+      setDeletingProviderKey(null);
+    }
+  }
+
+  const [deleteModelError, setDeleteModelError] = useState<string | null>(null);
+  const [deletingModelKey, setDeletingModelKey] = useState<string | null>(null);
+
+  async function deleteModel(providerKey: string, modelIdentifier: string) {
+    const key = `${providerKey}/${modelIdentifier}`;
+    setDeleteModelError(null);
+    setDeletingModelKey(key);
+    try {
+      await api.del(`/api/v1/ai/providers/${encodeURIComponent(providerKey)}/models/${encodeURIComponent(modelIdentifier)}`);
+      models.reload();
+    } catch (err) {
+      setDeleteModelError(err instanceof ApiError ? err.message : "Failed to delete model");
+    } finally {
+      setDeletingModelKey(null);
+    }
+  }
+
   return (
     <div>
       <PageHeader
@@ -698,6 +732,7 @@ export default function AIPage() {
           />
         )}
         {providers.error && <ErrorBanner message={providers.error} />}
+        {deleteProviderError && <ErrorBanner message={deleteProviderError} />}
         <div className="card">
           {providers.loading ? (
             <div className="p-4 text-sm text-base-400">Loading…</div>
@@ -711,6 +746,7 @@ export default function AIPage() {
                   <th>Kind</th>
                   <th>Display name</th>
                   <th>Status</th>
+                  <th></th>
                 </tr>
               </thead>
               <tbody>
@@ -721,6 +757,15 @@ export default function AIPage() {
                     <td className="text-xs text-base-300">{p.display_name}</td>
                     <td>
                       <StatusBadge status={p.status} />
+                    </td>
+                    <td>
+                      <button
+                        className="text-xs text-base-400 hover:text-danger disabled:text-base-600"
+                        disabled={deletingProviderKey === p.key}
+                        onClick={() => deleteProvider(p.key)}
+                      >
+                        {deletingProviderKey === p.key ? "Deleting…" : "Delete"}
+                      </button>
                     </td>
                   </tr>
                 ))}
@@ -747,6 +792,7 @@ export default function AIPage() {
           />
         )}
         {models.error && <ErrorBanner message={models.error} />}
+        {deleteModelError && <ErrorBanner message={deleteModelError} />}
         <div className="card">
           {models.loading ? (
             <div className="p-4 text-sm text-base-400">Loading…</div>
@@ -761,20 +807,33 @@ export default function AIPage() {
                   <th>Display name</th>
                   <th>Context window</th>
                   <th>Status</th>
+                  <th></th>
                 </tr>
               </thead>
               <tbody>
-                {models.data!.map((m) => (
-                  <tr key={`${m.provider_key}/${m.model_identifier}`}>
-                    <td className="font-mono text-xs">{m.provider_key}</td>
-                    <td className="font-mono text-xs text-base-300">{m.model_identifier}</td>
-                    <td className="text-xs text-base-300">{m.display_name}</td>
-                    <td className="text-xs text-base-400">{m.context_window}</td>
-                    <td>
-                      <StatusBadge status={m.status} />
-                    </td>
-                  </tr>
-                ))}
+                {models.data!.map((m) => {
+                  const key = `${m.provider_key}/${m.model_identifier}`;
+                  return (
+                    <tr key={key}>
+                      <td className="font-mono text-xs">{m.provider_key}</td>
+                      <td className="font-mono text-xs text-base-300">{m.model_identifier}</td>
+                      <td className="text-xs text-base-300">{m.display_name}</td>
+                      <td className="text-xs text-base-400">{m.context_window}</td>
+                      <td>
+                        <StatusBadge status={m.status} />
+                      </td>
+                      <td>
+                        <button
+                          className="text-xs text-base-400 hover:text-danger disabled:text-base-600"
+                          disabled={deletingModelKey === key}
+                          onClick={() => deleteModel(m.provider_key, m.model_identifier)}
+                        >
+                          {deletingModelKey === key ? "Deleting…" : "Delete"}
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           )}

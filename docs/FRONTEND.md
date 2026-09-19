@@ -185,11 +185,15 @@ delete, with `privacy_level` as a `<select>` and `preferred_model_ids`/
 matching the Tools/Agents pages' convention — the inline Edit form shows
 `key` as a disabled input since it's immutable once created), and
 Providers/Models
-sections (list + register, `ai.manage`-gated server-side — the page always
-shows the forms and lets a `FORBIDDEN` response surface as an error banner
-rather than trying to pre-compute the caller's permissions client-side,
-same pattern as the Tools page's execute forms). The page explicitly notes
-that a provider/model row is only *discoverable*, not necessarily
+sections (list + register + delete, `ai.manage`-gated server-side — the
+page always shows the forms and lets a `FORBIDDEN` response surface as an
+error banner rather than trying to pre-compute the caller's permissions
+client-side, same pattern as the Tools page's execute forms). Deleting a
+provider through its row's "Delete" button removes every model registered
+under it too (the backend cascade), reflected in the Models table on the
+same reload — verified live by registering a test provider and model,
+deleting the provider, and confirming both rows disappeared together. The
+page explicitly notes that a provider/model row is only *discoverable*, not necessarily
 *callable* — that still depends on a matching Go adapter being registered
 at server boot (`docs/AI_ARCHITECTURE.md`).
 

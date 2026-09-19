@@ -99,6 +99,34 @@ func (s *Service) UpsertProvider(ctx context.Context, ac authctx.AuthContext, in
 	return p, nil
 }
 
+// DeleteProvider permanently removes a provider registry row — for
+// cleaning up a mis-registered key (Upsert can correct every other field,
+// but not the key itself) or one that will never be used. ai_models.
+// provider_id is ON DELETE CASCADE (migration 0006), so this also removes
+// every model registered under it; ai_profiles.preferred_model_ids/
+// fallback_model_ids are free-form "provider_key/model_identifier" text
+// with no FK, so a profile referencing a deleted provider fails closed at
+// resolve time (the router already handles an unresolvable reference this
+// way) rather than via a cascading delete or a dangling FK.
+func (s *Service) DeleteProvider(ctx context.Context, ac authctx.AuthContext, key string) error {
+	if err := rbac.Require(ac, permManage); err != nil {
+		return err
+	}
+	tag, err := s.pool.Exec(ctx, `DELETE FROM ai_providers WHERE key = $1`, key)
+	if err != nil {
+		return apierr.Wrap(apierr.CodeInternal, "failed to delete AI provider", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return apierr.NotFound("AI provider")
+	}
+	if err := s.audit.Record(ctx, ac, audit.Entry{
+		Action: "ai.provider.deleted", ResourceType: "ai_provider", ResourceID: key, Success: true,
+	}); err != nil {
+		logger.FromContext(ctx).Error("failed to write audit entry", "error", err)
+	}
+	return nil
+}
+
 func (s *Service) ListProviders(ctx context.Context, ac authctx.AuthContext) ([]ProviderInfo, error) {
 	if err := rbac.Require(ac, permUse); err != nil {
 		return nil, err
@@ -199,6 +227,32 @@ func (s *Service) UpsertModel(ctx context.Context, ac authctx.AuthContext, in Up
 	}
 
 	return m, nil
+}
+
+// DeleteModel permanently removes a single model registry row — the same
+// cleanup path DeleteProvider offers for a provider, scoped to one model
+// rather than everything under a provider.
+func (s *Service) DeleteModel(ctx context.Context, ac authctx.AuthContext, providerKey, modelIdentifier string) error {
+	if err := rbac.Require(ac, permManage); err != nil {
+		return err
+	}
+	tag, err := s.pool.Exec(ctx, `
+		DELETE FROM ai_models
+		WHERE model_identifier = $2
+		  AND provider_id = (SELECT id FROM ai_providers WHERE key = $1)
+	`, providerKey, modelIdentifier)
+	if err != nil {
+		return apierr.Wrap(apierr.CodeInternal, "failed to delete AI model", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return apierr.NotFound("AI model")
+	}
+	if err := s.audit.Record(ctx, ac, audit.Entry{
+		Action: "ai.model.deleted", ResourceType: "ai_model", ResourceID: providerKey + "/" + modelIdentifier, Success: true,
+	}); err != nil {
+		logger.FromContext(ctx).Error("failed to write audit entry", "error", err)
+	}
+	return nil
 }
 
 func (s *Service) ListModels(ctx context.Context, ac authctx.AuthContext) ([]ModelInfo, error) {

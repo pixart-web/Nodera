@@ -11,6 +11,7 @@ import (
 	"github.com/nodera/nodera/internal/ai/providers"
 	"github.com/nodera/nodera/internal/ai/providers/localecho"
 	"github.com/nodera/nodera/internal/ai/providers/ollama"
+	"github.com/nodera/nodera/internal/platform/apierr"
 	"github.com/nodera/nodera/internal/testhelpers"
 )
 
@@ -155,5 +156,130 @@ func TestAIRegistryListProvidersAndModels(t *testing.T) {
 		ProviderKey: "does-not-exist", ModelIdentifier: "x",
 	}); err == nil {
 		t.Fatal("expected UpsertModel to fail for an unregistered provider_key")
+	}
+}
+
+func TestAIRegistryDeleteModel(t *testing.T) {
+	pool := testhelpers.RequirePool(t)
+	ctx := context.Background()
+	h := newHarness(pool)
+	ac, _ := h.newOwnerContext(t, ctx, "registry-delete-model-owner@nodera.dev")
+
+	aiSvc := ai.New(pool, h.audit, localecho.New())
+
+	if _, err := aiSvc.UpsertProvider(ctx, ac, ai.UpsertProviderInput{
+		Key: "delete-model-test-provider", Kind: "cloud", DisplayName: "Test", Status: "active",
+	}); err != nil {
+		t.Fatalf("UpsertProvider: %v", err)
+	}
+	if _, err := aiSvc.UpsertModel(ctx, ac, ai.UpsertModelInput{
+		ProviderKey: "delete-model-test-provider", ModelIdentifier: "test-model",
+	}); err != nil {
+		t.Fatalf("UpsertModel: %v", err)
+	}
+
+	if err := aiSvc.DeleteModel(ctx, ac, "delete-model-test-provider", "test-model"); err != nil {
+		t.Fatalf("DeleteModel: %v", err)
+	}
+
+	models, err := aiSvc.ListModels(ctx, ac)
+	if err != nil {
+		t.Fatalf("ListModels: %v", err)
+	}
+	for _, m := range models {
+		if m.ProviderKey == "delete-model-test-provider" && m.ModelIdentifier == "test-model" {
+			t.Fatal("expected the deleted model to no longer appear in ListModels")
+		}
+	}
+
+	if err := aiSvc.DeleteModel(ctx, ac, "delete-model-test-provider", "test-model"); err == nil {
+		t.Fatal("expected deleting an already-deleted model to fail")
+	} else if ae, ok := err.(*apierr.Error); !ok || ae.Code != apierr.CodeNotFound {
+		t.Fatalf("expected NOT_FOUND, got %v", err)
+	}
+}
+
+// DeleteProvider cascades to every model registered under it (migration
+// 0006's ON DELETE CASCADE), not just the provider row itself.
+func TestAIRegistryDeleteProviderCascadesToModels(t *testing.T) {
+	pool := testhelpers.RequirePool(t)
+	ctx := context.Background()
+	h := newHarness(pool)
+	ac, _ := h.newOwnerContext(t, ctx, "registry-delete-provider-owner@nodera.dev")
+
+	aiSvc := ai.New(pool, h.audit, localecho.New())
+
+	if _, err := aiSvc.UpsertProvider(ctx, ac, ai.UpsertProviderInput{
+		Key: "delete-provider-test", Kind: "cloud", DisplayName: "Test", Status: "active",
+	}); err != nil {
+		t.Fatalf("UpsertProvider: %v", err)
+	}
+	if _, err := aiSvc.UpsertModel(ctx, ac, ai.UpsertModelInput{
+		ProviderKey: "delete-provider-test", ModelIdentifier: "cascaded-model",
+	}); err != nil {
+		t.Fatalf("UpsertModel: %v", err)
+	}
+
+	if err := aiSvc.DeleteProvider(ctx, ac, "delete-provider-test"); err != nil {
+		t.Fatalf("DeleteProvider: %v", err)
+	}
+
+	providersList, err := aiSvc.ListProviders(ctx, ac)
+	if err != nil {
+		t.Fatalf("ListProviders: %v", err)
+	}
+	for _, p := range providersList {
+		if p.Key == "delete-provider-test" {
+			t.Fatal("expected the deleted provider to no longer appear in ListProviders")
+		}
+	}
+
+	modelsList, err := aiSvc.ListModels(ctx, ac)
+	if err != nil {
+		t.Fatalf("ListModels: %v", err)
+	}
+	for _, m := range modelsList {
+		if m.ProviderKey == "delete-provider-test" {
+			t.Fatal("expected the deleted provider's model to be gone too (cascade)")
+		}
+	}
+
+	if err := aiSvc.DeleteProvider(ctx, ac, "delete-provider-test"); err == nil {
+		t.Fatal("expected deleting an already-deleted provider to fail")
+	} else if ae, ok := err.(*apierr.Error); !ok || ae.Code != apierr.CodeNotFound {
+		t.Fatalf("expected NOT_FOUND, got %v", err)
+	}
+}
+
+func TestAIRegistryDeleteRequiresManagePermission(t *testing.T) {
+	pool := testhelpers.RequirePool(t)
+	ctx := context.Background()
+	h := newHarness(pool)
+	ac, _ := h.newOwnerContext(t, ctx, "registry-delete-perm-owner@nodera.dev")
+
+	aiSvc := ai.New(pool, h.audit, localecho.New())
+
+	if _, err := aiSvc.UpsertProvider(ctx, ac, ai.UpsertProviderInput{
+		Key: "delete-perm-test", Kind: "cloud", DisplayName: "Test", Status: "active",
+	}); err != nil {
+		t.Fatalf("UpsertProvider: %v", err)
+	}
+	if _, err := aiSvc.UpsertModel(ctx, ac, ai.UpsertModelInput{
+		ProviderKey: "delete-perm-test", ModelIdentifier: "guarded-model",
+	}); err != nil {
+		t.Fatalf("UpsertModel: %v", err)
+	}
+
+	memberAC := h.newMemberContext(t, ctx, ac.OrganizationID, "registry-delete-perm-member@nodera.dev")
+
+	if err := aiSvc.DeleteModel(ctx, memberAC, "delete-perm-test", "guarded-model"); err == nil {
+		t.Fatal("expected a member without ai.manage to be forbidden from deleting a model")
+	} else if ae, ok := err.(*apierr.Error); !ok || ae.Code != apierr.CodeForbidden {
+		t.Fatalf("expected FORBIDDEN, got %v", err)
+	}
+	if err := aiSvc.DeleteProvider(ctx, memberAC, "delete-perm-test"); err == nil {
+		t.Fatal("expected a member without ai.manage to be forbidden from deleting a provider")
+	} else if ae, ok := err.(*apierr.Error); !ok || ae.Code != apierr.CodeForbidden {
+		t.Fatalf("expected FORBIDDEN, got %v", err)
 	}
 }

@@ -3299,6 +3299,72 @@
           }
         }
       }
+    },
+    "/api/v1/ai/providers/{key}": {
+      "delete": {
+        "tags": [
+          "ai"
+        ],
+        "summary": "Permanently delete an AI provider registry row (ai.manage) \u2014 cascades to every model registered under it",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OrgHeader"
+          },
+          {
+            "name": "key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Provider deleted"
+          },
+          "404": {
+            "description": "No provider registered with this key"
+          }
+        }
+      }
+    },
+    "/api/v1/ai/providers/{providerKey}/models/{modelIdentifier}": {
+      "delete": {
+        "tags": [
+          "ai"
+        ],
+        "summary": "Permanently delete a single AI model registry row (ai.manage)",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OrgHeader"
+          },
+          {
+            "name": "providerKey",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "modelIdentifier",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Model deleted"
+          },
+          "404": {
+            "description": "No such model registered under this provider"
+          }
+        }
+      }
     }
   },
   "components": {
