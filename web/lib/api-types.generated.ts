@@ -3999,6 +3999,60 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/platform/audit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List the platform-scope audit log (identity/auth events not tied to any organization) (platform.audit.read) */
+        get: {
+            parameters: {
+                query?: {
+                    limit?: components["parameters"]["Limit"];
+                    offset?: components["parameters"]["Offset"];
+                    resource_type?: string;
+                    action?: string;
+                    /** @description RFC3339 timestamp; only rows created at or after this time are returned. Unparsable/missing values are ignored, not rejected. */
+                    from?: string;
+                    /** @description RFC3339 timestamp; only rows created at or before this time are returned. Unparsable/missing values are ignored, not rejected. */
+                    to?: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Platform-scope audit records */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AuditRecord"][];
+                    };
+                };
+                /** @description Missing platform.audit.read */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -4316,6 +4370,10 @@ export interface components {
             id: string;
             /** Format: uuid */
             organization_id: string | null;
+            /** Format: uuid */
+            actor_user_id?: string | null;
+            /** Format: uuid */
+            actor_service_account_id?: string | null;
             actor_label: string;
             action: string;
             resource_type: string;

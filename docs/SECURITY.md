@@ -304,13 +304,67 @@ self-contained implementation.
 - `internal/identity`'s service-account and API-token lifecycle
   (create/disable/enable/update, create/revoke) is audited the same way —
   a raw API token value is never included in the recorded state, only its
-  prefix. `SignUp`/`Login`/`Logout`/`ChangePassword`/session management
-  are deliberately NOT audited: those run before an organization is
-  selected (`requireSession`, not `requireOrganization`), and
-  `audit.Query` always scopes by `organization_id`, so a NULL-org entry
-  would be written but could never be read back through any existing API
-  surface — writing unverifiable, effectively invisible rows was judged
-  worse than not writing them (`docs/ROADMAP.md` Phase 41).
+  prefix.
+
+## Platform vs organization audit — IMPLEMENTED
+
+`SignUp`/`Login`/`Logout`/`ChangePassword`/session-revocation
+(`internal/identity/identity.go`) run before an organization is ever
+selected (`requireSession`, not `requireOrganization` —
+`cmd/server/middleware.go`), so they were previously either not audited
+at all, or would have written a `NULL`-`organization_id` row that
+`audit.Query` (which always scopes by a specific `organization_id`) could
+never read back — writing unverifiable, effectively invisible rows was
+judged worse than not writing them (`docs/ROADMAP.md` Phase 41's original
+reasoning). Rather than forcing these events into the organization-scoped
+table with fake/null org semantics, or fabricating an organization to
+attribute them to, `internal/audit` now supports a genuine **platform
+scope**:
+
+- `audit.Record` already wrote `organization_id = NULL` when
+  `AuthContext.OrganizationID` is the zero value — that part didn't
+  change. What's new is `audit.QueryPlatform`, which reads exactly the
+  `organization_id IS NULL` slice, gated by the platform permission
+  `platform.audit.read` (`internal/platformauth`) rather than any
+  organization's own `audit.read` — seeing every user's authentication
+  history across the whole system is a platform-admin capability, never
+  something an organization's own audit permission implies. `GET
+  /api/v1/platform/audit` exposes it, with the same `resource_type`/
+  `action`/`from`/`to`/pagination filters `GET /api/v1/audit` has, minus
+  `X-Nodera-Org` (there is no organization to scope by).
+- `internal/identity/identity.go` now calls `audit.Record` (via its own
+  `recordIdentityAudit` helper) for: `identity.user.signed_up`,
+  `identity.user.logged_in`, `identity.user.login_failed` (only when the
+  attempted email matches a real account — an attempt against a
+  nonexistent email is never recorded, since there's no real user to
+  attribute it to and recording one keyed by the attempted email would
+  turn the audit log into an account-enumeration oracle for anyone who
+  can read it), `identity.user.logged_out`,
+  `identity.user.password_changed`, `identity.session.revoked`, and
+  `identity.session.revoked_all_others`. Metadata carries IP
+  address/user agent/failure reason where relevant — **never** a
+  password, session token, or any other credential value.
+- `audit.Record`'s returned `Record` type (`Query` and `QueryPlatform`
+  both) now also exposes `actor_user_id`/`actor_service_account_id` —
+  previously tracked in the schema and written, but never actually
+  returned to any caller, human-readable `actor_label` was the only
+  identity a query result carried.
+- Wiring note: `audit.Service` and `platformauth.Service` depend on each
+  other (`platformauth` writes its own grant/revoke audit entries;
+  `audit.QueryPlatform` checks a platform permission before returning
+  results), which Go's import rules don't allow as two constructor
+  arguments pointing at each other. `audit.Service.SetPlatformAuthorizer`
+  closes the cycle after both are constructed
+  (`cmd/server/main.go`) — see that type's doc comment for the exact
+  reasoning and wiring order.
+- Tested by `internal/platform_audit_test.go` end to end against real
+  Postgres: signup → login → a failed login (wrong password) → password
+  change → login again → logout, all six actions land in
+  `QueryPlatform`'s results with `organization_id` nil and
+  `actor_user_id` correctly identifying the subject user; the same
+  records never appear in an ordinary organization's `Query`; a caller
+  without `platform.audit.read` (even a full organization owner) is
+  forbidden from `QueryPlatform`.
 
 ## Rate limiting — IMPLEMENTED (login, signup, AI chat, org creation, password change)
 

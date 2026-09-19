@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/nodera/nodera/internal/platform/apierr"
@@ -17,11 +18,34 @@ import (
 )
 
 type Service struct {
-	pool *pgxpool.Pool
+	pool     *pgxpool.Pool
+	platform PlatformAuthorizer
 }
 
 func New(pool *pgxpool.Pool) *Service {
 	return &Service{pool: pool}
+}
+
+// PlatformAuthorizer checks platform-scoped permissions (internal/platformauth)
+// — defined locally, not imported, because platformauth itself depends on
+// this package (for the audit.Entry type its own writes use), and Go
+// forbids the resulting import cycle. SetPlatformAuthorizer exists
+// instead of a New() constructor parameter for the same reason:
+// audit.Service and platformauth.Service each need the other
+// (platformauth writes its own grant/revoke audit entries; audit.
+// QueryPlatform checks a platform permission before returning
+// platform-scope rows), so cmd/server/main.go constructs both, then wires
+// this one back in — see its comment there for the exact order.
+type PlatformAuthorizer interface {
+	Require(ctx context.Context, ac authctx.AuthContext, key string) error
+}
+
+// SetPlatformAuthorizer wires the platform-authorization check
+// QueryPlatform needs. Until called, QueryPlatform fails closed
+// (CodeInternal) rather than silently skipping the permission check —
+// see requirePlatformPermission.
+func (s *Service) SetPlatformAuthorizer(p PlatformAuthorizer) {
+	s.platform = p
 }
 
 // Entry describes a single audit event to record. PreviousState and
@@ -104,18 +128,20 @@ func (s *Service) Record(ctx context.Context, ac authctx.AuthContext, e Entry) e
 	return nil
 }
 
-// Record types returned by Query.
+// Record types returned by Query/QueryPlatform.
 type Record struct {
-	ID             uuid.UUID  `json:"id"`
-	OrganizationID *uuid.UUID `json:"organization_id"`
-	ActorLabel     string     `json:"actor_label"`
-	Action         string     `json:"action"`
-	ResourceType   string     `json:"resource_type"`
-	ResourceID     string     `json:"resource_id"`
-	Source         string     `json:"source"`
-	CorrelationID  string     `json:"correlation_id"`
-	Success        bool       `json:"success"`
-	CreatedAt      time.Time  `json:"created_at"`
+	ID                    uuid.UUID  `json:"id"`
+	OrganizationID        *uuid.UUID `json:"organization_id"`
+	ActorUserID           *uuid.UUID `json:"actor_user_id,omitempty"`
+	ActorServiceAccountID *uuid.UUID `json:"actor_service_account_id,omitempty"`
+	ActorLabel            string     `json:"actor_label"`
+	Action                string     `json:"action"`
+	ResourceType          string     `json:"resource_type"`
+	ResourceID            string     `json:"resource_id"`
+	Source                string     `json:"source"`
+	CorrelationID         string     `json:"correlation_id"`
+	Success               bool       `json:"success"`
+	CreatedAt             time.Time  `json:"created_at"`
 }
 
 // QueryFilter narrows a Query call. OrganizationID is required — audit.Query
@@ -154,8 +180,7 @@ func (s *Service) Query(ctx context.Context, ac authctx.AuthContext, f QueryFilt
 	}
 
 	rows, err := s.pool.Query(ctx, `
-		SELECT id, organization_id, actor_label, action, resource_type,
-		       COALESCE(resource_id, ''), source, COALESCE(correlation_id, ''), success, created_at
+		SELECT `+recordColumns+`
 		FROM audit_log
 		WHERE organization_id = $1
 		  AND ($2 = '' OR resource_type = $2)
@@ -171,12 +196,68 @@ func (s *Service) Query(ctx context.Context, ac authctx.AuthContext, f QueryFilt
 		return nil, apierr.Wrap(apierr.CodeInternal, "failed to query audit log", err)
 	}
 	defer rows.Close()
+	return scanRecords(rows)
+}
 
+const platformAuditPermission = "platform.audit.read"
+
+// QueryPlatform queries the platform-scope slice of the audit log —
+// rows with organization_id IS NULL, written for identity events that
+// happen before an organization is ever selected (signup, login,
+// logout, password change, session revocation — see
+// internal/identity/identity.go) and so cannot be attributed to any one
+// organization. These were previously either not audited at all or
+// would have been written unqueryable (Query always filters by a
+// specific organization_id) — see docs/SECURITY.md "Platform vs
+// organization audit" for the full reasoning. Requires the platform
+// permission platform.audit.read (internal/platformauth), never an
+// organization permission — seeing every user's authentication history
+// across the whole system is a platform-admin capability, not something
+// any organization's own audit.read grants.
+func (s *Service) QueryPlatform(ctx context.Context, ac authctx.AuthContext, f QueryFilter) ([]Record, error) {
+	if s.platform == nil {
+		return nil, apierr.New(apierr.CodeInternal, "platform audit query unavailable: no platform authorizer wired")
+	}
+	if err := s.platform.Require(ctx, ac, platformAuditPermission); err != nil {
+		return nil, err
+	}
+	if f.Limit <= 0 {
+		f.Limit = 50
+	} else if f.Limit > 1000 {
+		f.Limit = 1000
+	}
+	if !f.From.IsZero() && !f.To.IsZero() && f.From.After(f.To) {
+		return nil, apierr.Validation("from must not be after to")
+	}
+
+	rows, err := s.pool.Query(ctx, `
+		SELECT `+recordColumns+`
+		FROM audit_log
+		WHERE organization_id IS NULL
+		  AND ($1 = '' OR resource_type = $1)
+		  AND ($2 = '' OR resource_id = $2)
+		  AND ($3 = '' OR action = $3)
+		  AND ($4::timestamptz IS NULL OR created_at >= $4)
+		  AND ($5::timestamptz IS NULL OR created_at <= $5)
+		ORDER BY created_at DESC
+		LIMIT $6 OFFSET $7
+	`, f.ResourceType, f.ResourceID, f.Action, nullableTime(f.From), nullableTime(f.To), f.Limit, f.Offset)
+	if err != nil {
+		return nil, apierr.Wrap(apierr.CodeInternal, "failed to query platform audit log", err)
+	}
+	defer rows.Close()
+	return scanRecords(rows)
+}
+
+const recordColumns = `id, organization_id, actor_user_id, actor_service_account_id, actor_label,
+	       action, resource_type, COALESCE(resource_id, ''), source, COALESCE(correlation_id, ''), success, created_at`
+
+func scanRecords(rows pgx.Rows) ([]Record, error) {
 	var out []Record
 	for rows.Next() {
 		var r Record
-		if err := rows.Scan(&r.ID, &r.OrganizationID, &r.ActorLabel, &r.Action, &r.ResourceType,
-			&r.ResourceID, &r.Source, &r.CorrelationID, &r.Success, &r.CreatedAt); err != nil {
+		if err := rows.Scan(&r.ID, &r.OrganizationID, &r.ActorUserID, &r.ActorServiceAccountID, &r.ActorLabel,
+			&r.Action, &r.ResourceType, &r.ResourceID, &r.Source, &r.CorrelationID, &r.Success, &r.CreatedAt); err != nil {
 			return nil, apierr.Wrap(apierr.CodeInternal, "failed to scan audit record", err)
 		}
 		out = append(out, r)

@@ -22,6 +22,7 @@ import (
 	"github.com/nodera/nodera/internal/audit"
 	"github.com/nodera/nodera/internal/platform/apierr"
 	"github.com/nodera/nodera/internal/platform/authctx"
+	"github.com/nodera/nodera/internal/platform/logger"
 )
 
 // PermissionResolver is the narrow interface identity needs from rbac to
@@ -43,19 +44,43 @@ type Service struct {
 	audit      AuditRecorder
 }
 
-// New wires the identity service. audit is used only for the subset of
-// identity operations that already carry a resolved organization (API
-// tokens, service accounts — see apitoken.go/serviceaccount.go); SignUp,
-// Login, Logout, UpdateProfile, ChangePassword, and session management are
-// deliberately not audited here even though they mutate state — they run
-// before an organization is selected (requireSession, not
-// requireOrganization — cmd/server/router.go), and audit.Query always
-// scopes by organization_id, so a NULL-org entry would be written but
-// could never be read back through any existing API surface. Auditing
-// them would be writing unverifiable, effectively invisible rows — see
-// docs/ROADMAP.md Phase 41 for the reasoning.
+// New wires the identity service. SignUp, Login, Logout, ChangePassword,
+// and session-revocation methods below now write real audit entries too
+// (docs/SECURITY.md "Platform vs organization audit") — they run before
+// an organization is ever selected (requireSession, not
+// requireOrganization — cmd/server/router.go), so those entries carry no
+// organization_id (audit.Record already supports this: a zero-value
+// AuthContext.OrganizationID writes NULL) and are queryable only via
+// audit.QueryPlatform (platform.audit.read), not the ordinary
+// organization-scoped audit.Query. This was previously a documented gap
+// (docs/ROADMAP.md Phase 41): writing such rows without a way to read
+// them back would have been pointless; QueryPlatform closes that.
 func New(pool *pgxpool.Pool, rbac PermissionResolver, sessionTTL time.Duration, auditRecorder AuditRecorder) *Service {
 	return &Service{pool: pool, rbac: rbac, sessionTTL: sessionTTL, audit: auditRecorder}
+}
+
+// platformAuditContext builds the platform-scope AuthContext (no
+// organization) identity's own audit.Record calls use — OrganizationID is
+// deliberately left at its zero value (uuid.Nil), which audit.Record
+// writes as a NULL organization_id.
+func platformAuditContext(userID uuid.UUID) authctx.AuthContext {
+	return authctx.AuthContext{ActorType: authctx.ActorUser, ActorID: userID}
+}
+
+// recordIdentityAudit is a small, deliberately-lenient wrapper around
+// audit.Record for the identity methods below: a failure to write the
+// audit entry must never fail (or roll back) the identity operation it
+// describes — the same tradeoff audit.Service.Record's own doc comment
+// establishes for every other domain, applied consistently here since
+// these calls have no logger.FromContext-wired request context to log
+// through the way HTTP-handler-adjacent code does.
+func (s *Service) recordIdentityAudit(ctx context.Context, userID uuid.UUID, action string, success bool, metadata map[string]any) {
+	if err := s.audit.Record(ctx, platformAuditContext(userID), audit.Entry{
+		Action: action, ResourceType: "user", ResourceID: userID.String(),
+		Success: success, Metadata: metadata,
+	}); err != nil {
+		logger.FromContext(ctx).Error("failed to write audit entry", "error", err, "action", action)
+	}
 }
 
 type User struct {
@@ -133,6 +158,8 @@ func (s *Service) SignUp(ctx context.Context, email, password, displayName strin
 	if err := tx.Commit(ctx); err != nil {
 		return User{}, apierr.Wrap(apierr.CodeInternal, "failed to commit transaction", err)
 	}
+
+	s.recordIdentityAudit(ctx, u.ID, "identity.user.signed_up", true, map[string]any{"email": u.Email})
 
 	return u, nil
 }
@@ -230,6 +257,9 @@ func (s *Service) ChangePassword(ctx context.Context, userID uuid.UUID, currentS
 	if err := tx.Commit(ctx); err != nil {
 		return apierr.Wrap(apierr.CodeInternal, "failed to commit transaction", err)
 	}
+
+	s.recordIdentityAudit(ctx, userID, "identity.user.password_changed", true, nil)
+
 	return nil
 }
 
@@ -294,6 +324,9 @@ func (s *Service) RevokeSession(ctx context.Context, userID, sessionID uuid.UUID
 	if tag.RowsAffected() == 0 {
 		return apierr.NotFound("session")
 	}
+
+	s.recordIdentityAudit(ctx, userID, "identity.session.revoked", true, map[string]any{"session_id": sessionID.String()})
+
 	return nil
 }
 
@@ -316,6 +349,9 @@ func (s *Service) RevokeAllOtherSessions(ctx context.Context, userID uuid.UUID, 
 	`, userID, currentSessionID); err != nil {
 		return apierr.Wrap(apierr.CodeInternal, "failed to revoke other sessions", err)
 	}
+
+	s.recordIdentityAudit(ctx, userID, "identity.session.revoked_all_others", true, nil)
+
 	return nil
 }
 
@@ -337,6 +373,7 @@ func (s *Service) Login(ctx context.Context, email, password, ipAddress, userAge
 	}
 
 	if u.Status != "active" {
+		s.recordIdentityAudit(ctx, u.ID, "identity.user.login_failed", false, map[string]any{"reason": "account_disabled", "ip_address": ipAddress})
 		return "", User{}, apierr.Forbidden("account is disabled")
 	}
 
@@ -345,6 +382,15 @@ func (s *Service) Login(ctx context.Context, email, password, ipAddress, userAge
 		return "", User{}, apierr.Wrap(apierr.CodeInternal, "failed to verify password", err)
 	}
 	if !ok {
+		// Only recorded when the account itself is real (we already have
+		// u.ID at this point) — a nonexistent email returns
+		// ErrInvalidCredentials above without ever reaching here, so no
+		// audit row is written for it. This isn't a coverage gap: there is
+		// no real user to attribute a "failed login" to for an email that
+		// was never signed up, and writing a row keyed by the attempted
+		// email instead would turn the audit log into an account-
+		// enumeration oracle for anyone who can read it.
+		s.recordIdentityAudit(ctx, u.ID, "identity.user.login_failed", false, map[string]any{"reason": "invalid_password", "ip_address": ipAddress})
 		return "", User{}, ErrInvalidCredentials
 	}
 
@@ -361,18 +407,31 @@ func (s *Service) Login(ctx context.Context, email, password, ipAddress, userAge
 		return "", User{}, apierr.Wrap(apierr.CodeInternal, "failed to create session", err)
 	}
 
+	s.recordIdentityAudit(ctx, u.ID, "identity.user.logged_in", true, map[string]any{"ip_address": ipAddress, "user_agent": userAgent})
+
 	return token, u, nil
 }
 
 // Logout revokes a session by its raw token.
 func (s *Service) Logout(ctx context.Context, token string) error {
 	tokenHash := hashToken(token)
+	userID, _, lookupErr := s.sessionUser(ctx, token)
+
 	_, err := s.pool.Exec(ctx, `
 		UPDATE sessions SET revoked_at = now() WHERE token_hash = $1 AND revoked_at IS NULL
 	`, tokenHash)
 	if err != nil {
 		return apierr.Wrap(apierr.CodeInternal, "failed to revoke session", err)
 	}
+
+	// Only recorded when the token resolved to a real, still-valid
+	// session — an already-invalid/expired token has no user to
+	// attribute the entry to, and the UPDATE above already correctly
+	// no-ops for it either way.
+	if lookupErr == nil {
+		s.recordIdentityAudit(ctx, userID, "identity.user.logged_out", true, nil)
+	}
+
 	return nil
 }
 

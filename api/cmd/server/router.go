@@ -98,6 +98,7 @@ func newRouter(d apiDeps) http.Handler {
 			r.Get("/platform/permissions", d.handlePlatformListCatalog)
 			r.Get("/platform/my-permissions", d.handlePlatformListMine)
 			r.Get("/platform/admins", d.handlePlatformListGrants)
+			r.Get("/platform/audit", d.handlePlatformListAudit)
 			r.Post("/platform/admins/{userID}/permissions/{key}", d.handlePlatformGrant)
 			r.Delete("/platform/admins/{userID}/permissions/{key}", d.handlePlatformRevoke)
 
@@ -742,6 +743,23 @@ func (d apiDeps) handlePlatformListMine(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	httpserver.WriteJSON(w, http.StatusOK, list)
+}
+
+func (d apiDeps) handlePlatformListAudit(w http.ResponseWriter, r *http.Request) {
+	p := httpserver.ParsePagination(r)
+	records, err := d.audit.QueryPlatform(r.Context(), platformAuthContext(r), audit.QueryFilter{
+		ResourceType: r.URL.Query().Get("resource_type"),
+		Action:       r.URL.Query().Get("action"),
+		From:         parseRFC3339Query(r, "from"),
+		To:           parseRFC3339Query(r, "to"),
+		Limit:        p.Limit + 1,
+		Offset:       p.Offset,
+	})
+	if err != nil {
+		httpserver.WriteError(w, r, err)
+		return
+	}
+	httpserver.WriteJSON(w, http.StatusOK, httpserver.NewPage(records, p))
 }
 
 func (d apiDeps) handlePlatformListGrants(w http.ResponseWriter, r *http.Request) {

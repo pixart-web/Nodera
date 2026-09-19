@@ -1916,6 +1916,78 @@ the certificate-inspection response as a reachability oracle.
 - [x] Docs: `docs/SECURITY.md` gained a full "Outbound network / SSRF
       policy" section; `README.md` updated.
 
+## Hardening pass (post-Phase-50): P1 — platform / identity audit
+
+`SignUp`/`Login`/`Logout`/`ChangePassword`/session-revocation run before
+an organization is ever selected, so they were a documented gap (Phase
+41's reasoning): auditing them would write `organization_id = NULL`
+rows that `audit.Query` — always scoped by one specific
+`organization_id` — could never read back. Writing unverifiable,
+invisible rows was correctly judged worse than not writing them at the
+time, but the master review flagged the underlying gap as real: identity
+security events (who logged in, who failed to, who changed their
+password, who revoked which session) simply weren't auditable anywhere.
+
+- [x] `internal/audit`: `Record`'s already-existing nullable
+      `organization_id` handling is unchanged; new `QueryPlatform` reads
+      exactly the `organization_id IS NULL` slice, gated by the new
+      platform permission `platform.audit.read`
+      (`internal/platformauth`, migration `0019`) rather than any
+      organization's own `audit.read`. `Record` (the type both `Query`
+      and `QueryPlatform` return) gained `actor_user_id`/
+      `actor_service_account_id` — tracked in the schema and written
+      since day one, but never actually returned to any caller before
+      this.
+- [x] `internal/identity/identity.go`: `SignUp`, `Login` (success and
+      failure — but only a failure against a real, existing account;
+      a nonexistent email is never recorded, to avoid turning the audit
+      log into an account-enumeration oracle), `Logout`,
+      `ChangePassword`, `RevokeSession`, and `RevokeAllOtherSessions` now
+      write real audit entries via a small `recordIdentityAudit` helper.
+      Metadata carries IP/user-agent/failure-reason where relevant —
+      never a password or session token.
+- [x] Wiring: `audit.Service` and `platformauth.Service` depend on each
+      other (platform writes its own grant/revoke audit entries; audit's
+      `QueryPlatform` checks a platform permission), which Go doesn't
+      allow as mutual constructor arguments. `audit.Service.SetPlatformAuthorizer`
+      closes the cycle after both are constructed
+      (`cmd/server/main.go`) — documented in `audit.PlatformAuthorizer`'s
+      doc comment along with why.
+- [x] `GET /api/v1/platform/audit` (same filters as `GET /api/v1/audit`,
+      minus `X-Nodera-Org`), OpenAPI updated (`AuditRecord` gained
+      `actor_user_id`/`actor_service_account_id`, new path added),
+      frontend types regenerated, `tsc`/`npm run build` clean. No
+      frontend UI added for the platform audit view in this pass — the
+      API is real and tested; the UI is a follow-up, same posture as the
+      platform-authorization pass's admin-management UI.
+- [x] `internal/platform_audit_test.go` — signup → login → failed login
+      → password change → login → logout all land in `QueryPlatform`'s
+      results with `organization_id` nil and `actor_user_id` correctly
+      identifying the subject, against real Postgres; the same records
+      never leak into an ordinary organization's `Query`; a caller
+      without `platform.audit.read` (even a full organization owner) is
+      forbidden.
+- [x] **Real regression caught and fixed while verifying this pass**:
+      running the full suite (`go test ./... -race`) started failing
+      intermittently with `sessions_user_id_fkey`/
+      `audit_log_actor_user_id_fkey` violations — not a bug in this
+      change's logic, but a pre-existing test-infrastructure hazard this
+      pass's new `cmd/server/cookie_csrf_test.go` (added in the previous
+      hardening entry) newly triggered: every package's integration
+      tests share one real Postgres database and truncate it at the
+      start of each test (`internal/testhelpers.RequirePool`), and Go
+      runs different packages' tests concurrently by default, so two
+      packages' truncations can race each other's in-flight fixtures.
+      This was latent as long as only one package (`internal`) had
+      DB-touching tests; `cmd/server` having its own tipped it over.
+      Fixed by adding `-p 1` (`.github/workflows/ci.yml` and
+      `README.md`'s test instructions) — packages run sequentially, no
+      code change needed since nothing was actually racing within a
+      package, only across them.
+- [x] Docs: `docs/SECURITY.md` gained a full "Platform vs organization
+      audit" section; `README.md` updated (both the audit log status row
+      and the `-p 1` testing note).
+
 ## Next up
 
 1. **Concrete job types**: the worker dispatcher is real but nothing

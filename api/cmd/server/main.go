@@ -77,9 +77,16 @@ func run() error {
 	}
 	log.Info("migrations applied", "count", len(migs))
 
+	// auditSvc and platformSvc need each other (platformSvc writes its own
+	// grant/revoke audit entries; auditSvc.QueryPlatform checks a platform
+	// permission before returning platform-scope rows) — SetPlatformAuthorizer
+	// closes that cycle after both are constructed, since Go doesn't allow
+	// them to take each other as constructor arguments. See
+	// audit.PlatformAuthorizer's doc comment.
 	auditSvc := audit.New(pool)
 	rbacSvc := rbac.New(pool, auditSvc)
 	platformSvc := platformauth.New(pool, auditSvc)
+	auditSvc.SetPlatformAuthorizer(platformSvc)
 	identitySvc := identity.New(pool, rbacSvc, cfg.Auth.SessionTTL, auditSvc)
 	tenancySvc := tenancy.New(pool, identitySvc, auditSvc)
 	infraSvc := infrastructure.New(pool, auditSvc)

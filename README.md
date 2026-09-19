@@ -29,7 +29,7 @@ schema/interfaces, no production backend yet) · **PLANNED** (not started).
 | Identity (signup/login/sessions) | IMPLEMENTED | Argon2id passwords, opaque revocable sessions, self-service profile update + password change (revokes other sessions, not the current one), self-service session listing + individual revocation ("log out that device") or bulk revocation ("log out all other devices") |
 | Tenancy (organizations, membership) | IMPLEMENTED | Rename/change slug, add/remove members (`organization.manage`), self-service leave for any member; refuses to remove or let leave an organization's last remaining `owner` |
 | RBAC | IMPLEMENTED | Seeded owner/admin/member roles plus org-scoped custom roles, granular permission catalog; list/create/delete roles, list members, add an existing account as a member, and assign/revoke a member's role via API + UI (`organization.manage`, no privilege escalation) |
-| Audit log | IMPLEMENTED | Append-only, tenant-scoped query, filterable by resource type/id, action, and time range (`?from=`/`?to=`, RFC3339) |
+| Audit log | IMPLEMENTED | Append-only, tenant-scoped query, filterable by resource type/id, action, and time range (`?from=`/`?to=`, RFC3339); a separate platform scope (`GET /api/v1/platform/audit`, `platform.audit.read`) now covers identity/auth events (signup, login, failed login, logout, password change, session revocation) that happen before an organization is selected — see docs/SECURITY.md "Platform vs organization audit" |
 | Infrastructure (nodes) | IMPLEMENTED | Provider-agnostic node inventory (register/list/get/update), status reporting (what a future Node Agent heartbeat would call) + decommission (terminal, row kept for history) |
 | Applications/services | IMPLEMENTED | Registration/inventory, editable fields, status reporting, deregistration (terminal, row kept for history) — no deployment execution yet |
 | API tokens | IMPLEMENTED | User-owned or service-account-owned, scope-limited (cannot exceed creator's own permissions); self-owned rename (metadata only — scopes fixed at mint time); org-admin can list/revoke any token in the org; create/update/revoke write real audit entries (never the raw token value) |
@@ -109,8 +109,16 @@ Postgres) are skipped automatically unless `NODERA_TEST_DATABASE_URL` is set:
 ```bash
 docker exec <postgres-container> psql -U nodera -d nodera -c "CREATE DATABASE nodera_test;"
 export NODERA_TEST_DATABASE_URL=postgres://nodera:nodera_dev_password@localhost:5432/nodera_test?sslmode=disable
-go test ./...
+go test ./... -p 1
 ```
+
+`-p 1` matters once `NODERA_TEST_DATABASE_URL` is set: every package's integration
+tests share that one real database and truncate it at the start of each test
+(`internal/testhelpers.RequirePool`), so running packages concurrently (Go's
+default) can race one package's truncation against another's in-flight
+fixtures. Without `-p 1`, `go test ./...` is not flaky when only one package
+has DB-touching tests, but is once more than one does (as of `cmd/server`'s
+cookie/CSRF tests and `internal`'s integration tests both existing).
 
 ## Documentation
 

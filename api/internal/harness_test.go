@@ -36,6 +36,8 @@ type testHarness struct {
 func newHarness(pool *pgxpool.Pool) *testHarness {
 	auditSvc := audit.New(pool)
 	rbacSvc := rbac.New(pool, auditSvc)
+	platformSvc := platformauth.New(pool, auditSvc)
+	auditSvc.SetPlatformAuthorizer(platformSvc)
 	identitySvc := identity.New(pool, rbacSvc, 24*time.Hour, auditSvc)
 	return &testHarness{
 		pool:     pool,
@@ -43,7 +45,7 @@ func newHarness(pool *pgxpool.Pool) *testHarness {
 		tenancy:  tenancy.New(pool, identitySvc, auditSvc),
 		audit:    auditSvc,
 		rbac:     rbacSvc,
-		platform: platformauth.New(pool, auditSvc),
+		platform: platformSvc,
 	}
 }
 

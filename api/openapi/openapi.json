@@ -3740,6 +3740,79 @@
           }
         }
       }
+    },
+    "/api/v1/platform/audit": {
+      "get": {
+        "tags": [
+          "platform"
+        ],
+        "summary": "List the platform-scope audit log (identity/auth events not tied to any organization) (platform.audit.read)",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Limit"
+          },
+          {
+            "$ref": "#/components/parameters/Offset"
+          },
+          {
+            "name": "resource_type",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "action",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "description": "RFC3339 timestamp; only rows created at or after this time are returned. Unparsable/missing values are ignored, not rejected.",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "description": "RFC3339 timestamp; only rows created at or before this time are returned. Unparsable/missing values are ignored, not rejected.",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Platform-scope audit records",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/AuditRecord"
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Missing platform.audit.read",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -4943,6 +5016,16 @@
             "format": "uuid"
           },
           "organization_id": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "actor_user_id": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "actor_service_account_id": {
             "type": "string",
             "format": "uuid",
             "nullable": true

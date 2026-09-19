@@ -61,7 +61,16 @@ jobs:
 
       - name: go test
         working-directory: api
-        run: go test ./... -race
+        # -p 1: integration tests across every package share one real
+        # Postgres database and truncate it at the start of each test
+        # (internal/testhelpers.RequirePool) — running packages
+        # concurrently (Go's default) races two packages' truncations
+        # against each other's in-flight fixtures (a user created by one
+        # package's test can be truncated away mid-test by another
+        # package's setup), producing flaky FK-violation failures that
+        # have nothing to do with the code under test. See
+        # docs/DATABASE.md "Running tests".
+        run: go test ./... -race -p 1
 
       - name: govulncheck
         working-directory: api
