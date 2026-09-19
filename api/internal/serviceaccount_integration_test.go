@@ -369,3 +369,101 @@ func TestServiceAccount_WritesAuditEntriesForFullLifecycle(t *testing.T) {
 		}
 	}
 }
+
+func TestServiceAccount_DeleteRequiresDisabledFirst(t *testing.T) {
+	pool := testhelpers.RequirePool(t)
+	ctx := context.Background()
+	h := newHarness(pool)
+	ac, _ := h.newOwnerContext(t, ctx, "sa-delete-owner@nodera.dev")
+
+	sa, err := h.identity.CreateServiceAccount(ctx, ac, "to-delete-bot", "")
+	if err != nil {
+		t.Fatalf("CreateServiceAccount: %v", err)
+	}
+
+	// A newly created service account starts active — Delete must refuse
+	// it, not just rely on a schema default.
+	if err := h.identity.DeleteServiceAccount(ctx, ac, sa.ID); err == nil {
+		t.Fatal("expected deleting an active service account to fail")
+	} else if ae, ok := err.(*apierr.Error); !ok || ae.Code != apierr.CodeConflict {
+		t.Fatalf("expected CONFLICT, got %v", err)
+	}
+
+	if err := h.identity.DisableServiceAccount(ctx, ac, sa.ID); err != nil {
+		t.Fatalf("DisableServiceAccount: %v", err)
+	}
+	if err := h.identity.DeleteServiceAccount(ctx, ac, sa.ID); err != nil {
+		t.Fatalf("DeleteServiceAccount: %v", err)
+	}
+
+	list, err := h.identity.ListServiceAccounts(ctx, ac)
+	if err != nil {
+		t.Fatalf("ListServiceAccounts: %v", err)
+	}
+	for _, s := range list {
+		if s.ID == sa.ID {
+			t.Fatalf("expected the deleted service account to no longer appear, got %+v", s)
+		}
+	}
+
+	if err := h.identity.DeleteServiceAccount(ctx, ac, sa.ID); err == nil {
+		t.Fatal("expected deleting an already-deleted service account to fail")
+	} else if ae, ok := err.(*apierr.Error); !ok || ae.Code != apierr.CodeNotFound {
+		t.Fatalf("expected NOT_FOUND, got %v", err)
+	}
+}
+
+// A hard delete cascades to every token the account ever held (migration
+// 0001's ON DELETE CASCADE), including ones already revoked — real
+// verification, not an assumption about the schema.
+func TestServiceAccount_DeleteCascadesToTokens(t *testing.T) {
+	pool := testhelpers.RequirePool(t)
+	ctx := context.Background()
+	h := newHarness(pool)
+	ac, _ := h.newOwnerContext(t, ctx, "sa-delete-cascade-owner@nodera.dev")
+
+	sa, err := h.identity.CreateServiceAccount(ctx, ac, "cascade-bot", "")
+	if err != nil {
+		t.Fatalf("CreateServiceAccount: %v", err)
+	}
+	if _, _, err := h.identity.CreateAPITokenForServiceAccount(ctx, ac, sa.ID, "cascade-key", []string{"infrastructure.read"}, nil); err != nil {
+		t.Fatalf("CreateAPITokenForServiceAccount: %v", err)
+	}
+
+	if err := h.identity.DisableServiceAccount(ctx, ac, sa.ID); err != nil {
+		t.Fatalf("DisableServiceAccount: %v", err)
+	}
+	if err := h.identity.DeleteServiceAccount(ctx, ac, sa.ID); err != nil {
+		t.Fatalf("DeleteServiceAccount: %v", err)
+	}
+
+	var count int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM api_tokens WHERE service_account_id = $1`, sa.ID).Scan(&count); err != nil {
+		t.Fatalf("count api_tokens: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("expected the cascade to remove every token row for the deleted service account, found %d", count)
+	}
+}
+
+func TestServiceAccount_DeleteRequiresOrganizationManage(t *testing.T) {
+	pool := testhelpers.RequirePool(t)
+	ctx := context.Background()
+	h := newHarness(pool)
+	ac, _ := h.newOwnerContext(t, ctx, "sa-delete-perm-owner@nodera.dev")
+
+	sa, err := h.identity.CreateServiceAccount(ctx, ac, "guarded-delete-bot", "")
+	if err != nil {
+		t.Fatalf("CreateServiceAccount: %v", err)
+	}
+	if err := h.identity.DisableServiceAccount(ctx, ac, sa.ID); err != nil {
+		t.Fatalf("DisableServiceAccount: %v", err)
+	}
+
+	memberAC := h.newMemberContext(t, ctx, ac.OrganizationID, "sa-delete-perm-member@nodera.dev")
+	if err := h.identity.DeleteServiceAccount(ctx, memberAC, sa.ID); err == nil {
+		t.Fatal("expected a member without organization.manage to be forbidden from deleting a service account")
+	} else if ae, ok := err.(*apierr.Error); !ok || ae.Code != apierr.CodeForbidden {
+		t.Fatalf("expected FORBIDDEN, got %v", err)
+	}
+}

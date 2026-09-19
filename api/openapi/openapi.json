@@ -3396,6 +3396,33 @@
           }
         }
       }
+    },
+    "/api/v1/service-accounts/{id}/permanent": {
+      "delete": {
+        "tags": [
+          "service-accounts"
+        ],
+        "summary": "Permanently delete a service account (organization.manage) \u2014 must already be disabled; cascades to every token it ever held",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OrgHeader"
+          },
+          {
+            "$ref": "#/components/parameters/PathId"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "Service account must be disabled before it can be deleted"
+          }
+        }
+      }
     }
   },
   "components": {

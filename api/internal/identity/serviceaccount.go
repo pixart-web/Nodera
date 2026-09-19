@@ -206,6 +206,58 @@ func (s *Service) UpdateServiceAccount(ctx context.Context, ac authctx.AuthConte
 	return sa, nil
 }
 
+// DeleteServiceAccount permanently removes a service account — a hard
+// delete, unlike the terminal-status-with-row-kept pattern nodes/
+// applications use (agents.Delete, Phase 31, is the direct precedent: a
+// service account is closer to an access-scoped config object than
+// physical/operational infrastructure). Requires the account already be
+// disabled first, the same real precondition check Delete enforces
+// elsewhere, not just a schema default.
+//
+// api_tokens.service_account_id is ON DELETE CASCADE (migration 0001), so
+// this also removes every token — including already-revoked ones — ever
+// issued to the account; DisableServiceAccount already revoked any that
+// were outstanding, so nothing live is affected, but the token rows
+// themselves (names, issue dates) don't survive. audit_log.
+// actor_service_account_id is ON DELETE SET NULL, so every audit entry
+// the account's actions ever produced stays in the trail (with its
+// actor_label snapshot intact) — only the FK back to the now-gone row is
+// cleared.
+func (s *Service) DeleteServiceAccount(ctx context.Context, ac authctx.AuthContext, id uuid.UUID) error {
+	if err := rbac.Require(ac, creatingAPITokensRequires); err != nil {
+		return err
+	}
+
+	var status string
+	if err := s.pool.QueryRow(ctx, `
+		SELECT status FROM service_accounts WHERE id = $1 AND organization_id = $2
+	`, id, ac.OrganizationID).Scan(&status); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return apierr.NotFound("service account")
+		}
+		return apierr.Wrap(apierr.CodeInternal, "failed to load service account", err)
+	}
+	if status != "disabled" {
+		return apierr.Conflict("service account must be disabled before it can be deleted")
+	}
+
+	tag, err := s.pool.Exec(ctx, `DELETE FROM service_accounts WHERE id = $1 AND organization_id = $2`, id, ac.OrganizationID)
+	if err != nil {
+		return apierr.Wrap(apierr.CodeInternal, "failed to delete service account", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return apierr.NotFound("service account")
+	}
+
+	if err := s.audit.Record(ctx, ac, audit.Entry{
+		Action: "identity.service_account.deleted", ResourceType: "service_account", ResourceID: id.String(), Success: true,
+	}); err != nil {
+		logger.FromContext(ctx).Error("failed to write audit entry", "error", err)
+	}
+
+	return nil
+}
+
 func (s *Service) serviceAccountExists(ctx context.Context, orgID, id uuid.UUID) (bool, error) {
 	var status string
 	err := s.pool.QueryRow(ctx, `

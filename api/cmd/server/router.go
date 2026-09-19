@@ -122,6 +122,7 @@ func newRouter(d apiDeps) http.Handler {
 				r.Put("/service-accounts/{id}", d.handleUpdateServiceAccount)
 				r.Delete("/service-accounts/{id}", d.handleDisableServiceAccount)
 				r.Post("/service-accounts/{id}/enable", d.handleEnableServiceAccount)
+				r.Delete("/service-accounts/{id}/permanent", d.handleDeleteServiceAccount)
 				r.Post("/service-accounts/{id}/api-tokens", d.handleCreateServiceAccountAPIToken)
 
 				r.Get("/jobs", d.handleListJobs)
@@ -836,6 +837,19 @@ func (d apiDeps) handleDisableServiceAccount(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	if err := d.identity.DisableServiceAccount(r.Context(), mustAuthContext(r), id); err != nil {
+		httpserver.WriteError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (d apiDeps) handleDeleteServiceAccount(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		httpserver.WriteError(w, r, apierr.Validation("invalid service account id"))
+		return
+	}
+	if err := d.identity.DeleteServiceAccount(r.Context(), mustAuthContext(r), id); err != nil {
 		httpserver.WriteError(w, r, err)
 		return
 	}

@@ -1312,6 +1312,49 @@ scanning in CI (`govulncheck`, `npm audit`).
 - [x] Full backend test suite re-run clean (`go test ./... -race`)
 - [x] Docs (`README.md`) updated
 
+**Phase 43** — this pass:
+- [x] `identity.DeleteServiceAccount` — a genuine lifecycle gap found in
+      the same domain audit that produced Phases 41-42:
+      Create/List/Disable/Enable/Update all existed, but disabling is
+      reversible and there was no way to permanently remove a service
+      account that's genuinely retired, short of a database edit
+- [x] `agents.Delete` (Phase 31) is the direct precedent: a hard delete
+      (not the terminal-status-with-row-kept pattern nodes/applications
+      use), gated on the account already being `disabled` — a real
+      precondition check, not a schema default. `api_tokens.
+      service_account_id` is `ON DELETE CASCADE` (migration 0001), so
+      deleting also removes every token the account ever held, including
+      already-revoked ones; `audit_log.actor_service_account_id` is `ON
+      DELETE SET NULL`, so every audit entry the account's actions ever
+      produced survives (with its `actor_label` snapshot intact) — only
+      the FK back to the now-gone row clears
+- [x] Reused the existing `DELETE /service-accounts/{id}` path for a
+      different route: `DELETE /service-accounts/{id}` already means
+      "disable" from an earlier phase, a naming decision this phase
+      couldn't retroactively change without breaking existing callers, so
+      the new hard-delete action lives at `DELETE
+      /service-accounts/{id}/permanent` instead
+- [x] 3 new integration tests, passing under `-race` alongside every
+      existing service-account test: delete refuses an active account
+      then succeeds once disabled (and a second delete on the same id is
+      `NOT_FOUND`), the cascade genuinely removes every `api_tokens` row
+      for the account (verified with a direct `SELECT count(*)`, not an
+      assumption about the schema), and a member without
+      `organization.manage` is forbidden
+- [x] 1 new HTTP route and an OpenAPI addition, validated with
+      `@redocly/cli lint`; `lib/api-types.generated.ts` regenerated
+- [x] `web/app/(org)/access/page.tsx`: a "Delete" button that only
+      appears once a service account is disabled, next to "Enable" —
+      matching the "Issue token"/"Disable" pair's own active-only
+      visibility rule
+- [x] Verified live end to end: deleted a real disabled service account
+      through the UI and watched it vanish from the table; confirmed via
+      a direct API call that attempting to hard-delete a still-active one
+      returns a real `409 CONFLICT`. Checked the browser console on a
+      fresh tab — zero errors
+- [x] Full backend test suite re-run clean (`go test ./... -race`)
+- [x] Docs (`API.md`, `FRONTEND.md`, `README.md`) updated
+
 ## Next up
 
 1. **Concrete job types**: the worker dispatcher is real but nothing

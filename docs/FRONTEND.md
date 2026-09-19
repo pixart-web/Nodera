@@ -132,10 +132,11 @@ it, and confirmed the resulting approval's real `expires_at` was exactly
 and confirmed the column reverted to `1d (default)`.
 
 `access/page.tsx` covers the caller's own API tokens (create/revoke),
-service accounts (create/edit name+description/enable/disable, and
-issuing a token owned by one instead of the caller — "Issue token" and
-"Disable" only show while active, "Enable" only shows while disabled), and
-— only rendered if the `GET /organization/api-tokens`
+service accounts (create/edit name+description/enable/disable/permanently
+delete, and issuing a token owned by one instead of the caller — "Issue
+token" and "Disable" only show while active, "Enable" and "Delete" only
+show while disabled, matching the backend's disabled-first precondition
+on delete), and — only rendered if the `GET /organization/api-tokens`
 call doesn't come back `FORBIDDEN` — an org-wide token listing with owner
 attribution. A `FORBIDDEN` there is treated as "this section isn't
 available to me," not an error to display, since a plain member lacking

@@ -135,6 +135,21 @@ export default function AccessPage() {
     }
   }
 
+  const [deletingSAID, setDeletingSAID] = useState<string | null>(null);
+
+  async function deleteServiceAccount(id: string) {
+    setSaStatusError(null);
+    setDeletingSAID(id);
+    try {
+      await api.del(`/api/v1/service-accounts/${id}/permanent`);
+      serviceAccounts.reload();
+    } catch (err) {
+      setSaStatusError(err instanceof ApiError ? err.message : "Failed to delete service account");
+    } finally {
+      setDeletingSAID(null);
+    }
+  }
+
   const [editingSAID, setEditingSAID] = useState<string | null>(null);
   const [editSAName, setEditSAName] = useState("");
   const [editSADescription, setEditSADescription] = useState("");
@@ -359,6 +374,13 @@ export default function AccessPage() {
                               onClick={() => enableServiceAccount(sa.id)}
                             >
                               Enable
+                            </button>
+                            <button
+                              className="text-xs text-base-400 hover:text-danger disabled:text-base-600"
+                              disabled={deletingSAID === sa.id}
+                              onClick={() => deleteServiceAccount(sa.id)}
+                            >
+                              {deletingSAID === sa.id ? "Deleting…" : "Delete"}
                             </button>
                           </>
                         )}

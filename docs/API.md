@@ -124,6 +124,7 @@ tracked in `docs/ROADMAP.md` if that stops being true.
 | PUT | `/api/v1/service-accounts/{id}` | session or token + org | Update a service account's name/description (`organization.manage`) — status is not settable here, see enable/disable |
 | DELETE | `/api/v1/service-accounts/{id}` | session or token + org | Disable a service account and immediately revoke all its outstanding tokens (`organization.manage`) — does not delete the account or its history |
 | POST | `/api/v1/service-accounts/{id}/enable` | session or token + org | Re-enable a disabled service account (`organization.manage`) — does not restore tokens revoked at disable-time |
+| DELETE | `/api/v1/service-accounts/{id}/permanent` | session or token + org | Permanently delete a service account (`organization.manage`) — must already be disabled (`409 CONFLICT` otherwise); cascades to every token it ever held |
 | POST | `/api/v1/service-accounts/{id}/api-tokens` | session or token + org | Mint a token owned by the service account (`organization.manage`); returns the raw token once |
 | GET | `/api/v1/jobs` | session or token + org | List jobs, paginated, optional `?status=` filter (`jobs.read`) |
 | POST | `/api/v1/jobs` | session or token + org | Enqueue a job (`jobs.manage`) |
