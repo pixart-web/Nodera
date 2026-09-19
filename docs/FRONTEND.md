@@ -234,6 +234,19 @@ genuinely still valid (not just claimed to be) — proving the
 don't-log-yourself-out behavior actually works, not just that the API
 call returned 204.
 
+A third section, Active sessions, lists every session from
+`GET /api/v1/account/sessions` with device/IP, created/expires
+timestamps, and a "this session" badge on whichever one is making the
+request — that one has no "Log out" button (revoking your own current
+session from this list would just be a confusing way to sign out; the
+sidebar's own "Sign out" button already does that directly). Every other
+session gets a "Log out" button calling
+`DELETE /api/v1/account/sessions/{id}`. Verified live: logged in a second
+time via a direct API call (simulating another device) without touching
+the page, reloaded, and saw both sessions listed with exactly one
+correctly marked "this session"; clicked "Log out" on the other and
+watched it disappear from the table.
+
 ## Real-time updates (polling)
 
 `lib/useApi.ts` takes an optional third argument, `{ pollMs }`: when set,

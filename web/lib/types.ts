@@ -20,6 +20,15 @@ export interface User {
   display_name: string;
 }
 
+export interface Session {
+  id: string;
+  created_at: string;
+  expires_at: string;
+  ip_address?: string;
+  user_agent?: string;
+  is_current: boolean;
+}
+
 export interface Organization {
   id: string;
   name: string;

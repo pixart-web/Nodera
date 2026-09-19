@@ -216,6 +216,70 @@ func (s *Service) ChangePassword(ctx context.Context, userID uuid.UUID, currentS
 	return nil
 }
 
+// Session is one of a user's active (not revoked, not expired) sessions —
+// what "log out other devices" shows and acts on. The raw token itself is
+// never retrievable after Login (ADR-005: only its hash is stored).
+type Session struct {
+	ID        uuid.UUID `json:"id"`
+	CreatedAt time.Time `json:"created_at"`
+	ExpiresAt time.Time `json:"expires_at"`
+	IPAddress string    `json:"ip_address,omitempty"`
+	UserAgent string    `json:"user_agent,omitempty"`
+	IsCurrent bool      `json:"is_current"`
+}
+
+// ListSessions returns every active session for userID, most recent
+// first, with IsCurrent marking whichever one currentSessionToken
+// resolves to (empty, or a token that fails to resolve, marks none —
+// an API-token caller has no session of its own to flag).
+func (s *Service) ListSessions(ctx context.Context, userID uuid.UUID, currentSessionToken string) ([]Session, error) {
+	var currentSessionID uuid.UUID
+	if currentSessionToken != "" {
+		if _, sid, err := s.sessionUser(ctx, currentSessionToken); err == nil {
+			currentSessionID = sid
+		}
+	}
+
+	rows, err := s.pool.Query(ctx, `
+		SELECT id, created_at, expires_at, COALESCE(host(ip_address), ''), COALESCE(user_agent, '')
+		FROM sessions
+		WHERE user_id = $1 AND revoked_at IS NULL AND expires_at > now()
+		ORDER BY created_at DESC
+	`, userID)
+	if err != nil {
+		return nil, apierr.Wrap(apierr.CodeInternal, "failed to list sessions", err)
+	}
+	defer rows.Close()
+
+	var out []Session
+	for rows.Next() {
+		var sess Session
+		if err := rows.Scan(&sess.ID, &sess.CreatedAt, &sess.ExpiresAt, &sess.IPAddress, &sess.UserAgent); err != nil {
+			return nil, apierr.Wrap(apierr.CodeInternal, "failed to scan session", err)
+		}
+		sess.IsCurrent = sess.ID == currentSessionID
+		out = append(out, sess)
+	}
+	return out, rows.Err()
+}
+
+// RevokeSession revokes one of userID's own sessions by ID — "log out
+// [that] device." Scoped to userID so one user can never revoke another
+// user's session by guessing/enumerating an ID.
+func (s *Service) RevokeSession(ctx context.Context, userID, sessionID uuid.UUID) error {
+	tag, err := s.pool.Exec(ctx, `
+		UPDATE sessions SET revoked_at = now()
+		WHERE id = $1 AND user_id = $2 AND revoked_at IS NULL
+	`, sessionID, userID)
+	if err != nil {
+		return apierr.Wrap(apierr.CodeInternal, "failed to revoke session", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return apierr.NotFound("session")
+	}
+	return nil
+}
+
 // Login verifies credentials and creates a new session. It returns the raw
 // session token (given to the client once, never stored) and the user.
 func (s *Service) Login(ctx context.Context, email, password, ipAddress, userAgent string) (token string, u User, err error) {

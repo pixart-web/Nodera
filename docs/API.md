@@ -84,6 +84,8 @@ tracked in `docs/ROADMAP.md` if that stops being true.
 | POST | `/api/v1/auth/logout` | session | Revokes the current session |
 | PUT | `/api/v1/account/profile` | session or token | Update the caller's own display name (email is not editable here) |
 | POST | `/api/v1/account/password` | session or token | Change the caller's own password; revokes every other active session, leaving the current one untouched |
+| GET | `/api/v1/account/sessions` | session or token | List the caller's own active sessions, most recent first, with `is_current` marking the one making this request |
+| DELETE | `/api/v1/account/sessions/{id}` | session or token | Revoke one of the caller's own sessions ("log out that device") |
 | GET | `/api/v1/organizations` | session or token | List organizations the caller belongs to |
 | POST | `/api/v1/organizations` | session or token | Create an organization; creator becomes `owner` |
 | GET | `/api/v1/organization` | session or token + org | Get the current organization |

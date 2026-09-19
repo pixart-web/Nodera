@@ -2447,6 +2447,56 @@
           }
         }
       }
+    },
+    "/api/v1/account/sessions": {
+      "get": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "List the calling user's own active sessions, most recent first",
+        "responses": {
+          "200": {
+            "description": "Active sessions, with is_current marking the one making this request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Session"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/account/sessions/{id}": {
+      "delete": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Revoke one of the calling user's own sessions (\"log out that device\")",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Session revoked"
+          },
+          "404": {
+            "description": "Not one of the caller's own active sessions"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -3608,6 +3658,32 @@
           },
           "display_name": {
             "type": "string"
+          }
+        }
+      },
+      "Session": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "ip_address": {
+            "type": "string"
+          },
+          "user_agent": {
+            "type": "string"
+          },
+          "is_current": {
+            "type": "boolean"
           }
         }
       }

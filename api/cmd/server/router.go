@@ -76,6 +76,8 @@ func newRouter(d apiDeps) http.Handler {
 
 			r.Put("/account/profile", d.handleUpdateProfile)
 			r.Post("/account/password", d.handleChangePassword)
+			r.Get("/account/sessions", d.handleListSessions)
+			r.Delete("/account/sessions/{id}", d.handleRevokeSession)
 
 			r.Group(func(r chi.Router) {
 				r.Use(d.requireOrganization)
@@ -266,6 +268,29 @@ func (d apiDeps) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 	}
 	sessionToken, _ := r.Context().Value(ctxKeySessionToken{}).(string)
 	if err := d.identity.ChangePassword(r.Context(), userIDFromRequest(r), sessionToken, body.CurrentPassword, body.NewPassword); err != nil {
+		httpserver.WriteError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (d apiDeps) handleListSessions(w http.ResponseWriter, r *http.Request) {
+	sessionToken, _ := r.Context().Value(ctxKeySessionToken{}).(string)
+	list, err := d.identity.ListSessions(r.Context(), userIDFromRequest(r), sessionToken)
+	if err != nil {
+		httpserver.WriteError(w, r, err)
+		return
+	}
+	httpserver.WriteJSON(w, http.StatusOK, list)
+}
+
+func (d apiDeps) handleRevokeSession(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		httpserver.WriteError(w, r, apierr.Validation("invalid session id"))
+		return
+	}
+	if err := d.identity.RevokeSession(r.Context(), userIDFromRequest(r), id); err != nil {
 		httpserver.WriteError(w, r, err)
 		return
 	}

@@ -665,6 +665,43 @@ scanning in CI (`govulncheck`, `npm audit`).
 - [x] Full backend and frontend verification clean
 - [x] Docs (`API.md`, `FRONTEND.md`, `SECURITY.md`, `README.md`) updated
 
+**Phase 27** — this pass:
+- [x] Self-service session management — "log out other devices," a
+      natural follow-on from Phase 26's `ChangePassword` (which already
+      had to solve "resolve the current session's own ID to exclude it
+      from a mass revoke"; this generalizes the same underlying data to a
+      user-facing list). `internal/identity.ListSessions` (every active
+      session for an account, most recent first, with `IsCurrent` marking
+      the one behind the request) and `RevokeSession` (revoke one by ID,
+      scoped to the calling user so nobody can revoke another user's
+      session by guessing/enumerating an ID)
+- [x] No new columns needed — `sessions` already had `id`, `created_at`,
+      `expires_at`, `ip_address`, `user_agent` from the original identity
+      migration; this phase only added read/revoke access to data that
+      already existed
+- [x] 2 new integration tests, passing under `-race`: listing correctly
+      marks exactly the session that made the request as current (not by
+      list-ordering coincidence — resolved from the actual token), and
+      revoking a session only ever affects that session and only for its
+      owner (a second user attempting to revoke the first user's session
+      by ID gets `NOT_FOUND`, not silently ignored or, worse, successful)
+- [x] 2 new HTTP routes (`GET /account/sessions`,
+      `DELETE /account/sessions/{id}`) and OpenAPI additions (`Session`
+      schema), validated with `@redocly/cli lint`;
+      `lib/api-types.generated.ts` regenerated
+- [x] `web/app/(org)/account/page.tsx`: a third "Active sessions" section
+      — a table with device/IP, created/expires, and a "this session"
+      badge on the current one (which gets no "Log out" button; the
+      sidebar's own "Sign out" already covers that case directly)
+- [x] Verified live end to end: logged in a second time via a direct API
+      call (simulating another device) without touching the page,
+      reloaded, and saw both sessions listed with exactly one correctly
+      marked "this session"; clicked "Log out" on the other and watched
+      it disappear from the table. Checked the browser console on a
+      fresh tab afterward — zero errors
+- [x] Full backend and frontend verification clean
+- [x] Docs (`API.md`, `FRONTEND.md`, `SECURITY.md`, `README.md`) updated
+
 ## Next up
 
 1. **Concrete job types**: the worker dispatcher is real but nothing

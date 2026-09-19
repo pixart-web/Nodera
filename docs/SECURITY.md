@@ -22,6 +22,12 @@ tests. Everything else is FOUNDATION ONLY or PLANNED — see `README.md`.
   isn't logged out by their own request, but every other session (another
   device, or one an attacker holds with a since-compromised password) is
   cut off immediately.
+- Self-service session management (`GET /api/v1/account/sessions`,
+  `DELETE /api/v1/account/sessions/{id}`, `internal/identity.ListSessions`/
+  `RevokeSession`) — a user can see every active session on their account
+  (device/IP, created/expires) and revoke any one individually ("log out
+  that device"), scoped so one user can never revoke another user's
+  session even by guessing/enumerating a session ID.
 
 ## Authorization — IMPLEMENTED
 

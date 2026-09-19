@@ -2,10 +2,11 @@
 
 import { useState } from "react";
 import { api, ApiError } from "@/lib/api";
+import { useApi } from "@/lib/useApi";
 import { PageHeader } from "@/components/PageHeader";
 import { ErrorBanner } from "@/components/ErrorBanner";
 import { getStoredUser, setStoredUser } from "@/lib/session";
-import type { User } from "@/lib/types";
+import type { Session, User } from "@/lib/types";
 
 function ProfileForm() {
   const stored = getStoredUser();
@@ -126,6 +127,65 @@ function ChangePasswordForm() {
   );
 }
 
+function SessionsList() {
+  const sessions = useApi(() => api.get<Session[]>("/api/v1/account/sessions"), []);
+  const [error, setError] = useState<string | null>(null);
+
+  async function revoke(id: string) {
+    setError(null);
+    try {
+      await api.del(`/api/v1/account/sessions/${id}`);
+      sessions.reload();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Failed to revoke session");
+    }
+  }
+
+  return (
+    <div>
+      {sessions.error && <ErrorBanner message={sessions.error} />}
+      {error && <ErrorBanner message={error} />}
+      <div className="card">
+        {sessions.loading ? (
+          <div className="p-4 text-sm text-base-400">Loading…</div>
+        ) : (sessions.data ?? []).length === 0 ? (
+          <div className="p-4 text-sm text-base-400">No active sessions.</div>
+        ) : (
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Device / IP</th>
+                <th>Created</th>
+                <th>Expires</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {sessions.data!.map((s) => (
+                <tr key={s.id}>
+                  <td className="text-xs text-base-300">
+                    {s.user_agent || "unknown device"} <span className="text-base-500">({s.ip_address || "unknown IP"})</span>
+                    {s.is_current && <span className="badge ml-2 bg-ok/15 text-ok">this session</span>}
+                  </td>
+                  <td className="text-xs text-base-400">{new Date(s.created_at).toLocaleString()}</td>
+                  <td className="text-xs text-base-400">{new Date(s.expires_at).toLocaleString()}</td>
+                  <td>
+                    {!s.is_current && (
+                      <button className="text-xs text-base-400 hover:text-danger" onClick={() => revoke(s.id)}>
+                        Log out
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function AccountPage() {
   return (
     <div>
@@ -136,9 +196,14 @@ export default function AccountPage() {
         <ProfileForm />
       </div>
 
-      <div>
+      <div className="mb-8">
         <h2 className="mb-3 text-sm font-medium text-base-100">Password</h2>
         <ChangePasswordForm />
+      </div>
+
+      <div>
+        <h2 className="mb-3 text-sm font-medium text-base-100">Active sessions</h2>
+        <SessionsList />
       </div>
     </div>
   );

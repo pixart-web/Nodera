@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 
+	"github.com/google/uuid"
+
 	"github.com/nodera/nodera/internal/identity"
 	"github.com/nodera/nodera/internal/platform/apierr"
 	"github.com/nodera/nodera/internal/testhelpers"
@@ -128,5 +130,108 @@ func TestIdentity_ChangePasswordTakesEffectForFutureLogins(t *testing.T) {
 	}
 	if _, _, err := h.identity.Login(ctx, "changepw-relogin@nodera.dev", "a brand new password 456", "127.0.0.1", "test"); err != nil {
 		t.Fatalf("expected login with the new password to succeed, got %v", err)
+	}
+}
+
+// ListSessions returns every active session for the account, marking
+// exactly the one the caller is currently using — not by coincidence of
+// ordering, but by resolving the actual token passed in.
+func TestIdentity_ListSessionsMarksCurrentSession(t *testing.T) {
+	pool := testhelpers.RequirePool(t)
+	ctx := context.Background()
+	h := newHarness(pool)
+
+	u, err := h.identity.SignUp(ctx, "sessions-list@nodera.dev", testPassword, "Test User")
+	if err != nil {
+		t.Fatalf("SignUp: %v", err)
+	}
+	if _, _, err := h.identity.Login(ctx, "sessions-list@nodera.dev", testPassword, "127.0.0.1", "device-a"); err != nil {
+		t.Fatalf("Login (A): %v", err)
+	}
+	tokenB, _, err := h.identity.Login(ctx, "sessions-list@nodera.dev", testPassword, "10.0.0.5", "device-b")
+	if err != nil {
+		t.Fatalf("Login (B): %v", err)
+	}
+
+	sessions, err := h.identity.ListSessions(ctx, u.ID, tokenB)
+	if err != nil {
+		t.Fatalf("ListSessions: %v", err)
+	}
+	if len(sessions) != 2 {
+		t.Fatalf("expected 2 active sessions, got %d: %+v", len(sessions), sessions)
+	}
+
+	var currentCount int
+	for _, s := range sessions {
+		if s.IsCurrent {
+			currentCount++
+			if s.UserAgent != "device-b" {
+				t.Fatalf("expected the session marked current to be the one tokenB resolves to, got %+v", s)
+			}
+		}
+	}
+	if currentCount != 1 {
+		t.Fatalf("expected exactly 1 session marked current, got %d", currentCount)
+	}
+}
+
+// RevokeSession lets a user log out one specific session (e.g. "log out
+// that other device") without affecting any of their other sessions, and
+// refuses to touch a session belonging to someone else.
+func TestIdentity_RevokeSessionOnlyAffectsTargetAndOwner(t *testing.T) {
+	pool := testhelpers.RequirePool(t)
+	ctx := context.Background()
+	h := newHarness(pool)
+
+	u1, err := h.identity.SignUp(ctx, "sessions-revoke-1@nodera.dev", testPassword, "User One")
+	if err != nil {
+		t.Fatalf("SignUp (1): %v", err)
+	}
+	u2, err := h.identity.SignUp(ctx, "sessions-revoke-2@nodera.dev", testPassword, "User Two")
+	if err != nil {
+		t.Fatalf("SignUp (2): %v", err)
+	}
+
+	tokenA, _, err := h.identity.Login(ctx, "sessions-revoke-1@nodera.dev", testPassword, "127.0.0.1", "device-a")
+	if err != nil {
+		t.Fatalf("Login (A): %v", err)
+	}
+	tokenB, _, err := h.identity.Login(ctx, "sessions-revoke-1@nodera.dev", testPassword, "127.0.0.1", "device-b")
+	if err != nil {
+		t.Fatalf("Login (B): %v", err)
+	}
+
+	sessions, err := h.identity.ListSessions(ctx, u1.ID, "")
+	if err != nil {
+		t.Fatalf("ListSessions: %v", err)
+	}
+	var deviceBID uuid.UUID
+	for _, s := range sessions {
+		if s.UserAgent == "device-b" {
+			deviceBID = s.ID
+		}
+	}
+	if deviceBID == uuid.Nil {
+		t.Fatal("expected to find device-b's session in the list")
+	}
+
+	// User 2 cannot revoke user 1's session by ID.
+	if err := h.identity.RevokeSession(ctx, u2.ID, deviceBID); err == nil {
+		t.Fatal("expected revoking another user's session to fail")
+	} else if ae, ok := err.(*apierr.Error); !ok || ae.Code != apierr.CodeNotFound {
+		t.Fatalf("expected NOT_FOUND, got %v", err)
+	}
+
+	if err := h.identity.RevokeSession(ctx, u1.ID, deviceBID); err != nil {
+		t.Fatalf("RevokeSession: %v", err)
+	}
+
+	if _, err := h.identity.UserIDForSession(ctx, tokenB); err == nil {
+		t.Fatal("expected device-b's session to be revoked")
+	} else if err != identity.ErrSessionInvalid {
+		t.Fatalf("expected ErrSessionInvalid, got %v", err)
+	}
+	if _, err := h.identity.UserIDForSession(ctx, tokenA); err != nil {
+		t.Fatalf("expected device-a's session to remain valid, got %v", err)
 	}
 }
