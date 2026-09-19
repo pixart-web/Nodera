@@ -78,6 +78,7 @@ func newRouter(d apiDeps) http.Handler {
 			r.Post("/account/password", d.handleChangePassword)
 			r.Get("/account/sessions", d.handleListSessions)
 			r.Delete("/account/sessions/{id}", d.handleRevokeSession)
+			r.Post("/account/sessions/revoke-others", d.handleRevokeAllOtherSessions)
 
 			r.Group(func(r chi.Router) {
 				r.Use(d.requireOrganization)
@@ -313,6 +314,15 @@ func (d apiDeps) handleRevokeSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := d.identity.RevokeSession(r.Context(), userIDFromRequest(r), id); err != nil {
+		httpserver.WriteError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (d apiDeps) handleRevokeAllOtherSessions(w http.ResponseWriter, r *http.Request) {
+	sessionToken, _ := r.Context().Value(ctxKeySessionToken{}).(string)
+	if err := d.identity.RevokeAllOtherSessions(r.Context(), userIDFromRequest(r), sessionToken); err != nil {
 		httpserver.WriteError(w, r, err)
 		return
 	}

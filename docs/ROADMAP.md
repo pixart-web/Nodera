@@ -1399,6 +1399,38 @@ scanning in CI (`govulncheck`, `npm audit`).
       database and a fresh test database
 - [x] Docs (`API.md`, `AGENTS.md`, `FRONTEND.md`, `README.md`) updated
 
+**Phase 45** — this pass:
+- [x] `identity.RevokeAllOtherSessions` — found in the same domain audit
+      as Phases 41-44: `ChangePassword` revokes every other session as a
+      side effect, and `RevokeSession` revokes one at a time, but there
+      was no direct "log out all other devices" action a user could take
+      without also rotating their password
+- [x] Shares `ChangePassword`'s exact "resolve the current session,
+      exclude it from the mass-revoke" logic — an invalid/expired/absent
+      current token just means there's nothing to exclude, not an error,
+      the same tradeoff `ChangePassword` already makes
+- [x] 1 new integration test, passing under `-race` alongside every
+      existing identity/session test: three sessions logged in, the
+      calling one survives a bulk revoke while the other two are
+      genuinely revoked (`ErrSessionInvalid`), and a call with no current
+      token still succeeds cleanly
+- [x] 1 new HTTP route (`POST /account/sessions/revoke-others`, in the
+      same pre-organization `requireSession`-only group as
+      `GET`/`DELETE /account/sessions`) and an OpenAPI addition,
+      validated with `@redocly/cli lint`; `lib/api-types.generated.ts`
+      regenerated
+- [x] `web/app/(org)/account/page.tsx`: a "Log out all other devices (N)"
+      button above the Active sessions table, only rendered when `N > 0`
+- [x] Verified live end to end: created two extra sessions for the real
+      test account via direct API calls, reloaded to see all three
+      listed, clicked the bulk button through the UI, and watched both
+      others disappear leaving only "this session" — then navigated to
+      another page to confirm the browser's own session genuinely
+      survived rather than just trusting the `204`. Checked the browser
+      console on a fresh tab — zero errors
+- [x] Full backend test suite re-run clean (`go test ./... -race`)
+- [x] Docs (`API.md`, `FRONTEND.md`, `README.md`) updated
+
 ## Next up
 
 1. **Concrete job types**: the worker dispatcher is real but nothing

@@ -297,6 +297,28 @@ func (s *Service) RevokeSession(ctx context.Context, userID, sessionID uuid.UUID
 	return nil
 }
 
+// RevokeAllOtherSessions revokes every one of userID's active sessions
+// except the caller's own current one — "log out all other devices" as a
+// direct action, rather than only as ChangePassword's side effect. Shares
+// ChangePassword's exact "resolve the current session, exclude it from
+// the mass-revoke" logic; an invalid/expired/absent currentSessionToken
+// just means there's nothing to exclude, not an error worth failing the
+// call over (same tradeoff ChangePassword makes).
+func (s *Service) RevokeAllOtherSessions(ctx context.Context, userID uuid.UUID, currentSessionToken string) error {
+	var currentSessionID uuid.UUID
+	if currentSessionToken != "" {
+		if _, sid, err := s.sessionUser(ctx, currentSessionToken); err == nil {
+			currentSessionID = sid
+		}
+	}
+	if _, err := s.pool.Exec(ctx, `
+		UPDATE sessions SET revoked_at = now() WHERE user_id = $1 AND id != $2 AND revoked_at IS NULL
+	`, userID, currentSessionID); err != nil {
+		return apierr.Wrap(apierr.CodeInternal, "failed to revoke other sessions", err)
+	}
+	return nil
+}
+
 // Login verifies credentials and creates a new session. It returns the raw
 // session token (given to the client once, never stored) and the user.
 func (s *Service) Login(ctx context.Context, email, password, ipAddress, userAgent string) (token string, u User, err error) {

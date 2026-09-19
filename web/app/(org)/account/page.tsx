@@ -130,6 +130,7 @@ function ChangePasswordForm() {
 function SessionsList() {
   const sessions = useApi(() => api.get<Session[]>("/api/v1/account/sessions"), []);
   const [error, setError] = useState<string | null>(null);
+  const [revokingAll, setRevokingAll] = useState(false);
 
   async function revoke(id: string) {
     setError(null);
@@ -141,10 +142,32 @@ function SessionsList() {
     }
   }
 
+  async function revokeAllOthers() {
+    setError(null);
+    setRevokingAll(true);
+    try {
+      await api.post("/api/v1/account/sessions/revoke-others");
+      sessions.reload();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Failed to log out other devices");
+    } finally {
+      setRevokingAll(false);
+    }
+  }
+
+  const otherSessionCount = (sessions.data ?? []).filter((s) => !s.is_current).length;
+
   return (
     <div>
       {sessions.error && <ErrorBanner message={sessions.error} />}
       {error && <ErrorBanner message={error} />}
+      {otherSessionCount > 0 && (
+        <div className="mb-3">
+          <button className="text-xs text-base-400 hover:text-danger" disabled={revokingAll} onClick={revokeAllOthers}>
+            {revokingAll ? "Logging out other devices…" : `Log out all other devices (${otherSessionCount})`}
+          </button>
+        </div>
+      )}
       <div className="card">
         {sessions.loading ? (
           <div className="p-4 text-sm text-base-400">Loading…</div>

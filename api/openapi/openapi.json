@@ -3457,6 +3457,19 @@
           }
         }
       }
+    },
+    "/api/v1/account/sessions/revoke-others": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Revoke every one of the calling user's sessions except the current one (\"log out all other devices\")",
+        "responses": {
+          "204": {
+            "description": "Other sessions revoked"
+          }
+        }
+      }
     }
   },
   "components": {

@@ -354,6 +354,16 @@ the page, reloaded, and saw both sessions listed with exactly one
 correctly marked "this session"; clicked "Log out" on the other and
 watched it disappear from the table.
 
+A "Log out all other devices (N)" button sits above the table
+(`POST /api/v1/account/sessions/revoke-others`) — only rendered when
+`N > 0`, and disappears once there's nothing left to revoke, same as
+"Log out" disappearing for the current row. Verified live: created two
+extra sessions for the same account via direct API calls, reloaded to
+see all three listed, clicked the bulk button, and watched both others
+disappear leaving only "this session" — then navigated to another page
+to confirm the browser's own session genuinely survived, not just that
+the call returned `204`.
+
 ## Jobs page: retry
 
 `jobs/page.tsx` gained a "Retry" button next to "Cancel," shown only on a

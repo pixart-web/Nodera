@@ -108,6 +108,57 @@ func TestIdentity_ChangePasswordRevokesOtherSessionsButNotCurrent(t *testing.T) 
 	}
 }
 
+// RevokeAllOtherSessions is a direct action with the identical
+// "current session survives, every other one dies" behavior
+// ChangePassword only gives as a side effect.
+func TestIdentity_RevokeAllOtherSessionsKeepsCurrentAlive(t *testing.T) {
+	pool := testhelpers.RequirePool(t)
+	ctx := context.Background()
+	h := newHarness(pool)
+
+	u, err := h.identity.SignUp(ctx, "revoke-others-sessions@nodera.dev", testPassword, "Test User")
+	if err != nil {
+		t.Fatalf("SignUp: %v", err)
+	}
+
+	tokenA, _, err := h.identity.Login(ctx, "revoke-others-sessions@nodera.dev", testPassword, "127.0.0.1", "session-a")
+	if err != nil {
+		t.Fatalf("Login (session A): %v", err)
+	}
+	tokenB, _, err := h.identity.Login(ctx, "revoke-others-sessions@nodera.dev", testPassword, "127.0.0.1", "session-b")
+	if err != nil {
+		t.Fatalf("Login (session B): %v", err)
+	}
+	tokenC, _, err := h.identity.Login(ctx, "revoke-others-sessions@nodera.dev", testPassword, "127.0.0.1", "session-c")
+	if err != nil {
+		t.Fatalf("Login (session C): %v", err)
+	}
+
+	if err := h.identity.RevokeAllOtherSessions(ctx, u.ID, tokenA); err != nil {
+		t.Fatalf("RevokeAllOtherSessions: %v", err)
+	}
+
+	if _, err := h.identity.UserIDForSession(ctx, tokenA); err != nil {
+		t.Fatalf("expected the calling session A to remain valid, got %v", err)
+	}
+	if _, err := h.identity.UserIDForSession(ctx, tokenB); err == nil {
+		t.Fatal("expected session B to be revoked")
+	} else if err != identity.ErrSessionInvalid {
+		t.Fatalf("expected ErrSessionInvalid for session B, got %v", err)
+	}
+	if _, err := h.identity.UserIDForSession(ctx, tokenC); err == nil {
+		t.Fatal("expected session C to be revoked")
+	} else if err != identity.ErrSessionInvalid {
+		t.Fatalf("expected ErrSessionInvalid for session C, got %v", err)
+	}
+
+	// An absent/invalid current token means "nothing to exclude," not an
+	// error — same tradeoff ChangePassword makes.
+	if err := h.identity.RevokeAllOtherSessions(ctx, u.ID, ""); err != nil {
+		t.Fatalf("RevokeAllOtherSessions with no current token: %v", err)
+	}
+}
+
 // After a successful change, the old password no longer works and the new
 // one does — proving the rotation actually took effect, not just that the
 // call returned success.
