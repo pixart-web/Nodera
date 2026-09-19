@@ -60,18 +60,49 @@ every request. The organization a user is currently acting within is also
 client state (`X-Nodera-Org` header), matching the API's own design (one
 session, many organizations — see `docs/API.md`).
 
-## Hand-written types, with a generated alternative now available
+## Generated types, `lib/types.ts` as a thin alias layer
 
 An OpenAPI 3.0 spec exists (`api/openapi/openapi.json`, served at
 `/openapi.json`) and `npm run gen:types` produces
-`lib/api-types.generated.ts` from it. No page has been switched over to it
-yet — `lib/types.ts` (kept intentionally small, mirroring only the fields
-the UI actually reads, not the full Go struct) is still what every page
-imports. `lib/types.ts` also defines `Page<T>`, the pagination envelope
-(`infrastructure/nodes`, `applications`, `jobs`, `audit` — see
-`docs/API.md` Pagination); the pages for those four hold their own
-`visibleLimit` state and a "Load more" button that re-fetches with a
-larger `?limit=`, rather than accumulating pages client-side.
+`lib/api-types.generated.ts` from it. As of Phase 50, `lib/types.ts` no
+longer hand-copies each shape — every exported type (`Node`, `Job`,
+`Agent`, `AIProfile`, …) is a one-line alias onto the matching generated
+schema (`export type Node = components["schemas"]["Node"];`), so a field
+this file used to get wrong or forget to update is now a real `tsc` error
+the moment the spec changes, not a runtime surprise caught only by live
+verification. Every page's own imports (`import type { Node } from
+"@/lib/types"`) are unchanged — only the definitions inside that one file
+moved. `Page<T>` stays hand-written there too, since it's a structural
+generic (every paginated endpoint has its own concrete `*Page` schema,
+e.g. `NodePage`, generated from the same shape, not one generic the
+frontend can alias directly); the pages for `infrastructure/nodes`,
+`applications`, `jobs`, `audit`, and `ai/usage` (see `docs/API.md`
+Pagination) hold their own `visibleLimit` state and a "Load more" button
+that re-fetches with a larger `?limit=`, rather than accumulating pages
+client-side.
+
+Generating types accurately required every response schema in
+`openapi.json` to declare a `required` array — before this pass,
+`openapi-typescript` made every field optional (no `required` meant
+"maybe present"), which would have been a real regression from the
+hand-written types' cardinality if swapped in as-is. Added `required` to
+every entity schema with a hand-written counterpart, matching the
+hand-written type's own optional/required split field-for-field (e.g.
+`Session.ip_address`/`user_agent` stay optional, everything else on
+`Session` doesn't).
+
+Caught two real, pre-existing spec bugs during this migration, not
+introduced by it: `Node.status`'s enum was missing `decommissioned`
+(added in Phase 28) and `Application.status` had no enum at all — both
+meant the hand-written `status: string` types were silently swallowing
+drift the OpenAPI spec never caught up to. `tsc` immediately flagged the
+first as a real type error (`infrastructure/page.tsx`'s decommission
+check comparing against a value the enum didn't include) the moment the
+generated, narrowed type was wired in — exactly the class of bug this
+migration exists to catch going forward. Fixed both enums to match the
+real DB `CHECK` constraints (migrations `0014`/`0015`), verified live: a
+real node decommissioned through the UI still renders `decommissioned`
+correctly with every control hidden, same as before the fix.
 
 ## Infrastructure page
 

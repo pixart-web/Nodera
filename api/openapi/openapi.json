@@ -3674,9 +3674,16 @@
               "request_id": {
                 "type": "string"
               }
-            }
+            },
+            "required": [
+              "code",
+              "message"
+            ]
           }
-        }
+        },
+        "required": [
+          "error"
+        ]
       },
       "User": {
         "type": "object",
@@ -3691,7 +3698,12 @@
           "display_name": {
             "type": "string"
           }
-        }
+        },
+        "required": [
+          "id",
+          "email",
+          "display_name"
+        ]
       },
       "Organization": {
         "type": "object",
@@ -3710,7 +3722,13 @@
             "type": "string",
             "format": "date-time"
           }
-        }
+        },
+        "required": [
+          "id",
+          "name",
+          "slug",
+          "created_at"
+        ]
       },
       "Node": {
         "type": "object",
@@ -3744,7 +3762,8 @@
               "unknown",
               "online",
               "offline",
-              "degraded"
+              "degraded",
+              "decommissioned"
             ]
           },
           "operating_system": {
@@ -3778,7 +3797,25 @@
             "type": "string",
             "format": "date-time"
           }
-        }
+        },
+        "required": [
+          "id",
+          "organization_id",
+          "hostname",
+          "provider",
+          "provider_resource_id",
+          "role",
+          "environment",
+          "status",
+          "operating_system",
+          "cpu_cores",
+          "memory_mb",
+          "storage_gb",
+          "capabilities",
+          "last_seen_at",
+          "created_at",
+          "updated_at"
+        ]
       },
       "RegisterNodeInput": {
         "type": "object",
@@ -3850,7 +3887,15 @@
             "type": "string"
           },
           "status": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "unknown",
+              "running",
+              "stopped",
+              "degraded",
+              "failed",
+              "deregistered"
+            ]
           },
           "repository_url": {
             "type": "string"
@@ -3863,7 +3908,19 @@
             "type": "string",
             "format": "date-time"
           }
-        }
+        },
+        "required": [
+          "id",
+          "organization_id",
+          "name",
+          "kind",
+          "node_id",
+          "environment",
+          "status",
+          "repository_url",
+          "created_at",
+          "updated_at"
+        ]
       },
       "RegisterApplicationInput": {
         "type": "object",
@@ -3947,7 +4004,16 @@
             "format": "date-time",
             "nullable": true
           }
-        }
+        },
+        "required": [
+          "id",
+          "name",
+          "token_prefix",
+          "scopes",
+          "created_at",
+          "expires_at",
+          "last_used_at"
+        ]
       },
       "AdminAPIToken": {
         "allOf": [
@@ -3967,7 +4033,11 @@
               "owner_label": {
                 "type": "string"
               }
-            }
+            },
+            "required": [
+              "owner_type",
+              "owner_label"
+            ]
           }
         ]
       },
@@ -4004,7 +4074,11 @@
           "info": {
             "$ref": "#/components/schemas/APIToken"
           }
-        }
+        },
+        "required": [
+          "token",
+          "info"
+        ]
       },
       "ServiceAccount": {
         "type": "object",
@@ -4030,7 +4104,14 @@
             "type": "string",
             "format": "date-time"
           }
-        }
+        },
+        "required": [
+          "id",
+          "name",
+          "description",
+          "status",
+          "created_at"
+        ]
       },
       "Job": {
         "type": "object",
@@ -4095,7 +4176,20 @@
             "format": "date-time",
             "nullable": true
           }
-        }
+        },
+        "required": [
+          "id",
+          "organization_id",
+          "type",
+          "status",
+          "priority",
+          "payload",
+          "progress",
+          "attempts",
+          "max_attempts",
+          "created_at",
+          "updated_at"
+        ]
       },
       "JobPage": {
         "allOf": [
@@ -4169,7 +4263,20 @@
             "type": "string",
             "format": "date-time"
           }
-        }
+        },
+        "required": [
+          "id",
+          "key",
+          "description",
+          "required_capabilities",
+          "privacy_level",
+          "preferred_model_ids",
+          "fallback_model_ids",
+          "temperature",
+          "max_tokens",
+          "timeout_seconds",
+          "created_at"
+        ]
       },
       "CreateAIProfileInput": {
         "type": "object",
@@ -4263,7 +4370,15 @@
           "output_tokens": {
             "type": "integer"
           }
-        }
+        },
+        "required": [
+          "content",
+          "profile_key",
+          "provider_key",
+          "model",
+          "input_tokens",
+          "output_tokens"
+        ]
       },
       "AIProvider": {
         "type": "object",
@@ -4302,7 +4417,16 @@
             "type": "string",
             "format": "date-time"
           }
-        }
+        },
+        "required": [
+          "id",
+          "key",
+          "kind",
+          "display_name",
+          "status",
+          "created_at",
+          "updated_at"
+        ]
       },
       "AIModel": {
         "type": "object",
@@ -4345,7 +4469,18 @@
             "type": "string",
             "format": "date-time"
           }
-        }
+        },
+        "required": [
+          "id",
+          "provider_key",
+          "model_identifier",
+          "display_name",
+          "capabilities",
+          "context_window",
+          "status",
+          "created_at",
+          "updated_at"
+        ]
       },
       "SecretMeta": {
         "type": "object",
@@ -4368,7 +4503,14 @@
             "type": "string",
             "format": "date-time"
           }
-        }
+        },
+        "required": [
+          "id",
+          "key",
+          "description",
+          "created_at",
+          "updated_at"
+        ]
       },
       "Tool": {
         "type": "object",
@@ -4394,7 +4536,14 @@
           "implemented": {
             "type": "boolean"
           }
-        }
+        },
+        "required": [
+          "key",
+          "description",
+          "risk_level",
+          "required_permission",
+          "implemented"
+        ]
       },
       "ExecuteResult": {
         "type": "object",
@@ -4412,7 +4561,10 @@
             "format": "uuid",
             "nullable": true
           }
-        }
+        },
+        "required": [
+          "status"
+        ]
       },
       "Approval": {
         "type": "object",
@@ -4466,7 +4618,17 @@
             "type": "string"
           },
           "execution_result": {}
-        }
+        },
+        "required": [
+          "id",
+          "requested_action",
+          "risk_level",
+          "resource_type",
+          "resource_id",
+          "parameters",
+          "status",
+          "created_at"
+        ]
       },
       "Agent": {
         "type": "object",
@@ -4519,7 +4681,20 @@
             "type": "string",
             "format": "date-time"
           }
-        }
+        },
+        "required": [
+          "id",
+          "name",
+          "description",
+          "system_instructions",
+          "ai_profile_key",
+          "allowed_tool_keys",
+          "permission_scope",
+          "status",
+          "timeout_seconds",
+          "created_at",
+          "updated_at"
+        ]
       },
       "CreateAgentInput": {
         "type": "object",
@@ -4596,7 +4771,19 @@
             "type": "string",
             "format": "date-time"
           }
-        }
+        },
+        "required": [
+          "id",
+          "organization_id",
+          "actor_label",
+          "action",
+          "resource_type",
+          "resource_id",
+          "source",
+          "correlation_id",
+          "success",
+          "created_at"
+        ]
       },
       "AuditRecordPage": {
         "allOf": [
@@ -4648,7 +4835,12 @@
             "type": "string",
             "format": "date-time"
           }
-        }
+        },
+        "required": [
+          "tool_key",
+          "approval_ttl_seconds",
+          "updated_at"
+        ]
       },
       "Role": {
         "type": "object",
@@ -4672,7 +4864,14 @@
               "type": "string"
             }
           }
-        }
+        },
+        "required": [
+          "id",
+          "name",
+          "description",
+          "is_system",
+          "permissions"
+        ]
       },
       "MemberRole": {
         "type": "object",
@@ -4684,7 +4883,11 @@
           "name": {
             "type": "string"
           }
-        }
+        },
+        "required": [
+          "role_id",
+          "name"
+        ]
       },
       "Member": {
         "type": "object",
@@ -4705,7 +4908,13 @@
               "$ref": "#/components/schemas/MemberRole"
             }
           }
-        }
+        },
+        "required": [
+          "user_id",
+          "email",
+          "display_name",
+          "roles"
+        ]
       },
       "AddedMember": {
         "type": "object",
@@ -4746,7 +4955,13 @@
           "is_current": {
             "type": "boolean"
           }
-        }
+        },
+        "required": [
+          "id",
+          "created_at",
+          "expires_at",
+          "is_current"
+        ]
       },
       "AIUsageRecord": {
         "type": "object",
@@ -4799,7 +5014,21 @@
             "type": "string",
             "format": "date-time"
           }
-        }
+        },
+        "required": [
+          "id",
+          "profile_key",
+          "provider_key",
+          "model_identifier",
+          "classification",
+          "input_tokens",
+          "output_tokens",
+          "total_tokens",
+          "latency_ms",
+          "status",
+          "correlation_id",
+          "created_at"
+        ]
       },
       "AIUsageRecordPage": {
         "allOf": [

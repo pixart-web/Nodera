@@ -256,7 +256,7 @@ function CreateProfileForm({ onCreated }: { onCreated: () => void }) {
 
 function EditProfileForm({ profile, onDone }: { profile: AIProfile; onDone: () => void }) {
   const [description, setDescription] = useState(profile.description);
-  const [privacyLevel, setPrivacyLevel] = useState(profile.privacy_level);
+  const [privacyLevel, setPrivacyLevel] = useState<string>(profile.privacy_level);
   const [preferredModelIds, setPreferredModelIds] = useState(profile.preferred_model_ids.join(", "));
   const [fallbackModelIds, setFallbackModelIds] = useState(profile.fallback_model_ids.join(", "));
   const [requiredCapabilities, setRequiredCapabilities] = useState(profile.required_capabilities.join(", "));

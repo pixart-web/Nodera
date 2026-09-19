@@ -13,9 +13,15 @@ a browser-enforced mechanism, not a server-side access control.
 OpenAPI 3.0 document (`api/openapi/openapi.json`, embedded in the binary —
 `api/openapi/openapi.go`), validated against the OpenAPI schema in CI.
 `GET /docs` serves a Swagger UI page against it. Both are unauthenticated,
-like `/health`. `web/` can generate TypeScript types from it via
-`npm run gen:types` (`web/lib/api-types.generated.ts`) — not yet swapped in
-for the hand-written `web/lib/types.ts` (`docs/ROADMAP.md`).
+like `/health`. `web/` generates TypeScript types from it via
+`npm run gen:types` (`web/lib/api-types.generated.ts`); `web/lib/types.ts`
+is now a thin alias layer over those generated types, not a hand-copied
+shape (`docs/ROADMAP.md` Phase 50, `docs/FRONTEND.md`) — every response
+schema declares `required` so the generated fields' optionality matches
+reality. Generating the spec itself from Go code (rather than
+hand-maintaining `openapi.json`) remains deferred, deliberately: retrofitting
+every handler's doc annotations is a much larger, higher-blast-radius
+mechanical change than this pass took on.
 
 ## Conventions
 

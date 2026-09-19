@@ -3791,50 +3791,50 @@ export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
         Error: {
-            error?: {
+            error: {
                 /** @example FORBIDDEN */
-                code?: string;
-                message?: string;
+                code: string;
+                message: string;
                 request_id?: string;
             };
         };
         User: {
             /** Format: uuid */
-            id?: string;
-            email?: string;
-            display_name?: string;
+            id: string;
+            email: string;
+            display_name: string;
         };
         Organization: {
             /** Format: uuid */
-            id?: string;
-            name?: string;
-            slug?: string;
+            id: string;
+            name: string;
+            slug: string;
             /** Format: date-time */
-            created_at?: string;
+            created_at: string;
         };
         Node: {
             /** Format: uuid */
-            id?: string;
+            id: string;
             /** Format: uuid */
-            organization_id?: string;
-            hostname?: string;
-            provider?: string;
-            provider_resource_id?: string;
-            role?: string;
-            environment?: string;
+            organization_id: string;
+            hostname: string;
+            provider: string;
+            provider_resource_id: string;
+            role: string;
+            environment: string;
             /** @enum {string} */
-            status?: "unknown" | "online" | "offline" | "degraded";
-            operating_system?: string;
-            cpu_cores?: number;
-            memory_mb?: number;
-            storage_gb?: number;
-            capabilities?: string[];
+            status: "unknown" | "online" | "offline" | "degraded" | "decommissioned";
+            operating_system: string;
+            cpu_cores: number;
+            memory_mb: number;
+            storage_gb: number;
+            capabilities: string[];
             /** Format: date-time */
-            last_seen_at?: string | null;
+            last_seen_at: string | null;
             /** Format: date-time */
-            created_at?: string;
+            created_at: string;
             /** Format: date-time */
-            updated_at?: string;
+            updated_at: string;
         };
         RegisterNodeInput: {
             hostname: string;
@@ -3848,20 +3848,21 @@ export interface components {
         };
         Application: {
             /** Format: uuid */
-            id?: string;
+            id: string;
             /** Format: uuid */
-            organization_id?: string;
-            name?: string;
-            kind?: string;
+            organization_id: string;
+            name: string;
+            kind: string;
             /** Format: uuid */
-            node_id?: string | null;
-            environment?: string;
-            status?: string;
-            repository_url?: string;
+            node_id: string | null;
+            environment: string;
+            /** @enum {string} */
+            status: "unknown" | "running" | "stopped" | "degraded" | "failed" | "deregistered";
+            repository_url: string;
             /** Format: date-time */
-            created_at?: string;
+            created_at: string;
             /** Format: date-time */
-            updated_at?: string;
+            updated_at: string;
         };
         RegisterApplicationInput: {
             name: string;
@@ -3877,21 +3878,21 @@ export interface components {
         };
         APIToken: {
             /** Format: uuid */
-            id?: string;
-            name?: string;
-            token_prefix?: string;
-            scopes?: string[];
+            id: string;
+            name: string;
+            token_prefix: string;
+            scopes: string[];
             /** Format: date-time */
-            created_at?: string;
+            created_at: string;
             /** Format: date-time */
-            expires_at?: string | null;
+            expires_at: string | null;
             /** Format: date-time */
-            last_used_at?: string | null;
+            last_used_at: string | null;
         };
         AdminAPIToken: components["schemas"]["APIToken"] & {
             /** @enum {string} */
-            owner_type?: "user" | "service_account";
-            owner_label?: string;
+            owner_type: "user" | "service_account";
+            owner_label: string;
         };
         CreateAPITokenInput: {
             name: string;
@@ -3902,39 +3903,39 @@ export interface components {
         };
         CreatedAPIToken: {
             /** @description The raw token — shown exactly once, never retrievable again */
-            token?: string;
-            info?: components["schemas"]["APIToken"];
+            token: string;
+            info: components["schemas"]["APIToken"];
         };
         ServiceAccount: {
             /** Format: uuid */
-            id?: string;
-            name?: string;
-            description?: string;
+            id: string;
+            name: string;
+            description: string;
             /** @enum {string} */
-            status?: "active" | "disabled";
+            status: "active" | "disabled";
             /** Format: date-time */
-            created_at?: string;
+            created_at: string;
         };
         Job: {
             /** Format: uuid */
-            id?: string;
+            id: string;
             /** Format: uuid */
-            organization_id?: string;
-            type?: string;
+            organization_id: string;
+            type: string;
             /** @enum {string} */
-            status?: "queued" | "running" | "succeeded" | "failed" | "cancelled" | "retrying";
-            priority?: number;
-            payload?: unknown;
+            status: "queued" | "running" | "succeeded" | "failed" | "cancelled" | "retrying";
+            priority: number;
+            payload: unknown;
             result?: unknown;
             error?: string;
-            progress?: number;
-            attempts?: number;
-            max_attempts?: number;
+            progress: number;
+            attempts: number;
+            max_attempts: number;
             correlation_id?: string;
             /** Format: date-time */
-            created_at?: string;
+            created_at: string;
             /** Format: date-time */
-            updated_at?: string;
+            updated_at: string;
             /** Format: date-time */
             started_at?: string | null;
             /** Format: date-time */
@@ -3945,20 +3946,20 @@ export interface components {
         };
         AIProfile: {
             /** Format: uuid */
-            id?: string;
-            key?: string;
-            description?: string;
-            required_capabilities?: string[];
+            id: string;
+            key: string;
+            description: string;
+            required_capabilities: string[];
             /** @enum {string} */
-            privacy_level?: "public" | "internal" | "confidential" | "restricted";
+            privacy_level: "public" | "internal" | "confidential" | "restricted";
             /** @description "<provider_key>/<model_identifier>" refs */
-            preferred_model_ids?: string[];
-            fallback_model_ids?: string[];
-            temperature?: number;
-            max_tokens?: number;
-            timeout_seconds?: number;
+            preferred_model_ids: string[];
+            fallback_model_ids: string[];
+            temperature: number;
+            max_tokens: number;
+            timeout_seconds: number;
             /** Format: date-time */
-            created_at?: string;
+            created_at: string;
         };
         CreateAIProfileInput: {
             key: string;
@@ -3978,80 +3979,80 @@ export interface components {
             content: string;
         };
         ChatResult: {
-            content?: string;
-            profile_key?: string;
-            provider_key?: string;
-            model?: string;
-            input_tokens?: number;
-            output_tokens?: number;
+            content: string;
+            profile_key: string;
+            provider_key: string;
+            model: string;
+            input_tokens: number;
+            output_tokens: number;
         };
         AIProvider: {
             /** Format: uuid */
-            id?: string;
-            key?: string;
+            id: string;
+            key: string;
             /** @enum {string} */
-            kind?: "cloud" | "local";
-            display_name?: string;
+            kind: "cloud" | "local";
+            display_name: string;
             /** @enum {string} */
-            status?: "unconfigured" | "active" | "disabled" | "unavailable";
+            status: "unconfigured" | "active" | "disabled" | "unavailable";
             /** Format: date-time */
-            created_at?: string;
+            created_at: string;
             /** Format: date-time */
-            updated_at?: string;
+            updated_at: string;
         };
         AIModel: {
             /** Format: uuid */
-            id?: string;
-            provider_key?: string;
-            model_identifier?: string;
-            display_name?: string;
-            capabilities?: string[];
-            context_window?: number;
+            id: string;
+            provider_key: string;
+            model_identifier: string;
+            display_name: string;
+            capabilities: string[];
+            context_window: number;
             /** @enum {string} */
-            status?: "available" | "unavailable" | "deprecated";
+            status: "available" | "unavailable" | "deprecated";
             /** Format: date-time */
-            created_at?: string;
+            created_at: string;
             /** Format: date-time */
-            updated_at?: string;
+            updated_at: string;
         };
         SecretMeta: {
             /** Format: uuid */
-            id?: string;
-            key?: string;
-            description?: string;
+            id: string;
+            key: string;
+            description: string;
             /** Format: date-time */
-            created_at?: string;
+            created_at: string;
             /** Format: date-time */
-            updated_at?: string;
+            updated_at: string;
         };
         Tool: {
-            key?: string;
-            description?: string;
+            key: string;
+            description: string;
             /** @enum {string} */
-            risk_level?: "read" | "safe" | "privileged" | "critical";
-            required_permission?: string;
-            implemented?: boolean;
+            risk_level: "read" | "safe" | "privileged" | "critical";
+            required_permission: string;
+            implemented: boolean;
         };
         ExecuteResult: {
             /** @enum {string} */
-            status?: "executed" | "approval_required";
+            status: "executed" | "approval_required";
             result?: unknown;
             /** Format: uuid */
             approval_id?: string | null;
         };
         Approval: {
             /** Format: uuid */
-            id?: string;
-            requested_action?: string;
+            id: string;
+            requested_action: string;
             /** @enum {string} */
-            risk_level?: "privileged" | "critical";
-            resource_type?: string;
-            resource_id?: string;
-            parameters?: unknown;
+            risk_level: "privileged" | "critical";
+            resource_type: string;
+            resource_id: string;
+            parameters: unknown;
             /** @enum {string} */
-            status?: "pending" | "approved" | "rejected" | "expired" | "cancelled";
+            status: "pending" | "approved" | "rejected" | "expired" | "cancelled";
             /** Format: date-time */
-            created_at?: string;
+            created_at: string;
             /** Format: date-time */
             expires_at?: string | null;
             /** Format: date-time */
@@ -4061,24 +4062,24 @@ export interface components {
         };
         Agent: {
             /** Format: uuid */
-            id?: string;
-            name?: string;
-            description?: string;
-            system_instructions?: string;
-            ai_profile_key?: string;
-            allowed_tool_keys?: string[];
+            id: string;
+            name: string;
+            description: string;
+            system_instructions: string;
+            ai_profile_key: string;
+            allowed_tool_keys: string[];
             /** @description Permission keys this agent acts with — never broader than its creator's own permissions at creation time */
-            permission_scope?: string[];
+            permission_scope: string[];
             /**
              * @description Starts 'disabled'; see POST .../enable
              * @enum {string}
              */
-            status?: "active" | "disabled";
-            timeout_seconds?: number;
+            status: "active" | "disabled";
+            timeout_seconds: number;
             /** Format: date-time */
-            created_at?: string;
+            created_at: string;
             /** Format: date-time */
-            updated_at?: string;
+            updated_at: string;
         };
         CreateAgentInput: {
             name: string;
@@ -4093,18 +4094,18 @@ export interface components {
         };
         AuditRecord: {
             /** Format: uuid */
-            id?: string;
+            id: string;
             /** Format: uuid */
-            organization_id?: string | null;
-            actor_label?: string;
-            action?: string;
-            resource_type?: string;
-            resource_id?: string;
-            source?: string;
-            correlation_id?: string;
-            success?: boolean;
+            organization_id: string | null;
+            actor_label: string;
+            action: string;
+            resource_type: string;
+            resource_id: string;
+            source: string;
+            correlation_id: string;
+            success: boolean;
             /** Format: date-time */
-            created_at?: string;
+            created_at: string;
         };
         AuditRecordPage: components["schemas"]["Page"] & {
             items?: components["schemas"]["AuditRecord"][];
@@ -4117,30 +4118,30 @@ export interface components {
             has_more?: boolean;
         };
         OrganizationToolSetting: {
-            tool_key?: string;
-            approval_ttl_seconds?: number;
+            tool_key: string;
+            approval_ttl_seconds: number;
             /** Format: date-time */
-            updated_at?: string;
+            updated_at: string;
         };
         Role: {
             /** Format: uuid */
-            id?: string;
-            name?: string;
-            description?: string;
-            is_system?: boolean;
-            permissions?: string[];
+            id: string;
+            name: string;
+            description: string;
+            is_system: boolean;
+            permissions: string[];
         };
         MemberRole: {
             /** Format: uuid */
-            role_id?: string;
-            name?: string;
+            role_id: string;
+            name: string;
         };
         Member: {
             /** Format: uuid */
-            user_id?: string;
-            email?: string;
-            display_name?: string;
-            roles?: components["schemas"]["MemberRole"][];
+            user_id: string;
+            email: string;
+            display_name: string;
+            roles: components["schemas"]["MemberRole"][];
         };
         AddedMember: {
             /** Format: uuid */
@@ -4150,32 +4151,32 @@ export interface components {
         };
         Session: {
             /** Format: uuid */
-            id?: string;
+            id: string;
             /** Format: date-time */
-            created_at?: string;
+            created_at: string;
             /** Format: date-time */
-            expires_at?: string;
+            expires_at: string;
             ip_address?: string;
             user_agent?: string;
-            is_current?: boolean;
+            is_current: boolean;
         };
         AIUsageRecord: {
             /** Format: uuid */
-            id?: string;
-            profile_key?: string;
-            provider_key?: string;
-            model_identifier?: string;
+            id: string;
+            profile_key: string;
+            provider_key: string;
+            model_identifier: string;
             /** @enum {string} */
-            classification?: "local" | "cloud";
-            input_tokens?: number;
-            output_tokens?: number;
-            total_tokens?: number;
-            latency_ms?: number | null;
+            classification: "local" | "cloud";
+            input_tokens: number;
+            output_tokens: number;
+            total_tokens: number;
+            latency_ms: number | null;
             /** @enum {string} */
-            status?: "success" | "error" | "timeout";
-            correlation_id?: string;
+            status: "success" | "error" | "timeout";
+            correlation_id: string;
             /** Format: date-time */
-            created_at?: string;
+            created_at: string;
         };
         AIUsageRecordPage: components["schemas"]["Page"] & {
             items?: components["schemas"]["AIUsageRecord"][];

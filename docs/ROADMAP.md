@@ -1588,6 +1588,73 @@ scanning in CI (`govulncheck`, `npm audit`).
       genuine CRUD/lifecycle/audit/rate-limit gap that audit surfaced
       across identity, jobs, tools/approvals, and the AI gateway
 
+**Phase 50** (final phase of this pass) — this pass:
+- [x] Swapped `web/lib/types.ts` from hand-copied shapes to a thin alias
+      layer over the generated `lib/api-types.generated.ts` — the
+      frontend-facing half of the long-standing "Next up" item 3.
+      Deliberately did NOT attempt generating the OpenAPI spec itself
+      from Go code in the same pass: my own domain-audit findings for
+      this batch flagged it as the single riskiest, highest-blast-radius
+      candidate (retrofitting every handler across `router.go` with doc
+      annotations, ~100+ operations, versus this phase's single-file,
+      fully `tsc`-verifiable change) — deferred explicitly, not silently
+      dropped, matching rule 36's spirit for scope decisions
+- [x] `openapi-typescript` makes every schema field optional unless the
+      schema declares `required` — before this pass, `openapi.json`'s
+      response schemas mostly didn't, so swapping to generated types
+      as-is would have made nearly every field `| undefined`, a real
+      regression from the hand-written types' cardinality. Added
+      `required` to every entity schema with a hand-written counterpart
+      (`User`, `Node`, `Job`, `Agent`, `AIProfile`, …), matching each
+      hand-written type's own optional/required split field-for-field
+      (e.g. `Session.ip_address`/`user_agent` stay optional) — a
+      scripted, deterministic pass, not hand-edited per schema
+- [x] **Caught two real, pre-existing spec bugs during the migration**,
+      not introduced by it: `Node.status`'s enum was missing
+      `decommissioned` (added in Phase 28, never back-filled into the
+      spec) and `Application.status` had no enum at all — both meant the
+      hand-written `status: string` types silently swallowed drift the
+      spec never caught up to. `tsc` immediately surfaced the first as a
+      real compile error (`infrastructure/page.tsx`'s decommission check
+      comparing against a value the enum didn't include) the moment the
+      narrowed generated type was wired in — exactly the bug class this
+      migration exists to catch going forward, demonstrated on the very
+      first typecheck. Fixed both enums to match the real DB `CHECK`
+      constraints (migrations `0014`/`0015`)
+- [x] `lib/types.ts`'s exported names and every page's own import site
+      (`import type { Node } from "@/lib/types"`) are unchanged — only
+      the definitions inside that one file moved from hand-copied
+      interfaces to one-line aliases (`export type Node =
+      components["schemas"]["Node"];`). `Page<T>` stays hand-written
+      (a structural generic; every paginated endpoint has its own
+      concrete `*Page` schema already, not something to alias generically)
+- [x] `npx tsc --noEmit` across the whole app: clean after fixing the two
+      real bugs above plus one incidental fix (`ai/page.tsx`'s
+      `privacyLevel` edit-form state needed to stay a plain `string`,
+      not narrow to the response's own literal union, since it backs a
+      free-typing `<select>`); `npm run build` clean
+- [x] No backend Go changes this phase — `openapi.json` metadata only, no
+      route/handler/domain logic touched; full backend test suite re-run
+      clean anyway, confirming nothing regressed
+- [x] Verified live end to end: registered a real node, decommissioned
+      it through the UI, and confirmed the `decommissioned` status still
+      renders correctly with every control hidden (exercising the exact
+      comparison `tsc` had just flagged); created a real AI profile and
+      edited its privacy level through the UI, confirming the
+      previously-type-broken form still round-trips through the real
+      backend. Checked the browser console on fresh tabs across both
+      pages — zero errors
+- [x] Docs (`API.md`, `FRONTEND.md`, `README.md`) updated
+- [x] **This is the final phase of this development pass** — Phases
+      31-50 collectively closed every CRUD/lifecycle gap, audit-trail
+      gap, rate-limiting gap, and type-safety gap this session's several
+      rounds of domain audits surfaced, without fabricating scope beyond
+      what was genuinely found (rule 36) and without taking on
+      higher-risk mechanical rewrites (full code-first OpenAPI
+      generation, concrete job types, a platform secrets mechanism,
+      real email delivery) that need their own dedicated, carefully-scoped
+      passes rather than being squeezed into this one
+
 ## Next up
 
 1. **Concrete job types**: the worker dispatcher is real but nothing
@@ -1596,9 +1663,15 @@ scanning in CI (`govulncheck`, `npm audit`).
 2. **More tool handlers**: `get_container_logs` needs a container domain
    that doesn't exist yet; `create_backup`/`verify_backup` need the jobs
    system wired to an actual backup mechanism.
-3. **Generate the OpenAPI spec from code** instead of hand-maintaining it,
-   and swap `web/`'s hand-written `lib/types.ts` over to the generated
-   `lib/api-types.generated.ts`.
+3. **Generate the OpenAPI spec from code** instead of hand-maintaining
+   it — the frontend-type-generation half of this item shipped in
+   Phase 50 (`web/lib/types.ts` is now a thin alias layer over
+   `lib/api-types.generated.ts`); retrofitting every handler with Go doc
+   annotations so the spec itself is generated, rather than
+   hand-maintained-and-kept-in-sync, remains deliberately deferred — a
+   much larger, higher-blast-radius mechanical rewrite than any other
+   item on this list, not something to take on in the same pass as the
+   type-alias swap.
 4. **A "platform secrets" mechanism** for cloud provider credentials
    (`docs/AI_ARCHITECTURE.md` Credential handling) — the
    org-scoped-secrets-vs-platform-wide-provider mismatch is unaffected by
