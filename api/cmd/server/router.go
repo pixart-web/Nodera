@@ -1314,13 +1314,24 @@ func (d apiDeps) handleRunAgent(w http.ResponseWriter, r *http.Request) {
 		httpserver.WriteError(w, r, apierr.Validation("invalid agent id"))
 		return
 	}
+	ac := mustAuthContext(r)
+
+	// Run drives the same ai.Service.Chat cost path as POST /ai/chat — an
+	// agent is just another caller of it, so it must be bound by the same
+	// per-organization rate limit, or agents.execute becomes a way to
+	// bypass ai.chat's cost-control limiter entirely (see docs/SECURITY.md).
+	if d.aiChatRate != nil && !d.aiChatRate.Allow(ac.OrganizationID.String()) {
+		httpserver.WriteError(w, r, apierr.New(apierr.CodeRateLimited, "too many AI requests for this organization, try again shortly"))
+		return
+	}
+
 	var body struct {
 		Message string `json:"message"`
 	}
 	if !decodeJSON(w, r, &body) {
 		return
 	}
-	result, err := d.agents.Run(r.Context(), mustAuthContext(r), id, body.Message)
+	result, err := d.agents.Run(r.Context(), ac, id, body.Message)
 	if err != nil {
 		httpserver.WriteError(w, r, err)
 		return

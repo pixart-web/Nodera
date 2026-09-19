@@ -174,7 +174,10 @@ oversight — see `internal/ai/registry.go`.
 
 `POST /auth/login` (5 attempts / 5 minutes) and `POST /auth/signup`
 (3 attempts / hour) are rate limited per client IP; `POST /api/v1/ai/chat`
-is rate limited per organization (60 requests / minute); `POST
+and `POST /api/v1/agents/{id}/run` share one per-organization budget
+(60 requests / minute combined) — an agent's scoped chat drives the same
+AI-gateway cost path `ai/chat` does, so it draws from the same limiter
+rather than a separate one an agent could use to bypass it; `POST
 /api/v1/organizations` is rate limited per user (10 organizations / hour).
 Exceeding any of them returns `429` with code `RATE_LIMITED` — see
 `docs/SECURITY.md`.

@@ -972,6 +972,40 @@ scanning in CI (`govulncheck`, `npm audit`).
 - [x] Full backend test suite re-run clean (`go test ./... -race`)
 - [x] Docs (`API.md`, `FRONTEND.md`, `README.md`) updated
 
+**Phase 34** — this pass:
+- [x] Closed a concrete rate-limiting bypass found during the same
+      domain-audit pass as Phases 31-33: `POST /agents/{id}/run` drives
+      the exact same `ai.Service.Chat` cost path `POST /ai/chat` does, but
+      only `/ai/chat` checked `aiChatRate` — an agent's scoped chat could
+      run unlimited AI-gateway calls against an org's budget with no
+      throttling at all, unlike calling the gateway directly
+- [x] `handleRunAgent` now checks the exact same `aiChatRate` limiter
+      instance, keyed by `ac.OrganizationID` the same way `handleAIChat`
+      already was — a shared per-organization budget between the two
+      endpoints, not a second independent one an agent could exhaust
+      separately from `/ai/chat`'s own 60/minute
+- [x] No new domain logic, no migration, no OpenAPI schema change beyond
+      documenting the existing `429`/`RATE_LIMITED` response on
+      `POST /agents/{id}/run` (mirroring how `/ai/chat` already documents
+      it); `lib/api-types.generated.ts` regenerated. `cmd/server` has no
+      Go test harness for router-level HTTP wiring (rate limiting was
+      previously verified live only, same as `/ai/chat`'s original
+      rollout), so this was verified the same way, live, against the real
+      running server rather than skipped for lack of a unit test
+- [x] Verified live end to end: signed up a fresh account, created an org,
+      an AI profile, and an agent scoped to `ai.use`, enabled it, then
+      fired 65 real HTTP requests at `POST /agents/{id}/run` in a tight
+      loop — the first 60 returned `200`, the 61st through 65th returned a
+      real `429` with `RATE_LIMITED`. Then, without resetting anything,
+      called `POST /ai/chat` for the same organization and confirmed it
+      also came back `429` — proving the two endpoints draw from one
+      shared budget, not two independent ones that happened to both be
+      exhausted
+- [x] Full backend test suite re-run clean (`go test ./... -race`)
+- [x] Docs (`API.md`, `SECURITY.md`, `AGENTS.md`, `README.md`) updated —
+      `SECURITY.md`'s rate-limiting section previously implied
+      `agents/{id}/run` was unlimited; corrected
+
 ## Next up
 
 1. **Concrete job types**: the worker dispatcher is real but nothing

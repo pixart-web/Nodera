@@ -125,7 +125,8 @@ self-contained implementation.
 (`cmd/server/router.go`) to:
 - `POST /auth/login` — 5 attempts / 5 minutes per client IP
 - `POST /auth/signup` — 3 attempts / hour per client IP
-- `POST /api/v1/ai/chat` — 60 requests / minute **per organization**
+- `POST /api/v1/ai/chat` and `POST /api/v1/agents/{id}/run` — 60 requests
+  / minute **per organization, sharing one budget between the two**
 - `POST /api/v1/organizations` — 10 organizations / hour **per user**
 
 Login/signup are keyed by IP rather than the submitted email, so an
@@ -135,7 +136,15 @@ design would enable). AI chat is keyed by organization instead — the real
 risk there isn't login lockout, it's one tenant (a careless or compromised
 integration) running up real provider cost or crowding out other tenants
 on a shared local model; an IP-keyed limiter wouldn't even bound that
-(many legitimate calls can share an IP behind NAT). Organization creation
+(many legitimate calls can share an IP behind NAT). `agents/{id}/run`
+draws from that identical limiter (same `Allower`, same organization key)
+rather than a limiter of its own, since it drives the exact same
+`ai.Service.Chat` cost path — a separate budget there would have let
+`agents.execute` bypass `ai.chat`'s cost control entirely. Verified live:
+60 rapid calls to `agents/{id}/run` succeed and the 61st returns a real
+`429`, and a subsequent call to `ai/chat` for the same organization is
+also `429`, proving the two endpoints share state rather than each
+tolerating 60 of their own. Organization creation
 is keyed by the calling user's ID rather than IP — unlike login/signup,
 it's only reachable once authenticated, so the actor is already known and
 stable; bounds spam-organization creation by any single account.
@@ -202,8 +211,9 @@ not taken during this foundation-building pass; tracked in
   session token is a bearer token, not a cookie, so CSRF is out of scope
   until a cookie-based web session flow is added)
 - Rate limiting on endpoints beyond `/auth/login`, `/auth/signup`,
-  `/ai/chat`, and `/organizations` — every other endpoint remains unlimited
-  (most mutations beyond these are already `organization.manage`-gated,
+  `/ai/chat` (shared with `/agents/{id}/run`), and `/organizations` —
+  every other endpoint remains unlimited (most mutations beyond these are
+  already `organization.manage`-gated,
   which meaningfully narrows who can even attempt abuse)
 - Upload validation (no upload endpoints exist yet)
 - External KMS/vault integration for secrets (current implementation is a

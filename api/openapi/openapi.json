@@ -2385,6 +2385,9 @@
               }
             }
           },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
           "403": {
             "description": "Agent's own permission_scope lacks ai.use"
           },

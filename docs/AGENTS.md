@@ -126,7 +126,11 @@ Two capabilities exist today, both requiring the caller to hold
   `system_instructions` as a system message if set, and calls
   `ai.Service.Chat` under that scoped context. The agent's own scope — not
   the caller's `agents.execute` — must include `ai.use`, or the call is
-  refused (`TestAgents_RunRequiresAIUseInAgentScope`).
+  refused (`TestAgents_RunRequiresAIUseInAgentScope`). The HTTP handler
+  (`POST /agents/{id}/run`) draws from the exact same per-organization
+  rate-limit budget as `POST /ai/chat` (`docs/SECURITY.md`) — `Run` drives
+  the identical `ai.Service.Chat` cost path, so it can't be used as a way
+  around that limiter.
 - **`ExecuteTool(ctx, ac, id, toolKey, input)`** — checks `toolKey` is in
   the agent's `allowed_tool_keys` (refused before it ever reaches the Tool
   Gateway if not — `TestAgents_ExecuteToolRespectsAllowlistAndScope`), then
