@@ -84,6 +84,7 @@ func newRouter(d apiDeps) http.Handler {
 
 				r.Get("/organization", d.handleGetOrganization)
 				r.Put("/organization", d.handleUpdateOrganization)
+				r.Post("/organization/leave", d.handleLeaveOrganization)
 
 				r.Get("/infrastructure/nodes", d.handleListNodes)
 				r.Post("/infrastructure/nodes", d.handleRegisterNode)
@@ -373,6 +374,14 @@ func (d apiDeps) handleUpdateOrganization(w http.ResponseWriter, r *http.Request
 		return
 	}
 	httpserver.WriteJSON(w, http.StatusOK, org)
+}
+
+func (d apiDeps) handleLeaveOrganization(w http.ResponseWriter, r *http.Request) {
+	if err := d.tenancy.LeaveOrganization(r.Context(), mustAuthContext(r)); err != nil {
+		httpserver.WriteError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // --- infrastructure ---

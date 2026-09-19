@@ -215,6 +215,22 @@ the form, confirmed the dashboard's header and the audit log's
 confirmed via a direct API call that renaming to another organization's
 slug returns a real `409 CONFLICT`.
 
+A "Leave this organization" control sits right below the Organization
+form (`POST /api/v1/organization/leave`) — deliberately independent of
+the `organization.manage` gate the Roles/Members sections below it are
+subject to, since leaving is a self-service action any member can take on
+their own membership, the same "you can act on your own resource"
+pattern account sessions/tokens already follow. On success it navigates
+to `/orgs` (the same place "Switch organization" goes), since the current
+org is no longer one the caller belongs to. Verified live: as the sole
+owner, clicked it and saw the real `409 CONFLICT` ("cannot remove the
+organization's last owner") render inline; added a second real account,
+logged in as them (a plain member, `organization.manage`-forbidden from
+the Roles/Members sections but the Organization form and Leave control
+still render), clicked Leave, and watched a genuine redirect to the org
+picker showing "you don't belong to any organization yet." Checked the
+console on a completely fresh tab as the owner afterward — zero errors.
+
 It otherwise covers RBAC: a Roles table (name, description, and
 permission count/list from `GET /api/v1/roles`) and a Members table
 (`GET /api/v1/organization/members`) showing each member's currently

@@ -1117,6 +1117,50 @@ scanning in CI (`govulncheck`, `npm audit`).
 - [x] Full backend test suite re-run clean (`go test ./... -race`)
 - [x] Docs (`API.md`, `FRONTEND.md`, `README.md`) updated
 
+**Phase 38** — this pass:
+- [x] `tenancy.LeaveOrganization` — the third Phase 36 audit finding: an
+      admin (`organization.manage`) can add and now remove any member,
+      but there was no *self-service* way for a member to remove their
+      own membership — `AddMember` requires `organization.manage`, and
+      RevokeSession/RevokeAPIToken's "act on your own resource" pattern
+      had no equivalent here
+- [x] Refactored `RemoveMember`'s body into a shared `removeMember(ctx,
+      ac, userID, auditAction)` helper both `RemoveMember` and
+      `LeaveOrganization` call — same last-owner guard, same cascade-via-
+      FK delete, different audit action label (`tenancy.member.removed`
+      vs `tenancy.member.left`) so the trail records which path was
+      taken. `LeaveOrganization` requires no permission beyond being an
+      authenticated member — deliberately not gated by
+      `organization.manage`, since a member lacking it must still be able
+      to remove *themselves*, just not anyone else
+- [x] Subject to the identical last-owner guard as `RemoveMember`: a sole
+      owner can't leave any more than they could remove themselves via
+      the admin path
+- [x] 2 new integration tests, passing under `-race` alongside the 13
+      pre-existing tenancy tests (15 total): a plain member successfully
+      removes themselves, and the last owner is refused
+- [x] 1 new HTTP route (`POST /organization/leave`, in the same
+      `requireOrganization`-only group as `GET`/`PUT /organization` —
+      deliberately outside the `organization.manage`-gated group the
+      member/role routes sit in) and an OpenAPI addition, validated with
+      `@redocly/cli lint`; `lib/api-types.generated.ts` regenerated
+- [x] `web/app/(org)/settings/page.tsx`: a "Leave this organization"
+      control below the Organization form, independent of the
+      `organization.manage` gate the Roles/Members sections below it
+      need — a plain member sees it even though those sections show
+      `FORBIDDEN`. Navigates to `/orgs` on success, same as "Switch
+      organization"
+- [x] Verified live end to end: as the sole owner, clicked Leave and saw
+      the real `409 CONFLICT` render inline; added a second real
+      account, logged in as them, confirmed the Organization form and
+      Leave control render while Roles/Members correctly show
+      `FORBIDDEN`, clicked Leave, and watched a genuine redirect to the
+      org picker showing "you don't belong to any organization yet."
+      Checked the console on a completely fresh tab afterward — zero
+      errors
+- [x] Full backend test suite re-run clean (`go test ./... -race`)
+- [x] Docs (`API.md`, `FRONTEND.md`, `README.md`) updated
+
 ## Next up
 
 1. **Concrete job types**: the worker dispatcher is real but nothing

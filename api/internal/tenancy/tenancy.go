@@ -272,7 +272,27 @@ func (s *Service) RemoveMember(ctx context.Context, ac authctx.AuthContext, user
 	if err := rbac.Require(ac, "organization.manage"); err != nil {
 		return err
 	}
+	return s.removeMember(ctx, ac, userID, "tenancy.member.removed")
+}
 
+// LeaveOrganization removes the caller themselves from the calling
+// organization — the self-service counterpart to the admin-driven
+// RemoveMember. Deliberately requires no permission beyond being an
+// authenticated member of the org: a member who lacks organization.manage
+// can still remove themselves (they just can't remove anyone else), the
+// same "you can always act on your own resource" pattern RevokeSession and
+// RevokeAPIToken already follow. Subject to the identical last-owner guard
+// RemoveMember enforces — a sole owner can't leave any more than they
+// could remove themselves via the admin path.
+func (s *Service) LeaveOrganization(ctx context.Context, ac authctx.AuthContext) error {
+	return s.removeMember(ctx, ac, ac.ActorID, "tenancy.member.left")
+}
+
+// removeMember is shared by RemoveMember and LeaveOrganization — same
+// last-owner guard, same cascade-via-FK delete, different audit action
+// label so the trail records which path was taken (an admin removing
+// someone else vs. a member removing themselves).
+func (s *Service) removeMember(ctx context.Context, ac authctx.AuthContext, userID uuid.UUID, auditAction string) error {
 	var isOwner bool
 	if err := s.pool.QueryRow(ctx, `
 		SELECT EXISTS(
@@ -306,7 +326,7 @@ func (s *Service) RemoveMember(ctx context.Context, ac authctx.AuthContext, user
 	}
 
 	if err := s.audit.Record(ctx, ac, audit.Entry{
-		Action: "tenancy.member.removed", ResourceType: "organization_member", ResourceID: userID.String(),
+		Action: auditAction, ResourceType: "organization_member", ResourceID: userID.String(),
 		Success: true,
 	}); err != nil {
 		logger.FromContext(ctx).Error("failed to write audit entry", "error", err)

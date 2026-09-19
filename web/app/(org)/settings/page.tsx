@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { api, ApiError } from "@/lib/api";
 import { useApi } from "@/lib/useApi";
 import { PageHeader } from "@/components/PageHeader";
@@ -62,6 +63,38 @@ function OrganizationForm({ org, onUpdated }: { org: Organization; onUpdated: ()
         {busy ? "Saving…" : "Save organization"}
       </button>
     </form>
+  );
+}
+
+function LeaveOrganizationSection() {
+  const router = useRouter();
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  async function leave() {
+    setError(null);
+    setBusy(true);
+    try {
+      await api.post("/api/v1/organization/leave");
+      router.push("/orgs");
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Failed to leave organization");
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="card mb-8 space-y-2 border-danger/30 p-4">
+      {error && <ErrorBanner message={error} />}
+      <p className="text-xs text-base-400">
+        Removes your own membership from this organization. You&apos;ll keep your account and any other
+        organizations you belong to — this only affects this one. Refused if you&apos;re the organization&apos;s
+        last remaining owner.
+      </p>
+      <button className="text-xs text-base-400 hover:text-danger" disabled={busy} onClick={leave}>
+        {busy ? "Leaving…" : "Leave this organization"}
+      </button>
+    </div>
   );
 }
 
@@ -333,6 +366,7 @@ export default function SettingsPage() {
         <div className="mb-8">
           <h2 className="mb-3 text-sm font-medium text-base-100">Organization</h2>
           <OrganizationForm org={org.data} onUpdated={() => org.reload()} />
+          <LeaveOrganizationSection />
         </div>
       )}
 

@@ -90,6 +90,7 @@ tracked in `docs/ROADMAP.md` if that stops being true.
 | POST | `/api/v1/organizations` | session or token | Create an organization; creator becomes `owner` |
 | GET | `/api/v1/organization` | session or token + org | Get the current organization |
 | PUT | `/api/v1/organization` | session or token + org | Rename the current organization and/or change its slug (`organization.manage`) — `409 CONFLICT` if the slug is already taken |
+| POST | `/api/v1/organization/leave` | session or token + org | Remove the caller's own membership from the current organization — no `organization.manage` required, any member can leave; `409 CONFLICT` if the caller is the organization's last `owner` |
 | GET | `/api/v1/infrastructure/nodes` | session or token + org | List nodes, paginated (`infrastructure.read`) |
 | POST | `/api/v1/infrastructure/nodes` | session or token + org | Register a node (`infrastructure.manage`) |
 | GET | `/api/v1/infrastructure/nodes/{id}` | session or token + org | Get a node |

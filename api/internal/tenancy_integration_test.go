@@ -197,6 +197,46 @@ func TestTenancy_UpdateOrganizationRejectsDuplicateSlug(t *testing.T) {
 	}
 }
 
+// LeaveOrganization is the self-service counterpart to RemoveMember — a
+// plain member (no organization.manage) can remove themselves even though
+// they couldn't remove anyone else.
+func TestTenancy_LeaveOrganizationRemovesSelf(t *testing.T) {
+	pool := testhelpers.RequirePool(t)
+	ctx := context.Background()
+	h := newHarness(pool)
+	ownerAC, _ := h.newOwnerContext(t, ctx, "leaveorg-owner@nodera.dev")
+	memberAC := h.newMemberContext(t, ctx, ownerAC.OrganizationID, "leaveorg-member@nodera.dev")
+
+	if err := h.tenancy.LeaveOrganization(ctx, memberAC); err != nil {
+		t.Fatalf("LeaveOrganization: %v", err)
+	}
+
+	members, err := h.rbac.ListMembers(ctx, ownerAC)
+	if err != nil {
+		t.Fatalf("ListMembers: %v", err)
+	}
+	for _, m := range members {
+		if m.Email == "leaveorg-member@nodera.dev" {
+			t.Fatalf("expected the departed member to no longer appear, got %+v", m)
+		}
+	}
+}
+
+// The sole owner can't leave any more than they could remove themselves
+// via the admin path — same last-owner guard, same reason.
+func TestTenancy_LeaveOrganizationRefusesLastOwner(t *testing.T) {
+	pool := testhelpers.RequirePool(t)
+	ctx := context.Background()
+	h := newHarness(pool)
+	ac, _ := h.newOwnerContext(t, ctx, "leaveorg-lastowner-owner@nodera.dev")
+
+	if err := h.tenancy.LeaveOrganization(ctx, ac); err == nil {
+		t.Fatal("expected the last owner leaving to fail")
+	} else if ae, ok := err.(*apierr.Error); !ok || ae.Code != apierr.CodeConflict {
+		t.Fatalf("expected CONFLICT, got %v", err)
+	}
+}
+
 // RemoveMember drops both the membership row and, via the composite FK's
 // cascade, every role grant the member held — confirmed by re-adding the
 // same person afterward, which only succeeds if no stale membership row

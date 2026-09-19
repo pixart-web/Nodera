@@ -3278,6 +3278,27 @@
           }
         }
       }
+    },
+    "/api/v1/organization/leave": {
+      "post": {
+        "tags": [
+          "organizations"
+        ],
+        "summary": "Leave the current organization \u2014 remove the caller's own membership",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OrgHeader"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Left the organization"
+          },
+          "409": {
+            "description": "Refused \u2014 the caller is the organization's last owner"
+          }
+        }
+      }
     }
   },
   "components": {
