@@ -3333,6 +3333,59 @@ export interface paths {
         };
         trace?: never;
     };
+    "/api/v1/organization/members/{userID}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Remove a member from the calling organization (organization.manage) — cascades to their role grants */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: {
+                    /** @description Required for a session token (which org to act within). Optional for an API token, which already embeds one — if present it must match. */
+                    "X-Nodera-Org"?: components["parameters"]["OrgHeader"];
+                };
+                path: {
+                    userID: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Member removed */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not a member of this organization */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Refused — this would remove the organization's last owner */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {

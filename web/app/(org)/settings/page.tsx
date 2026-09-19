@@ -247,6 +247,21 @@ export default function SettingsPage() {
     }
   }
 
+  const [removingMemberID, setRemovingMemberID] = useState<string | null>(null);
+
+  async function removeMember(userID: string) {
+    setError(null);
+    setRemovingMemberID(userID);
+    try {
+      await api.del(`/api/v1/organization/members/${userID}`);
+      members.reload();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Failed to remove member");
+    } finally {
+      setRemovingMemberID(null);
+    }
+  }
+
   return (
     <div>
       <PageHeader
@@ -388,7 +403,7 @@ export default function SettingsPage() {
                         ))
                       )}
                     </td>
-                    <td>
+                    <td className="space-x-3">
                       {assigningFor === m.user_id ? (
                         <AssignRoleForm
                           member={m}
@@ -399,12 +414,21 @@ export default function SettingsPage() {
                           }}
                         />
                       ) : (
-                        <button
-                          className="text-xs text-accent-400 hover:text-accent-300"
-                          onClick={() => setAssigningFor(m.user_id)}
-                        >
-                          Assign role
-                        </button>
+                        <>
+                          <button
+                            className="text-xs text-accent-400 hover:text-accent-300"
+                            onClick={() => setAssigningFor(m.user_id)}
+                          >
+                            Assign role
+                          </button>
+                          <button
+                            className="text-xs text-base-400 hover:text-danger disabled:text-base-600"
+                            disabled={removingMemberID === m.user_id}
+                            onClick={() => removeMember(m.user_id)}
+                          >
+                            {removingMemberID === m.user_id ? "Removing…" : "Remove"}
+                          </button>
+                        </>
                       )}
                     </td>
                   </tr>

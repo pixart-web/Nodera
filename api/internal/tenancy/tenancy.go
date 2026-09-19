@@ -198,6 +198,64 @@ func (s *Service) AddMember(ctx context.Context, ac authctx.AuthContext, email s
 	return AddedMember{UserID: u.ID, Email: u.Email, DisplayName: u.DisplayName}, nil
 }
 
+// RemoveMember removes an existing member from the calling organization —
+// the missing counterpart to AddMember. The composite FK on
+// organization_member_roles (migration 0002) cascades on delete, so a
+// single DELETE from organization_members is enough to also drop every
+// role grant the member held; there is nothing else in the schema keyed
+// by (organization_id, user_id) today.
+//
+// Refuses to remove the organization's last remaining holder of the
+// system 'owner' role — an org with zero owners has no one left who can
+// manage it (assign roles, add/remove members, etc.), an unrecoverable
+// state nothing else in the codebase can repair short of a database edit.
+func (s *Service) RemoveMember(ctx context.Context, ac authctx.AuthContext, userID uuid.UUID) error {
+	if err := rbac.Require(ac, "organization.manage"); err != nil {
+		return err
+	}
+
+	var isOwner bool
+	if err := s.pool.QueryRow(ctx, `
+		SELECT EXISTS(
+			SELECT 1 FROM organization_member_roles
+			WHERE organization_id = $1 AND user_id = $2 AND role_id = $3
+		)
+	`, ac.OrganizationID, userID, systemOwnerRoleID).Scan(&isOwner); err != nil {
+		return apierr.Wrap(apierr.CodeInternal, "failed to check member's role", err)
+	}
+	if isOwner {
+		var ownerCount int
+		if err := s.pool.QueryRow(ctx, `
+			SELECT count(*) FROM organization_member_roles
+			WHERE organization_id = $1 AND role_id = $2
+		`, ac.OrganizationID, systemOwnerRoleID).Scan(&ownerCount); err != nil {
+			return apierr.Wrap(apierr.CodeInternal, "failed to count owners", err)
+		}
+		if ownerCount <= 1 {
+			return apierr.Conflict("cannot remove the organization's last owner")
+		}
+	}
+
+	tag, err := s.pool.Exec(ctx, `
+		DELETE FROM organization_members WHERE organization_id = $1 AND user_id = $2
+	`, ac.OrganizationID, userID)
+	if err != nil {
+		return apierr.Wrap(apierr.CodeInternal, "failed to remove member", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return apierr.NotFound("organization member")
+	}
+
+	if err := s.audit.Record(ctx, ac, audit.Entry{
+		Action: "tenancy.member.removed", ResourceType: "organization_member", ResourceID: userID.String(),
+		Success: true,
+	}); err != nil {
+		logger.FromContext(ctx).Error("failed to write audit entry", "error", err)
+	}
+
+	return nil
+}
+
 // AddedMember is the minimal shape AddMember returns — deliberately not
 // identity.User verbatim (this package doesn't own user records, ADR-002;
 // it only reports who was just added, not the full user record).

@@ -1048,6 +1048,43 @@ scanning in CI (`govulncheck`, `npm audit`).
 - [x] Full backend test suite re-run clean (`go test ./... -race`)
 - [x] Docs (`API.md`, `FRONTEND.md`, `README.md`) updated
 
+**Phase 36** — this pass:
+- [x] `tenancy.RemoveMember` — found by a fresh domain audit (the same
+      style as Phases 31-35, now applied to `internal/tenancy`,
+      `internal/rbac`, and `internal/identity`): `AddMember` existed with
+      no counterpart to undo it, and `ListMembers`/`AssignRole`/
+      `RevokeRole` in `internal/rbac` are otherwise a complete set —
+      rbac's role CRUD and tools' TTL-override CRUD were both already
+      fully closed, so this sweep's strongest finding was specifically
+      the missing member-removal path
+- [x] A single `DELETE FROM organization_members` is sufficient — the
+      composite FK on `organization_member_roles` (migration 0002)
+      cascades on delete, so removing a member also drops every role
+      grant they held without a second query
+- [x] Refuses to remove an organization's last remaining holder of the
+      system `owner` role (`409 CONFLICT`) — an org with zero owners has
+      no one left who can manage it, an unrecoverable state short of a
+      database edit. The guard is specifically about the *last* owner:
+      removing one of several owners is allowed
+- [x] 6 new integration tests, passing under `-race` alongside the 4
+      pre-existing tenancy tests (10 total): membership and role rows
+      both drop (confirmed by a clean re-add), a plain member is
+      forbidden, removing a nonexistent member is `NOT_FOUND`, the
+      last-owner guard fires, and removing one of two owners succeeds
+- [x] 1 new HTTP route (`DELETE /organization/members/{userID}`) and an
+      OpenAPI addition, validated with `@redocly/cli lint`;
+      `lib/api-types.generated.ts` regenerated
+- [x] `web/app/(org)/settings/page.tsx`: a "Remove" button next to
+      "Assign role" on each member row
+- [x] Verified live end to end: attempted removing the sole owner of a
+      real organization through the UI and watched the real `409
+      CONFLICT` ("cannot remove the organization's last owner") render
+      inline; added a second real account as a member, removed it
+      through the UI, and confirmed it disappeared from the table.
+      Checked the browser console on a fresh tab — zero errors
+- [x] Full backend test suite re-run clean (`go test ./... -race`)
+- [x] Docs (`API.md`, `FRONTEND.md`, `README.md`) updated
+
 ## Next up
 
 1. **Concrete job types**: the worker dispatcher is real but nothing

@@ -111,6 +111,7 @@ func newRouter(d apiDeps) http.Handler {
 				r.Delete("/roles/{id}", d.handleDeleteRole)
 				r.Get("/organization/members", d.handleListMembers)
 				r.Post("/organization/members", d.handleAddMember)
+				r.Delete("/organization/members/{userID}", d.handleRemoveMember)
 				r.Post("/organization/members/{userID}/roles", d.handleAssignRole)
 				r.Delete("/organization/members/{userID}/roles/{roleID}", d.handleRevokeRole)
 
@@ -718,6 +719,19 @@ func (d apiDeps) handleAddMember(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpserver.WriteJSON(w, http.StatusCreated, added)
+}
+
+func (d apiDeps) handleRemoveMember(w http.ResponseWriter, r *http.Request) {
+	userID, err := uuid.Parse(chi.URLParam(r, "userID"))
+	if err != nil {
+		httpserver.WriteError(w, r, apierr.Validation("invalid user id"))
+		return
+	}
+	if err := d.tenancy.RemoveMember(r.Context(), mustAuthContext(r), userID); err != nil {
+		httpserver.WriteError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (d apiDeps) handleAssignRole(w http.ResponseWriter, r *http.Request) {

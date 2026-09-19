@@ -259,6 +259,13 @@ before. Verified live: renamed a custom role and changed its description
 through the form, confirmed the table updated and the permission set
 (`audit.read`) was unaffected by a details-only edit.
 
+Each member row also has a "Remove" button next to "Assign role"
+(`DELETE /api/v1/organization/members/{userID}`), the missing counterpart
+to "Add member." Verified live: attempted removing the organization's
+sole owner and saw the real `409 CONFLICT` ("cannot remove the
+organization's last owner") render inline; added a second account, then
+removed it and watched it disappear from the table.
+
 ## Account page
 
 `account/page.tsx` is deliberately not under any `organization.manage`
