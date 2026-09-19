@@ -6,6 +6,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/nodera/nodera/internal/audit"
 	"github.com/nodera/nodera/internal/identity"
 	"github.com/nodera/nodera/internal/platform/apierr"
 	"github.com/nodera/nodera/internal/testhelpers"
@@ -319,5 +320,52 @@ func TestServiceAccountManagement_RequiresOrganizationManage(t *testing.T) {
 
 	if _, err := h.identity.AdminListAPITokens(ctx, memberAC); err == nil {
 		t.Fatal("expected a 'member' to be forbidden from the admin token listing")
+	}
+}
+
+// Create/Disable/Enable/Update all now write real, queryable audit
+// entries — the full lifecycle produces a real trail, not just some of it.
+func TestServiceAccount_WritesAuditEntriesForFullLifecycle(t *testing.T) {
+	pool := testhelpers.RequirePool(t)
+	ctx := context.Background()
+	h := newHarness(pool)
+	ac, _ := h.newOwnerContext(t, ctx, "sa-audit-owner@nodera.dev")
+
+	sa, err := h.identity.CreateServiceAccount(ctx, ac, "audited-bot", "original")
+	if err != nil {
+		t.Fatalf("CreateServiceAccount: %v", err)
+	}
+	if err := h.identity.DisableServiceAccount(ctx, ac, sa.ID); err != nil {
+		t.Fatalf("DisableServiceAccount: %v", err)
+	}
+	if err := h.identity.EnableServiceAccount(ctx, ac, sa.ID); err != nil {
+		t.Fatalf("EnableServiceAccount: %v", err)
+	}
+	newName := "renamed-bot"
+	if _, err := h.identity.UpdateServiceAccount(ctx, ac, sa.ID, identity.UpdateServiceAccountInput{Name: &newName}); err != nil {
+		t.Fatalf("UpdateServiceAccount: %v", err)
+	}
+
+	records, err := h.audit.Query(ctx, ac, audit.QueryFilter{
+		OrganizationID: ac.OrganizationID, ResourceType: "service_account", ResourceID: sa.ID.String(),
+	})
+	if err != nil {
+		t.Fatalf("Query: %v", err)
+	}
+	wantActions := map[string]bool{
+		"identity.service_account.created":  false,
+		"identity.service_account.disabled": false,
+		"identity.service_account.enabled":  false,
+		"identity.service_account.updated":  false,
+	}
+	for _, r := range records {
+		if _, ok := wantActions[r.Action]; ok {
+			wantActions[r.Action] = true
+		}
+	}
+	for action, seen := range wantActions {
+		if !seen {
+			t.Fatalf("expected an audit entry for %s, got %+v", action, records)
+		}
 	}
 }

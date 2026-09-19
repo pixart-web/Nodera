@@ -118,6 +118,16 @@ self-contained implementation.
   since it depends on the still-unfinalized production role layout.
 - Sensitive operations (e.g. node registration) call `audit.Record` with
   actor, action, resource, and resulting state.
+- `internal/identity`'s service-account and API-token lifecycle
+  (create/disable/enable/update, create/revoke) is audited the same way —
+  a raw API token value is never included in the recorded state, only its
+  prefix. `SignUp`/`Login`/`Logout`/`ChangePassword`/session management
+  are deliberately NOT audited: those run before an organization is
+  selected (`requireSession`, not `requireOrganization`), and
+  `audit.Query` always scopes by `organization_id`, so a NULL-org entry
+  would be written but could never be read back through any existing API
+  surface — writing unverifiable, effectively invisible rows was judged
+  worse than not writing them (`docs/ROADMAP.md` Phase 41).
 
 ## Rate limiting — IMPLEMENTED (login, signup, AI chat, org creation)
 

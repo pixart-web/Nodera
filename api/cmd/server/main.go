@@ -78,7 +78,7 @@ func run() error {
 
 	auditSvc := audit.New(pool)
 	rbacSvc := rbac.New(pool, auditSvc)
-	identitySvc := identity.New(pool, rbacSvc, cfg.Auth.SessionTTL)
+	identitySvc := identity.New(pool, rbacSvc, cfg.Auth.SessionTTL, auditSvc)
 	tenancySvc := tenancy.New(pool, identitySvc, auditSvc)
 	infraSvc := infrastructure.New(pool, auditSvc)
 	appsSvc := applications.New(pool, auditSvc)

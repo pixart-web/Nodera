@@ -1236,6 +1236,57 @@ scanning in CI (`govulncheck`, `npm audit`).
 - [x] Full backend test suite re-run clean (`go test ./... -race`)
 - [x] Docs (`API.md`, `FRONTEND.md`, `README.md`) updated
 
+**Phase 41** — this pass:
+- [x] `internal/identity` audit trail for API tokens and service
+      accounts — found by a fresh domain-wide audit (widening beyond
+      tenancy/AI, Phases 36-40) that noticed `identity.Service` had no
+      `audit` field at all, unlike every other mutating domain (tenancy,
+      rbac, ai, secrets, tools, agents, applications, infrastructure).
+      The Audit page's own copy ("Every sensitive operation is recorded
+      here") was, until now, false for this whole domain
+- [x] Threaded an `AuditRecorder` into `identity.New` (now takes an
+      `auditRecorder` param — 3 call sites updated: `main.go`,
+      `harness_test.go`, `integration_test.go`) and wired it into
+      `CreateAPIToken`, `CreateAPITokenForServiceAccount`,
+      `RevokeAPIToken`, `AdminRevokeAPIToken` (`apitoken.go`) and
+      `CreateServiceAccount`, `DisableServiceAccount`,
+      `EnableServiceAccount`, `UpdateServiceAccount`
+      (`serviceaccount.go`) — the full lifecycle of both, not a subset
+- [x] **Deliberately did not audit `SignUp`/`Login`/`Logout`/
+      `ChangePassword`/session management** — a real scope decision, not
+      an oversight: those routes run before an organization is selected
+      (`requireSession` only, not `requireOrganization` —
+      `cmd/server/router.go`), and `audit.Query` always filters by
+      `organization_id`. A NULL-org audit entry would be written but
+      could never be read back through the existing Audit page or API —
+      writing rows nothing could ever verify or display would have
+      violated rule 36 in spirit even though the write itself would
+      "succeed." Documented explicitly in `identity.New`'s doc comment
+      and `docs/SECURITY.md` so a future phase doesn't have to
+      rediscover this
+- [x] The raw API token value is never included in what gets audited —
+      `APIToken`'s JSON shape only ever carries `TokenPrefix`, never the
+      secret itself, same guarantee `Set`/`UpdateDescription` already give
+      secret values
+- [x] 2 new integration tests, passing under `-race` alongside every
+      existing identity/service-account/API-token test: one confirms
+      create+revoke both produce real, queryable audit rows AND
+      double-checks by querying `audit_log` directly that the raw token
+      value never appears in `resulting_state`; the other confirms
+      create/disable/enable/update on a service account each produce
+      their own distinct audit action
+- [x] No new HTTP routes, OpenAPI changes, or frontend code — existing
+      endpoints simply now also write audit entries, and the existing
+      Audit page already renders whatever `GET /audit` returns
+- [x] Verified live end to end: created a real service account through
+      the UI, disabled it, and watched `identity.service_account.created`
+      then `identity.service_account.disabled` appear at the top of the
+      real Audit page; separately created a real API token and watched
+      `identity.api_token.created` appear too. Checked the browser
+      console on a fresh tab — zero errors
+- [x] Full backend test suite re-run clean (`go test ./... -race`)
+- [x] Docs (`SECURITY.md`, `README.md`) updated
+
 ## Next up
 
 1. **Concrete job types**: the worker dispatcher is real but nothing

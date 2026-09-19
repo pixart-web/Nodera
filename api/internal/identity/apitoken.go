@@ -8,8 +8,10 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/nodera/nodera/internal/audit"
 	"github.com/nodera/nodera/internal/platform/apierr"
 	"github.com/nodera/nodera/internal/platform/authctx"
+	"github.com/nodera/nodera/internal/platform/logger"
 	"github.com/nodera/nodera/internal/rbac"
 )
 
@@ -49,7 +51,18 @@ func (s *Service) CreateAPIToken(ctx context.Context, ac authctx.AuthContext, na
 		return "", APIToken{}, err
 	}
 	userID := ac.ActorID
-	return s.insertAPIToken(ctx, ac.OrganizationID, &userID, nil, name, scopes, expiresAt)
+	raw, t, err := s.insertAPIToken(ctx, ac.OrganizationID, &userID, nil, name, scopes, expiresAt)
+	if err != nil {
+		return "", APIToken{}, err
+	}
+	// t (and its JSON) never includes the raw token — only TokenPrefix.
+	if err := s.audit.Record(ctx, ac, audit.Entry{
+		Action: "identity.api_token.created", ResourceType: "api_token", ResourceID: t.ID.String(),
+		Success: true, ResultingState: t,
+	}); err != nil {
+		logger.FromContext(ctx).Error("failed to write audit entry", "error", err)
+	}
+	return raw, t, nil
 }
 
 // CreateAPITokenForServiceAccount issues a token owned by a service
@@ -73,7 +86,17 @@ func (s *Service) CreateAPITokenForServiceAccount(ctx context.Context, ac authct
 	if !active {
 		return "", APIToken{}, apierr.Validation("no active service account with that id in this organization")
 	}
-	return s.insertAPIToken(ctx, ac.OrganizationID, nil, &serviceAccountID, name, scopes, expiresAt)
+	raw, t, err := s.insertAPIToken(ctx, ac.OrganizationID, nil, &serviceAccountID, name, scopes, expiresAt)
+	if err != nil {
+		return "", APIToken{}, err
+	}
+	if err := s.audit.Record(ctx, ac, audit.Entry{
+		Action: "identity.api_token.created", ResourceType: "api_token", ResourceID: t.ID.String(),
+		Success: true, ResultingState: t, Metadata: map[string]any{"service_account_id": serviceAccountID.String()},
+	}); err != nil {
+		logger.FromContext(ctx).Error("failed to write audit entry", "error", err)
+	}
+	return raw, t, nil
 }
 
 func validateTokenScopes(ac authctx.AuthContext, name string, scopes []string) error {
@@ -151,6 +174,11 @@ func (s *Service) RevokeAPIToken(ctx context.Context, ac authctx.AuthContext, id
 	if tag.RowsAffected() == 0 {
 		return apierr.NotFound("API token")
 	}
+	if err := s.audit.Record(ctx, ac, audit.Entry{
+		Action: "identity.api_token.revoked", ResourceType: "api_token", ResourceID: id.String(), Success: true,
+	}); err != nil {
+		logger.FromContext(ctx).Error("failed to write audit entry", "error", err)
+	}
 	return nil
 }
 
@@ -212,6 +240,11 @@ func (s *Service) AdminRevokeAPIToken(ctx context.Context, ac authctx.AuthContex
 	}
 	if tag.RowsAffected() == 0 {
 		return apierr.NotFound("API token")
+	}
+	if err := s.audit.Record(ctx, ac, audit.Entry{
+		Action: "identity.api_token.admin_revoked", ResourceType: "api_token", ResourceID: id.String(), Success: true,
+	}); err != nil {
+		logger.FromContext(ctx).Error("failed to write audit entry", "error", err)
 	}
 	return nil
 }

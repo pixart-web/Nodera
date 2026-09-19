@@ -34,7 +34,7 @@ type testHarness struct {
 func newHarness(pool *pgxpool.Pool) *testHarness {
 	auditSvc := audit.New(pool)
 	rbacSvc := rbac.New(pool, auditSvc)
-	identitySvc := identity.New(pool, rbacSvc, 24*time.Hour)
+	identitySvc := identity.New(pool, rbacSvc, 24*time.Hour, auditSvc)
 	return &testHarness{
 		pool:     pool,
 		identity: identitySvc,

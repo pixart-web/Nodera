@@ -26,7 +26,7 @@ func TestSignupLoginOrgAndNodeFlow(t *testing.T) {
 
 	auditSvc := audit.New(pool)
 	rbacSvc := rbac.New(pool, auditSvc)
-	identitySvc := identity.New(pool, rbacSvc, 24*time.Hour)
+	identitySvc := identity.New(pool, rbacSvc, 24*time.Hour, auditSvc)
 	tenancySvc := tenancy.New(pool, identitySvc, auditSvc)
 	infraSvc := infrastructure.New(pool, auditSvc)
 

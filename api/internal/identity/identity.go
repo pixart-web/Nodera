@@ -19,6 +19,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/nodera/nodera/internal/audit"
 	"github.com/nodera/nodera/internal/platform/apierr"
 	"github.com/nodera/nodera/internal/platform/authctx"
 )
@@ -31,14 +32,30 @@ type PermissionResolver interface {
 	ResolvePermissions(ctx context.Context, orgID, userID uuid.UUID) (map[string]struct{}, error)
 }
 
+type AuditRecorder interface {
+	Record(ctx context.Context, ac authctx.AuthContext, e audit.Entry) error
+}
+
 type Service struct {
 	pool       *pgxpool.Pool
 	rbac       PermissionResolver
 	sessionTTL time.Duration
+	audit      AuditRecorder
 }
 
-func New(pool *pgxpool.Pool, rbac PermissionResolver, sessionTTL time.Duration) *Service {
-	return &Service{pool: pool, rbac: rbac, sessionTTL: sessionTTL}
+// New wires the identity service. audit is used only for the subset of
+// identity operations that already carry a resolved organization (API
+// tokens, service accounts — see apitoken.go/serviceaccount.go); SignUp,
+// Login, Logout, UpdateProfile, ChangePassword, and session management are
+// deliberately not audited here even though they mutate state — they run
+// before an organization is selected (requireSession, not
+// requireOrganization — cmd/server/router.go), and audit.Query always
+// scopes by organization_id, so a NULL-org entry would be written but
+// could never be read back through any existing API surface. Auditing
+// them would be writing unverifiable, effectively invisible rows — see
+// docs/ROADMAP.md Phase 41 for the reasoning.
+func New(pool *pgxpool.Pool, rbac PermissionResolver, sessionTTL time.Duration, auditRecorder AuditRecorder) *Service {
+	return &Service{pool: pool, rbac: rbac, sessionTTL: sessionTTL, audit: auditRecorder}
 }
 
 type User struct {

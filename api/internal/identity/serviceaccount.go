@@ -8,8 +8,10 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/nodera/nodera/internal/audit"
 	"github.com/nodera/nodera/internal/platform/apierr"
 	"github.com/nodera/nodera/internal/platform/authctx"
+	"github.com/nodera/nodera/internal/platform/logger"
 	"github.com/nodera/nodera/internal/rbac"
 )
 
@@ -42,6 +44,12 @@ func (s *Service) CreateServiceAccount(ctx context.Context, ac authctx.AuthConte
 	`, ac.OrganizationID, name, description).Scan(&sa.ID, &sa.Name, &sa.Description, &sa.Status, &sa.CreatedAt)
 	if err != nil {
 		return ServiceAccount{}, apierr.Wrap(apierr.CodeInternal, "failed to create service account", err)
+	}
+	if err := s.audit.Record(ctx, ac, audit.Entry{
+		Action: "identity.service_account.created", ResourceType: "service_account", ResourceID: sa.ID.String(),
+		Success: true, ResultingState: sa,
+	}); err != nil {
+		logger.FromContext(ctx).Error("failed to write audit entry", "error", err)
 	}
 	return sa, nil
 }
@@ -108,6 +116,11 @@ func (s *Service) DisableServiceAccount(ctx context.Context, ac authctx.AuthCont
 	if err := tx.Commit(ctx); err != nil {
 		return apierr.Wrap(apierr.CodeInternal, "failed to commit transaction", err)
 	}
+	if err := s.audit.Record(ctx, ac, audit.Entry{
+		Action: "identity.service_account.disabled", ResourceType: "service_account", ResourceID: id.String(), Success: true,
+	}); err != nil {
+		logger.FromContext(ctx).Error("failed to write audit entry", "error", err)
+	}
 	return nil
 }
 
@@ -130,6 +143,11 @@ func (s *Service) EnableServiceAccount(ctx context.Context, ac authctx.AuthConte
 	}
 	if tag.RowsAffected() == 0 {
 		return apierr.NotFound("service account")
+	}
+	if err := s.audit.Record(ctx, ac, audit.Entry{
+		Action: "identity.service_account.enabled", ResourceType: "service_account", ResourceID: id.String(), Success: true,
+	}); err != nil {
+		logger.FromContext(ctx).Error("failed to write audit entry", "error", err)
 	}
 	return nil
 }
@@ -178,6 +196,12 @@ func (s *Service) UpdateServiceAccount(ctx context.Context, ac authctx.AuthConte
 	`, name, description, id, ac.OrganizationID).Scan(&sa.ID, &sa.Name, &sa.Description, &sa.Status, &sa.CreatedAt)
 	if err != nil {
 		return ServiceAccount{}, apierr.Wrap(apierr.CodeInternal, "failed to update service account", err)
+	}
+	if err := s.audit.Record(ctx, ac, audit.Entry{
+		Action: "identity.service_account.updated", ResourceType: "service_account", ResourceID: sa.ID.String(),
+		Success: true, PreviousState: existing, ResultingState: sa,
+	}); err != nil {
+		logger.FromContext(ctx).Error("failed to write audit entry", "error", err)
 	}
 	return sa, nil
 }
