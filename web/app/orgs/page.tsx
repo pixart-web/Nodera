@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { api, ApiError } from "@/lib/api";
 import { clearSession, getStoredUser, setCurrentOrgId } from "@/lib/session";
 import type { Organization } from "@/lib/types";
+import { Logo } from "@/components/shell/Logo";
 
 export default function OrgsPage() {
   const router = useRouter();
@@ -56,13 +57,15 @@ export default function OrgsPage() {
   }
 
   return (
-    <div className="mx-auto max-w-lg px-4 py-16">
-      <div className="mb-6 flex items-center justify-between">
-        <h1 className="text-lg font-medium text-base-100">Choose an organization</h1>
-        <button className="text-sm text-base-400 hover:text-base-200" onClick={logout}>
-          Sign out
+    <div className="mx-auto max-w-lg px-4 py-12 sm:py-20">
+      <div className="mb-10 flex items-center justify-between">
+        <Logo />
+        <button className="text-sm text-nd-muted transition-colors hover:text-nd-text" onClick={logout}>
+          Terminar sessão
         </button>
       </div>
+      <h1 className="text-2xl font-semibold tracking-tight text-nd-text">Escolhe uma organização</h1>
+      <p className="mb-6 mt-1.5 text-sm text-nd-muted">Cada organização tem a sua infraestrutura, acessos e auditoria isolados.</p>
 
       {error && (
         <div className="mb-4 rounded-md border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger">
@@ -73,12 +76,12 @@ export default function OrgsPage() {
       {orgs === null ? (
         <div className="text-sm text-base-400">Loading…</div>
       ) : orgs.length > 0 ? (
-        <div className="card mb-6 divide-y divide-base-700">
+        <div className="card mb-6 divide-y divide-nd-border overflow-hidden">
           {orgs.map((o) => (
             <button
               key={o.id}
               onClick={() => selectOrg(o.id)}
-              className="flex w-full items-center justify-between px-4 py-3 text-left hover:bg-base-800/60"
+              className="flex w-full items-center justify-between px-4 py-3 text-left transition-colors hover:bg-nd-hover"
             >
               <div>
                 <div className="text-sm font-medium text-base-100">{o.name}</div>
@@ -92,8 +95,8 @@ export default function OrgsPage() {
         <p className="mb-6 text-sm text-base-400">You don&apos;t belong to any organization yet.</p>
       )}
 
-      <div className="card p-4">
-        <h2 className="mb-3 text-sm font-medium text-base-100">Create a new organization</h2>
+      <div className="card p-5">
+        <h2 className="mb-4 text-base font-semibold text-nd-text">Criar nova organização</h2>
         <form onSubmit={createOrg} className="space-y-3">
           <div>
             <label className="label" htmlFor="org-name">

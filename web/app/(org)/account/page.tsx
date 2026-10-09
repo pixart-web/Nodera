@@ -170,9 +170,9 @@ function SessionsList() {
       )}
       <div className="card">
         {sessions.loading ? (
-          <div className="p-4 text-sm text-base-400">Loading…</div>
+          <div className="px-4 py-10 text-center text-sm text-nd-muted">Loading…</div>
         ) : (sessions.data ?? []).length === 0 ? (
-          <div className="p-4 text-sm text-base-400">No active sessions.</div>
+          <div className="px-4 py-10 text-center text-sm text-nd-muted">No active sessions.</div>
         ) : (
           <table className="data-table">
             <thead>
@@ -215,17 +215,17 @@ export default function AccountPage() {
       <PageHeader title="Account" description="Your own profile and password. Not organization-scoped." />
 
       <div className="mb-8">
-        <h2 className="mb-3 text-sm font-medium text-base-100">Profile</h2>
+        <h2 className="mb-3 text-base font-semibold text-nd-text">Profile</h2>
         <ProfileForm />
       </div>
 
       <div className="mb-8">
-        <h2 className="mb-3 text-sm font-medium text-base-100">Password</h2>
+        <h2 className="mb-3 text-base font-semibold text-nd-text">Password</h2>
         <ChangePasswordForm />
       </div>
 
       <div>
-        <h2 className="mb-3 text-sm font-medium text-base-100">Active sessions</h2>
+        <h2 className="mb-3 text-base font-semibold text-nd-text">Active sessions</h2>
         <SessionsList />
       </div>
     </div>

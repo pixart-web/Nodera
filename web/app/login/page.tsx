@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { api, ApiError } from "@/lib/api";
 import { setCurrentOrgId, setStoredUser } from "@/lib/session";
 import type { Organization, User } from "@/lib/types";
+import { Logo } from "@/components/shell/Logo";
 
 interface LoginResponse {
   session_token: string;
@@ -67,21 +68,19 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center px-4">
+    <div className="flex min-h-screen items-center justify-center bg-[radial-gradient(ellipse_at_top,rgb(var(--color-primary)/0.12),transparent_60%)] px-4">
       <div className="w-full max-w-sm">
         <div className="mb-8 text-center">
-          <div className="mb-1 font-mono text-2xl font-semibold tracking-tight text-base-100">
-            nodera
-          </div>
-          <div className="text-sm text-base-400">Infrastructure &amp; AI control plane</div>
+          <Logo className="mb-2 justify-center [&_span]:text-3xl" />
+          <div className="text-sm text-nd-muted">Infrastructure &amp; AI control plane</div>
         </div>
 
         <div className="card p-6">
-          <div className="mb-5 flex gap-1 rounded-md bg-base-800 p-1 text-sm">
+          <div className="mb-5 flex gap-1 rounded-md bg-nd-elevated p-1 text-sm">
             <button
               type="button"
               className={`flex-1 rounded px-3 py-1.5 transition-colors ${
-                mode === "login" ? "bg-base-700 text-base-100" : "text-base-400"
+                mode === "login" ? "bg-nd-hover text-nd-text" : "text-base-400"
               }`}
               onClick={() => setMode("login")}
             >
@@ -90,7 +89,7 @@ export default function LoginPage() {
             <button
               type="button"
               className={`flex-1 rounded px-3 py-1.5 transition-colors ${
-                mode === "signup" ? "bg-base-700 text-base-100" : "text-base-400"
+                mode === "signup" ? "bg-nd-hover text-nd-text" : "text-base-400"
               }`}
               onClick={() => setMode("signup")}
             >

@@ -61,7 +61,7 @@ export default function InfrastructurePage() {
 
   return (
     <div>
-      <div className="mb-6 flex items-center justify-between">
+      <div className="mb-6 flex flex-wrap items-end justify-between gap-3 [&>header]:mb-0">
         <PageHeader title="Infrastructure" description="Provider-agnostic node inventory." />
         <button className="btn-primary" onClick={() => setShowForm((v) => !v)}>
           {showForm ? "Cancel" : "Register node"}
@@ -122,9 +122,9 @@ export default function InfrastructurePage() {
 
       <div className="card">
         {nodes.loading ? (
-          <div className="p-4 text-sm text-base-400">Loading…</div>
+          <div className="px-4 py-10 text-center text-sm text-nd-muted">Loading…</div>
         ) : (nodes.data?.items ?? []).length === 0 ? (
-          <div className="p-4 text-sm text-base-400">
+          <div className="px-4 py-10 text-center text-sm text-nd-muted">
             No nodes registered yet. This is real inventory, not a placeholder — register your first node above.
           </div>
         ) : (

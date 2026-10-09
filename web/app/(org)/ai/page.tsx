@@ -644,13 +644,13 @@ export default function AIPage() {
       />
 
       <div className="mb-8">
-        <h2 className="mb-3 text-sm font-medium text-base-100">Chat</h2>
+        <h2 className="mb-3 text-base font-semibold text-nd-text">Chat</h2>
         {profiles.error && <ErrorBanner message={profiles.error} />}
         {!profiles.loading && <ChatPanel profiles={profiles.data ?? []} onSent={() => usage.reload()} />}
       </div>
 
       <div className="mb-8">
-        <h2 className="mb-3 text-sm font-medium text-base-100">Usage</h2>
+        <h2 className="mb-3 text-base font-semibold text-nd-text">Usage</h2>
         <div className="mb-3 flex items-center gap-3">
           <select
             className="input"
@@ -686,9 +686,9 @@ export default function AIPage() {
         {usage.error && <ErrorBanner message={usage.error} />}
         <div className="card">
           {usage.loading ? (
-            <div className="p-4 text-sm text-base-400">Loading…</div>
+            <div className="px-4 py-10 text-center text-sm text-nd-muted">Loading…</div>
           ) : (usage.data?.items ?? []).length === 0 ? (
-            <div className="p-4 text-sm text-base-400">No AI usage recorded yet — this fills in as Chat is used.</div>
+            <div className="px-4 py-10 text-center text-sm text-nd-muted">No AI usage recorded yet — this fills in as Chat is used.</div>
           ) : (
             <table className="data-table">
               <thead>
@@ -729,7 +729,7 @@ export default function AIPage() {
 
       <div className="mb-8">
         <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-sm font-medium text-base-100">Profiles</h2>
+          <h2 className="text-base font-semibold text-nd-text">Profiles</h2>
           <button className="btn-primary" onClick={() => setShowProfileForm((v) => !v)}>
             {showProfileForm ? "Cancel" : "Create profile"}
           </button>
@@ -746,9 +746,9 @@ export default function AIPage() {
         {deleteProfileError && <ErrorBanner message={deleteProfileError} />}
         <div className="card">
           {profiles.loading ? (
-            <div className="p-4 text-sm text-base-400">Loading…</div>
+            <div className="px-4 py-10 text-center text-sm text-nd-muted">Loading…</div>
           ) : (profiles.data ?? []).length === 0 ? (
-            <div className="p-4 text-sm text-base-400">No AI profiles yet.</div>
+            <div className="px-4 py-10 text-center text-sm text-nd-muted">No AI profiles yet.</div>
           ) : (
             <table className="data-table">
               <thead>
@@ -811,7 +811,7 @@ export default function AIPage() {
 
       <div className="mb-8">
         <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-sm font-medium text-base-100">Providers</h2>
+          <h2 className="text-base font-semibold text-nd-text">Providers</h2>
           <button className="btn-primary" onClick={() => setShowProviderForm((v) => !v)}>
             {showProviderForm ? "Cancel" : "Register provider"}
           </button>
@@ -828,9 +828,9 @@ export default function AIPage() {
         {deleteProviderError && <ErrorBanner message={deleteProviderError} />}
         <div className="card">
           {providers.loading ? (
-            <div className="p-4 text-sm text-base-400">Loading…</div>
+            <div className="px-4 py-10 text-center text-sm text-nd-muted">Loading…</div>
           ) : (providers.data ?? []).length === 0 ? (
-            <div className="p-4 text-sm text-base-400">No providers registered.</div>
+            <div className="px-4 py-10 text-center text-sm text-nd-muted">No providers registered.</div>
           ) : (
             <table className="data-table">
               <thead>
@@ -870,7 +870,7 @@ export default function AIPage() {
 
       <div>
         <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-sm font-medium text-base-100">Models</h2>
+          <h2 className="text-base font-semibold text-nd-text">Models</h2>
           <button className="btn-primary" onClick={() => setShowModelForm((v) => !v)}>
             {showModelForm ? "Cancel" : "Register model"}
           </button>
@@ -888,9 +888,9 @@ export default function AIPage() {
         {deleteModelError && <ErrorBanner message={deleteModelError} />}
         <div className="card">
           {models.loading ? (
-            <div className="p-4 text-sm text-base-400">Loading…</div>
+            <div className="px-4 py-10 text-center text-sm text-nd-muted">Loading…</div>
           ) : (models.data ?? []).length === 0 ? (
-            <div className="p-4 text-sm text-base-400">No models registered.</div>
+            <div className="px-4 py-10 text-center text-sm text-nd-muted">No models registered.</div>
           ) : (
             <table className="data-table">
               <thead>

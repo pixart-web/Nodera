@@ -56,7 +56,7 @@ export default function ApplicationsPage() {
 
   return (
     <div>
-      <div className="mb-6 flex items-center justify-between">
+      <div className="mb-6 flex flex-wrap items-end justify-between gap-3 [&>header]:mb-0">
         <PageHeader title="Applications" description="Registered applications and services." />
         <button className="btn-primary" onClick={() => setShowForm((v) => !v)}>
           {showForm ? "Cancel" : "Register application"}
@@ -103,9 +103,9 @@ export default function ApplicationsPage() {
 
       <div className="card">
         {apps.loading ? (
-          <div className="p-4 text-sm text-base-400">Loading…</div>
+          <div className="px-4 py-10 text-center text-sm text-nd-muted">Loading…</div>
         ) : (apps.data?.items ?? []).length === 0 ? (
-          <div className="p-4 text-sm text-base-400">No applications registered yet.</div>
+          <div className="px-4 py-10 text-center text-sm text-nd-muted">No applications registered yet.</div>
         ) : (
           <table className="data-table">
             <thead>

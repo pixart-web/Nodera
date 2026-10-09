@@ -81,9 +81,9 @@ export default function AuditPage() {
 
       <div className="card">
         {audit.loading ? (
-          <div className="p-4 text-sm text-base-400">Loading…</div>
+          <div className="px-4 py-10 text-center text-sm text-nd-muted">Loading…</div>
         ) : (audit.data?.items ?? []).length === 0 ? (
-          <div className="p-4 text-sm text-base-400">No audit records yet.</div>
+          <div className="px-4 py-10 text-center text-sm text-nd-muted">No audit records yet.</div>
         ) : (
           <table className="data-table">
             <thead>

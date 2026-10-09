@@ -244,7 +244,7 @@ export default function AccessPage() {
       {/* --- My API tokens --- */}
       <div className="mb-8">
         <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-sm font-medium text-base-100">My API tokens</h2>
+          <h2 className="text-base font-semibold text-nd-text">My API tokens</h2>
           <button className="btn-primary" onClick={() => setShowTokenForm((v) => !v)}>
             {showTokenForm ? "Cancel" : "Create token"}
           </button>
@@ -283,9 +283,9 @@ export default function AccessPage() {
         {myTokens.error && <ErrorBanner message={myTokens.error} />}
         <div className="card">
           {myTokens.loading ? (
-            <div className="p-4 text-sm text-base-400">Loading…</div>
+            <div className="px-4 py-10 text-center text-sm text-nd-muted">Loading…</div>
           ) : (myTokens.data ?? []).length === 0 ? (
-            <div className="p-4 text-sm text-base-400">No API tokens yet.</div>
+            <div className="px-4 py-10 text-center text-sm text-nd-muted">No API tokens yet.</div>
           ) : (
             <table className="data-table">
               <thead>
@@ -343,7 +343,7 @@ export default function AccessPage() {
       {/* --- Service accounts --- */}
       <div className="mb-8">
         <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-sm font-medium text-base-100">Service accounts</h2>
+          <h2 className="text-base font-semibold text-nd-text">Service accounts</h2>
           <button className="btn-primary" onClick={() => setShowSAForm((v) => !v)}>
             {showSAForm ? "Cancel" : "Create service account"}
           </button>
@@ -376,9 +376,9 @@ export default function AccessPage() {
         {saStatusError && <ErrorBanner message={saStatusError} />}
         <div className="card">
           {serviceAccounts.loading ? (
-            <div className="p-4 text-sm text-base-400">Loading…</div>
+            <div className="px-4 py-10 text-center text-sm text-nd-muted">Loading…</div>
           ) : (serviceAccounts.data ?? []).length === 0 ? (
-            <div className="p-4 text-sm text-base-400">No service accounts yet.</div>
+            <div className="px-4 py-10 text-center text-sm text-nd-muted">No service accounts yet.</div>
           ) : (
             <table className="data-table">
               <thead>
@@ -511,10 +511,10 @@ export default function AccessPage() {
       {/* --- Organization-wide token visibility (organization.manage only) --- */}
       {orgTokens.data && (
         <div>
-          <h2 className="mb-3 text-sm font-medium text-base-100">All organization tokens</h2>
+          <h2 className="mb-3 text-base font-semibold text-nd-text">All organization tokens</h2>
           <div className="card">
             {orgTokens.data.length === 0 ? (
-              <div className="p-4 text-sm text-base-400">No tokens in this organization.</div>
+              <div className="px-4 py-10 text-center text-sm text-nd-muted">No tokens in this organization.</div>
             ) : (
               <table className="data-table">
                 <thead>

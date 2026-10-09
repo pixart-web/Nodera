@@ -85,7 +85,7 @@ function JobsPageInner() {
 
   return (
     <div>
-      <div className="mb-6 flex items-center justify-between">
+      <div className="mb-6 flex flex-wrap items-end justify-between gap-3 [&>header]:mb-0">
         <PageHeader
           title="Jobs"
           description="Postgres-backed job queue. No job type has a handler registered yet beyond what callers enqueue — see docs/ROADMAP.md. Refreshes automatically every 5s."
@@ -133,9 +133,9 @@ function JobsPageInner() {
 
       <div className="card">
         {jobs.loading ? (
-          <div className="p-4 text-sm text-base-400">Loading…</div>
+          <div className="px-4 py-10 text-center text-sm text-nd-muted">Loading…</div>
         ) : (jobs.data?.items ?? []).length === 0 ? (
-          <div className="p-4 text-sm text-base-400">No jobs{statusFilter ? ` with status "${statusFilter}"` : ""}.</div>
+          <div className="px-4 py-10 text-center text-sm text-nd-muted">No jobs{statusFilter ? ` with status "${statusFilter}"` : ""}.</div>
         ) : (
           <table className="data-table">
             <thead>

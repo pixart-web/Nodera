@@ -437,7 +437,7 @@ export default function AgentsPage() {
       />
 
       <div className="mb-3 flex items-center justify-between">
-        <h2 className="text-sm font-medium text-base-100">Agent definitions</h2>
+        <h2 className="text-base font-semibold text-nd-text">Agent definitions</h2>
         <button className="btn-primary" onClick={() => setShowCreate((v) => !v)}>
           {showCreate ? "Cancel" : "Create agent"}
         </button>
@@ -458,9 +458,9 @@ export default function AgentsPage() {
 
       <div className="card">
         {agents.loading ? (
-          <div className="p-4 text-sm text-base-400">Loading…</div>
+          <div className="px-4 py-10 text-center text-sm text-nd-muted">Loading…</div>
         ) : (agents.data ?? []).length === 0 ? (
-          <div className="p-4 text-sm text-base-400">No agents yet.</div>
+          <div className="px-4 py-10 text-center text-sm text-nd-muted">No agents yet.</div>
         ) : (
           <table className="data-table">
             <thead>

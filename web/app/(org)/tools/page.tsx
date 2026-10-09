@@ -236,7 +236,7 @@ export default function ToolsPage() {
       {tools.error && <ErrorBanner message={tools.error} />}
       <div className="card mb-8">
         {tools.loading ? (
-          <div className="p-4 text-sm text-base-400">Loading…</div>
+          <div className="px-4 py-10 text-center text-sm text-nd-muted">Loading…</div>
         ) : (
           <table className="data-table">
             <thead>
@@ -299,7 +299,7 @@ export default function ToolsPage() {
 
       <div className="mb-3 flex items-center justify-between">
         <div>
-          <h2 className="text-sm font-medium text-base-100">Approvals</h2>
+          <h2 className="text-base font-semibold text-nd-text">Approvals</h2>
           <p className="text-xs text-base-500">Refreshes automatically every 7s.</p>
         </div>
         <select className="input w-40" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
@@ -317,9 +317,9 @@ export default function ToolsPage() {
       {decideError && <ErrorBanner message={decideError} />}
       <div className="card">
         {approvals.loading ? (
-          <div className="p-4 text-sm text-base-400">Loading…</div>
+          <div className="px-4 py-10 text-center text-sm text-nd-muted">Loading…</div>
         ) : (approvals.data ?? []).length === 0 ? (
-          <div className="p-4 text-sm text-base-400">No {statusFilter || ""} approvals.</div>
+          <div className="px-4 py-10 text-center text-sm text-nd-muted">No {statusFilter || ""} approvals.</div>
         ) : (
           <table className="data-table">
             <thead>

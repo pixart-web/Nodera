@@ -1,30 +1,25 @@
-const COLORS: Record<string, string> = {
-  // infra / application statuses
-  online: "bg-ok/15 text-ok",
-  running: "bg-ok/15 text-ok",
-  succeeded: "bg-ok/15 text-ok",
-  available: "bg-ok/15 text-ok",
-  active: "bg-ok/15 text-ok",
-  degraded: "bg-warn/15 text-warn",
-  retrying: "bg-warn/15 text-warn",
-  queued: "bg-base-500/20 text-base-200",
-  unknown: "bg-base-500/20 text-base-300",
-  stopped: "bg-base-500/20 text-base-300",
-  cancelled: "bg-base-500/20 text-base-300",
-  offline: "bg-danger/15 text-danger",
-  failed: "bg-danger/15 text-danger",
-  unavailable: "bg-danger/15 text-danger",
-  disabled: "bg-danger/15 text-danger",
-  decommissioned: "bg-base-500/20 text-base-400",
-  deregistered: "bg-base-500/20 text-base-400",
-  // approval statuses
-  pending: "bg-warn/15 text-warn",
-  approved: "bg-ok/15 text-ok",
-  rejected: "bg-danger/15 text-danger",
-  expired: "bg-base-500/20 text-base-300",
+// Maps the API's raw status strings onto the Nodera status tokens
+// (lib/status.ts) so API-backed pages use the same colours as the rest.
+import { STATUS } from "@/lib/status";
+import type { ResourceStatus } from "@/lib/domain";
+import { StatusDot } from "@/components/ui/Status";
+
+const MAP: Record<string, ResourceStatus> = {
+  online: "ONLINE", running: "ONLINE", succeeded: "ONLINE", available: "ONLINE", active: "ONLINE", approved: "ONLINE", executed: "ONLINE",
+  degraded: "WARNING", retrying: "WARNING", pending: "WARNING", deprecated: "WARNING",
+  executing: "DEPLOYING",
+  queued: "PENDING",
+  unknown: "UNKNOWN", stopped: "UNKNOWN", cancelled: "UNKNOWN", expired: "UNKNOWN", decommissioned: "UNKNOWN", deregistered: "UNKNOWN",
+  offline: "OFFLINE", failed: "ERROR", unavailable: "OFFLINE", disabled: "OFFLINE", rejected: "ERROR", execution_failed: "ERROR",
 };
 
 export function StatusBadge({ status }: { status: string }) {
-  const cls = COLORS[status] ?? "bg-base-500/20 text-base-300";
-  return <span className={`badge ${cls}`}>{status}</span>;
+  const key = MAP[status] ?? "UNKNOWN";
+  const t = STATUS[key];
+  return (
+    <span className={`badge ${t.text} ${t.bg} ${t.ring}`}>
+      <StatusDot status={key} />
+      {status}
+    </span>
+  );
 }

@@ -364,7 +364,7 @@ export default function SettingsPage() {
       {org.error && <ErrorBanner message={org.error} />}
       {org.data && (
         <div className="mb-8">
-          <h2 className="mb-3 text-sm font-medium text-base-100">Organization</h2>
+          <h2 className="mb-3 text-base font-semibold text-nd-text">Organization</h2>
           <OrganizationForm org={org.data} onUpdated={() => org.reload()} />
           <LeaveOrganizationSection />
         </div>
@@ -372,7 +372,7 @@ export default function SettingsPage() {
 
       <div className="mb-8">
         <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-sm font-medium text-base-100">Roles</h2>
+          <h2 className="text-base font-semibold text-nd-text">Roles</h2>
           <button className="btn-primary" onClick={() => setShowCreateRole((v) => !v)}>
             {showCreateRole ? "Cancel" : "Create role"}
           </button>
@@ -389,9 +389,9 @@ export default function SettingsPage() {
         {roleError && <ErrorBanner message={roleError} />}
         <div className="card">
           {roles.loading ? (
-            <div className="p-4 text-sm text-base-400">Loading…</div>
+            <div className="px-4 py-10 text-center text-sm text-nd-muted">Loading…</div>
           ) : (roles.data ?? []).length === 0 ? (
-            <div className="p-4 text-sm text-base-400">No roles visible to this organization.</div>
+            <div className="px-4 py-10 text-center text-sm text-nd-muted">No roles visible to this organization.</div>
           ) : (
             <table className="data-table">
               <thead>
@@ -451,7 +451,7 @@ export default function SettingsPage() {
 
       <div>
         <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-sm font-medium text-base-100">Members</h2>
+          <h2 className="text-base font-semibold text-nd-text">Members</h2>
           <button className="btn-primary" onClick={() => setShowAddMember((v) => !v)}>
             {showAddMember ? "Cancel" : "Add member"}
           </button>
@@ -468,9 +468,9 @@ export default function SettingsPage() {
         {error && <ErrorBanner message={error} />}
         <div className="card">
           {members.loading ? (
-            <div className="p-4 text-sm text-base-400">Loading…</div>
+            <div className="px-4 py-10 text-center text-sm text-nd-muted">Loading…</div>
           ) : (members.data ?? []).length === 0 ? (
-            <div className="p-4 text-sm text-base-400">No members.</div>
+            <div className="px-4 py-10 text-center text-sm text-nd-muted">No members.</div>
           ) : (
             <table className="data-table">
               <thead>

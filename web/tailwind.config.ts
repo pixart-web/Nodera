@@ -19,7 +19,7 @@ const config: Config = {
           200: "#b9c4d6",
           100: "rgb(var(--color-text) / <alpha-value>)",
         },
-        accent: { 600: "#2563eb", 500: "#3b82f6", 400: "#60a5fa" },
+        accent: { 600: "#2563eb", 500: "#3b82f6", 400: "#60a5fa", 300: "#93c5fd" },
         danger: "rgb(var(--color-danger) / <alpha-value>)",
         warn: "rgb(var(--color-warning) / <alpha-value>)",
         ok: "rgb(var(--color-success) / <alpha-value>)",
