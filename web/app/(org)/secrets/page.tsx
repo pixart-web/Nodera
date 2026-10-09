@@ -1,214 +1,98 @@
 "use client";
 
-import { Fragment, useState } from "react";
-import { api, ApiError } from "@/lib/api";
+import { useState } from "react";
+import { KeyRound, Pencil, Plus, Trash2 } from "lucide-react";
+import { api } from "@/lib/api";
 import { useApi } from "@/lib/useApi";
-import { PageHeader } from "@/components/PageHeader";
-import { ErrorBanner } from "@/components/ErrorBanner";
+import { useAction } from "@/lib/useAction";
+import { PageHeader } from "@/components/ui/PageHeader";
+import { Section } from "@/components/ui/Card";
+import { Button } from "@/components/ui/Button";
+import { Alert } from "@/components/ui/Feedback";
+import { DataTable, type Column } from "@/components/ui/DataTable";
+import { ConfirmDialog, Modal } from "@/components/ui/Overlay";
+import { Field, Input } from "@/components/ui/Forms";
+import { RowMenu } from "@/components/ui/RowMenu";
 import type { SecretMeta } from "@/lib/types";
 
 export default function SecretsPage() {
   const secrets = useApi(() => api.get<SecretMeta[]>("/api/v1/secrets"), []);
+  const create = useAction();
+  const edit = useAction();
+  const del = useAction();
+
   const [showForm, setShowForm] = useState(false);
-  const [key, setKey] = useState("");
-  const [value, setValue] = useState("");
-  const [description, setDescription] = useState("");
-  const [formError, setFormError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [key, setKey] = useState(""); const [value, setValue] = useState(""); const [description, setDescription] = useState("");
+  const [editing, setEditing] = useState<SecretMeta | null>(null);
+  const [editDescription, setEditDescription] = useState("");
+  const [deleting, setDeleting] = useState<SecretMeta | null>(null);
 
   const unavailable = secrets.error?.includes("not configured");
 
-  async function setSecret(e: React.FormEvent) {
+  async function save(e: React.FormEvent) {
     e.preventDefault();
-    setFormError(null);
-    setBusy(true);
-    try {
-      await api.put(`/api/v1/secrets/${encodeURIComponent(key)}`, { value, description });
-      setKey("");
-      setValue("");
-      setDescription("");
-      setShowForm(false);
-      secrets.reload();
-    } catch (err) {
-      setFormError(err instanceof ApiError ? err.message : "Failed to set secret");
-    } finally {
-      setBusy(false);
-    }
+    const ok = await create.run(() => api.put(`/api/v1/secrets/${encodeURIComponent(key)}`, { value, description }), "Secret guardado.", "Não foi possível guardar o secret");
+    if (ok) { setKey(""); setValue(""); setDescription(""); setShowForm(false); secrets.reload(); }
   }
-
-  async function deleteSecret(k: string) {
-    try {
-      await api.del(`/api/v1/secrets/${encodeURIComponent(k)}`);
-      secrets.reload();
-    } catch (err) {
-      setFormError(err instanceof ApiError ? err.message : "Failed to delete secret");
-    }
-  }
-
-  const [editingKey, setEditingKey] = useState<string | null>(null);
-  const [editDescription, setEditDescription] = useState("");
-  const [editError, setEditError] = useState<string | null>(null);
-  const [editBusy, setEditBusy] = useState(false);
-
-  function startEditing(s: SecretMeta) {
-    setEditingKey((cur) => (cur === s.key ? null : s.key));
-    setEditDescription(s.description);
-    setEditError(null);
-  }
-
-  async function saveDescription(e: React.FormEvent, k: string) {
+  async function saveDescription(e: React.FormEvent) {
     e.preventDefault();
-    setEditError(null);
-    setEditBusy(true);
-    try {
-      await api.patch(`/api/v1/secrets/${encodeURIComponent(k)}/description`, { description: editDescription });
-      setEditingKey(null);
-      secrets.reload();
-    } catch (err) {
-      setEditError(err instanceof ApiError ? err.message : "Failed to update description");
-    } finally {
-      setEditBusy(false);
-    }
+    if (!editing) return;
+    const ok = await edit.run(() => api.patch(`/api/v1/secrets/${encodeURIComponent(editing.key)}/description`, { description: editDescription }), "Descrição atualizada.");
+    if (ok) { setEditing(null); secrets.reload(); }
   }
+  async function remove() {
+    if (!deleting) return;
+    const ok = await del.run(() => api.del(`/api/v1/secrets/${encodeURIComponent(deleting.key)}`), "Secret eliminado.");
+    if (ok) secrets.reload();
+    setDeleting(null);
+  }
+
+  const columns: Column<SecretMeta>[] = [
+    { key: "key", header: "Chave", primary: true, cell: (s) => <span className="font-mono text-xs text-nd-text">{s.key}</span> },
+    { key: "desc", header: "Descrição", cell: (s) => <span className="text-nd-muted">{s.description || "—"}</span> },
+    { key: "upd", header: "Atualizado", cell: (s) => <span className="text-xs text-nd-faint">{new Date(s.updated_at).toLocaleString("pt-PT")}</span> },
+    { key: "act", header: "", className: "w-12 text-right", hideOnMobile: true, cell: (s) => (
+      <RowMenu label={`Ações para ${s.key}`} items={[
+        { label: "Editar descrição", icon: <Pencil />, onSelect: () => { setEditing(s); setEditDescription(s.description); edit.setError(null); } },
+        { label: "Eliminar", icon: <Trash2 />, danger: true, separatorBefore: true, onSelect: () => setDeleting(s) },
+      ]} />) },
+  ];
 
   return (
     <div>
-      <div className="mb-6 flex flex-wrap items-end justify-between gap-3 [&>header]:mb-0">
-        <PageHeader
-          title="Secrets"
-          description="Encrypted at rest (AES-256-GCM). Values are never shown here or anywhere else after they're set."
-        />
-        {!unavailable && (
-          <button className="btn-primary" onClick={() => setShowForm((v) => !v)}>
-            {showForm ? "Cancel" : "Add secret"}
-          </button>
-        )}
-      </div>
+      <PageHeader title="Secrets" description="Cifrados em repouso (AES-256-GCM). Os valores nunca são mostrados depois de guardados."
+        actions={!unavailable && <Button variant="primary" icon={<Plus className="h-4 w-4" />} onClick={() => { setShowForm(true); create.setError(null); }}>Novo secret</Button>} />
 
-      {unavailable && (
-        <ErrorBanner message="The secrets module is not configured on this server (NODERA_SECRETS_ENCRYPTION_KEY unset)." />
-      )}
-      {!unavailable && secrets.error && <ErrorBanner message={secrets.error} />}
-      {formError && <ErrorBanner message={formError} />}
-
-      {showForm && (
-        <form onSubmit={setSecret} className="card mb-6 space-y-3 p-4">
-          <div>
-            <label className="label" htmlFor="secret-key">
-              Key
-            </label>
-            <input
-              id="secret-key"
-              className="input font-mono"
-              value={key}
-              onChange={(e) => setKey(e.target.value)}
-              placeholder="ai_provider.openai.api_key"
-              required
-            />
-          </div>
-          <div>
-            <label className="label" htmlFor="secret-value">
-              Value
-            </label>
-            <input
-              id="secret-value"
-              type="password"
-              className="input"
-              value={value}
-              onChange={(e) => setValue(e.target.value)}
-              required
-            />
-          </div>
-          <div>
-            <label className="label" htmlFor="secret-description">
-              Description
-            </label>
-            <input
-              id="secret-description"
-              className="input"
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-            />
-          </div>
-          <button type="submit" className="btn-primary" disabled={busy}>
-            {busy ? "Saving…" : "Save secret"}
-          </button>
-        </form>
-      )}
+      {unavailable && <Alert tone="warning" title="Módulo de secrets não configurado">Define NODERA_SECRETS_ENCRYPTION_KEY no servidor para o ativar.</Alert>}
+      {!unavailable && del.error && <Alert tone="error" className="mb-4">{del.error}</Alert>}
 
       {!unavailable && (
-        <div className="card">
-          {secrets.loading ? (
-            <div className="px-4 py-10 text-center text-sm text-nd-muted">Loading…</div>
-          ) : (secrets.data ?? []).length === 0 ? (
-            <div className="px-4 py-10 text-center text-sm text-nd-muted">No secrets stored yet.</div>
-          ) : (
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Key</th>
-                  <th>Description</th>
-                  <th>Updated</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                {secrets.data!.map((s) => (
-                  <Fragment key={s.id}>
-                    <tr>
-                      <td className="font-mono text-xs">{s.key}</td>
-                      <td className="text-xs text-base-300">{s.description || "—"}</td>
-                      <td className="text-xs text-base-400">{new Date(s.updated_at).toLocaleString()}</td>
-                      <td className="space-x-3">
-                        <button className="text-xs text-base-400 hover:text-base-200" onClick={() => startEditing(s)}>
-                          {editingKey === s.key ? "Close" : "Edit description"}
-                        </button>
-                        <button
-                          className="text-xs text-base-400 hover:text-danger"
-                          onClick={() => deleteSecret(s.key)}
-                        >
-                          Delete
-                        </button>
-                      </td>
-                    </tr>
-                    {editingKey === s.key && (
-                      <tr>
-                        <td colSpan={4} className="bg-base-800/40 p-3">
-                          <form onSubmit={(e) => saveDescription(e, s.key)} className="space-y-2">
-                            {editError && <ErrorBanner message={editError} />}
-                            <p className="text-xs text-base-400">
-                              Only the description changes here — the secret&apos;s value is never resupplied or
-                              rotated by this form.
-                            </p>
-                            <input
-                              className="input"
-                              value={editDescription}
-                              onChange={(e) => setEditDescription(e.target.value)}
-                              placeholder="Description"
-                            />
-                            <div className="flex items-center gap-3">
-                              <button type="submit" className="btn-primary" disabled={editBusy}>
-                                {editBusy ? "Saving…" : "Save description"}
-                              </button>
-                              <button
-                                type="button"
-                                className="text-xs text-base-400 hover:text-base-200"
-                                onClick={() => setEditingKey(null)}
-                              >
-                                Cancel
-                              </button>
-                            </div>
-                          </form>
-                        </td>
-                      </tr>
-                    )}
-                  </Fragment>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
+        <Section title="Secrets da organização" description="Referências cifradas usadas por providers, tools e integrações.">
+          <DataTable caption="Secrets" columns={columns} rows={secrets.data} loading={secrets.loading} error={secrets.error} onRetry={secrets.reload}
+            empty={{ icon: <KeyRound />, title: "Nenhum secret guardado", description: "Guarda credenciais de forma cifrada para as usares por referência.", action: { label: "Novo secret", onClick: () => setShowForm(true) } }} />
+        </Section>
       )}
+
+      <Modal open={showForm} onClose={() => setShowForm(false)} title="Novo secret" description="O valor é cifrado e nunca mais é mostrado."
+        footer={<><Button onClick={() => setShowForm(false)}>Cancelar</Button><Button variant="primary" type="submit" form="secret-form" disabled={create.busy}>{create.busy ? "A guardar…" : "Guardar"}</Button></>}>
+        <form id="secret-form" onSubmit={save} className="space-y-4">
+          {create.error && <Alert tone="error">{create.error}</Alert>}
+          <Field label="Chave">{(id) => <Input id={id} className="font-mono" value={key} onChange={(e) => setKey(e.target.value)} placeholder="ai_provider.openai.api_key" required />}</Field>
+          <Field label="Valor">{(id) => <Input id={id} type="password" value={value} onChange={(e) => setValue(e.target.value)} required autoComplete="off" />}</Field>
+          <Field label="Descrição">{(id) => <Input id={id} value={description} onChange={(e) => setDescription(e.target.value)} />}</Field>
+        </form>
+      </Modal>
+
+      <Modal open={!!editing} onClose={() => setEditing(null)} title="Editar descrição" description="Só a descrição muda — o valor do secret nunca é reenviado por este formulário."
+        footer={<><Button onClick={() => setEditing(null)}>Cancelar</Button><Button variant="primary" type="submit" form="secret-edit" disabled={edit.busy}>{edit.busy ? "A guardar…" : "Guardar"}</Button></>}>
+        <form id="secret-edit" onSubmit={saveDescription} className="space-y-4">
+          {edit.error && <Alert tone="error">{edit.error}</Alert>}
+          <Field label={editing?.key ?? "Descrição"}>{(id) => <Input id={id} value={editDescription} onChange={(e) => setEditDescription(e.target.value)} />}</Field>
+        </form>
+      </Modal>
+
+      <ConfirmDialog open={!!deleting} onClose={() => setDeleting(null)} onConfirm={remove} danger confirmLabel="Eliminar"
+        title="Eliminar secret?" description={`“${deleting?.key}” será eliminado definitivamente. Quem o usar por referência deixará de funcionar.`} />
     </div>
   );
 }

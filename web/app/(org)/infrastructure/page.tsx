@@ -1,193 +1,84 @@
 "use client";
 
 import { useState } from "react";
-import { api, ApiError } from "@/lib/api";
+import { Plus, Power, Server } from "lucide-react";
+import { api } from "@/lib/api";
 import { useApi } from "@/lib/useApi";
-import { PageHeader } from "@/components/PageHeader";
-import { ErrorBanner } from "@/components/ErrorBanner";
+import { useAction } from "@/lib/useAction";
+import { PageHeader } from "@/components/ui/PageHeader";
+import { Section } from "@/components/ui/Card";
+import { Button } from "@/components/ui/Button";
+import { Alert } from "@/components/ui/Feedback";
+import { Badge } from "@/components/ui/Status";
+import { DataTable, type Column } from "@/components/ui/DataTable";
+import { ConfirmDialog, Modal } from "@/components/ui/Overlay";
+import { Field, Input, Select } from "@/components/ui/Forms";
+import { RowMenu } from "@/components/ui/RowMenu";
 import { StatusBadge } from "@/components/StatusBadge";
 import type { Node as NoderaNode, Page } from "@/lib/types";
 
+const STATUSES = ["online", "offline", "degraded", "unknown"];
+const ROLES = ["application", "database", "storage", "worker", "ai-inference", "monitoring"];
+
 export default function InfrastructurePage() {
-  const [visibleLimit, setVisibleLimit] = useState(50);
-  const nodes = useApi(
-    () => api.get<Page<NoderaNode>>(`/api/v1/infrastructure/nodes?limit=${visibleLimit}`),
-    [visibleLimit],
-  );
+  const [limit, setLimit] = useState(50);
+  const nodes = useApi(() => api.get<Page<NoderaNode>>(`/api/v1/infrastructure/nodes?limit=${limit}`), [limit]);
+  const create = useAction();
+  const row = useAction();
   const [showForm, setShowForm] = useState(false);
-  const [hostname, setHostname] = useState("");
-  const [provider, setProvider] = useState("");
-  const [role, setRole] = useState("application");
-  const [formError, setFormError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [rowError, setRowError] = useState<string | null>(null);
+  const [hostname, setHostname] = useState(""); const [provider, setProvider] = useState(""); const [role, setRole] = useState("application");
+  const [decom, setDecom] = useState<NoderaNode | null>(null);
 
-  async function reportStatus(id: string, status: string) {
-    setRowError(null);
-    try {
-      await api.post(`/api/v1/infrastructure/nodes/${id}/status`, { status });
-      nodes.reload();
-    } catch (err) {
-      setRowError(err instanceof ApiError ? err.message : "Failed to update node status");
-    }
-  }
-
-  async function decommission(id: string) {
-    setRowError(null);
-    try {
-      await api.post(`/api/v1/infrastructure/nodes/${id}/decommission`);
-      nodes.reload();
-    } catch (err) {
-      setRowError(err instanceof ApiError ? err.message : "Failed to decommission node");
-    }
-  }
-
-  async function registerNode(e: React.FormEvent) {
+  async function register(e: React.FormEvent) {
     e.preventDefault();
-    setFormError(null);
-    setBusy(true);
-    try {
-      await api.post("/api/v1/infrastructure/nodes", { hostname, provider, role });
-      setHostname("");
-      setProvider("");
-      setShowForm(false);
-      nodes.reload();
-    } catch (err) {
-      setFormError(err instanceof ApiError ? err.message : "Failed to register node");
-    } finally {
-      setBusy(false);
-    }
+    const ok = await create.run(() => api.post("/api/v1/infrastructure/nodes", { hostname, provider, role }), "Node registado.", "Não foi possível registar o node");
+    if (ok) { setHostname(""); setProvider(""); setShowForm(false); nodes.reload(); }
   }
+  async function setStatus(n: NoderaNode, status: string) {
+    if (await row.run(() => api.post(`/api/v1/infrastructure/nodes/${n.id}/status`, { status }), `Estado de ${n.hostname}: ${status}.`)) nodes.reload();
+  }
+  async function decommission() {
+    if (!decom) return;
+    if (await row.run(() => api.post(`/api/v1/infrastructure/nodes/${decom.id}/decommission`), "Node desativado.")) nodes.reload();
+    setDecom(null);
+  }
+
+  const columns: Column<NoderaNode>[] = [
+    { key: "host", header: "Hostname", primary: true, cell: (n) => <span className="font-mono text-sm font-medium">{n.hostname}</span> },
+    { key: "prov", header: "Provider", cell: (n) => n.provider || "—" },
+    { key: "role", header: "Role", cell: (n) => <Badge tone="blue">{n.role}</Badge> },
+    { key: "env", header: "Ambiente", cell: (n) => <span className="text-nd-muted">{n.environment}</span> },
+    { key: "st", header: "Estado", cell: (n) => <StatusBadge status={n.status} /> },
+    { key: "cap", header: "Capabilities", cell: (n) => <span className="text-xs text-nd-muted">{n.capabilities.join(", ") || "—"}</span> },
+    { key: "act", header: "", className: "w-12 text-right", hideOnMobile: true, cell: (n) => n.status === "decommissioned" ? null : (
+      <RowMenu label={`Ações para ${n.hostname}`} items={[
+        ...STATUSES.map((s) => ({ label: `Reportar ${s}`, onSelect: () => setStatus(n, s) })),
+        { label: "Desativar node", icon: <Power />, danger: true, separatorBefore: true, onSelect: () => setDecom(n) },
+      ]} />) },
+  ];
 
   return (
     <div>
-      <div className="mb-6 flex flex-wrap items-end justify-between gap-3 [&>header]:mb-0">
-        <PageHeader title="Infrastructure" description="Provider-agnostic node inventory." />
-        <button className="btn-primary" onClick={() => setShowForm((v) => !v)}>
-          {showForm ? "Cancel" : "Register node"}
-        </button>
-      </div>
+      <PageHeader title="Infraestrutura" description="Inventário de nodes independente do provider."
+        actions={<Button variant="primary" icon={<Plus className="h-4 w-4" />} onClick={() => { setShowForm(true); create.setError(null); }}>Registar node</Button>} />
+      {row.error && <Alert tone="error" className="mb-4">{row.error}</Alert>}
+      <Section title="Nodes" description="Inventário real — não há métricas fabricadas; o estado vem do que for reportado.">
+        <DataTable caption="Nodes" columns={columns} rows={nodes.data?.items ?? null} loading={nodes.loading} error={nodes.error} onRetry={nodes.reload} pageSize={10}
+          empty={{ icon: <Server />, title: "Nenhum node registado", description: "Isto é inventário real, não um placeholder — regista o primeiro node.", action: { label: "Registar node", onClick: () => setShowForm(true) } }} />
+        {nodes.data?.has_more && <div className="mt-3"><Button onClick={() => setLimit((n) => n + 50)}>Carregar mais</Button></div>}
+      </Section>
 
-      {showForm && (
-        <form onSubmit={registerNode} className="card mb-6 space-y-3 p-4">
-          {formError && <ErrorBanner message={formError} />}
-          <div className="grid grid-cols-3 gap-3">
-            <div>
-              <label className="label" htmlFor="hostname">
-                Hostname
-              </label>
-              <input
-                id="hostname"
-                className="input"
-                value={hostname}
-                onChange={(e) => setHostname(e.target.value)}
-                placeholder="nodera-prod-01"
-                required
-              />
-            </div>
-            <div>
-              <label className="label" htmlFor="provider">
-                Provider
-              </label>
-              <input
-                id="provider"
-                className="input"
-                value={provider}
-                onChange={(e) => setProvider(e.target.value)}
-                placeholder="hetzner, local, aws…"
-              />
-            </div>
-            <div>
-              <label className="label" htmlFor="role">
-                Role
-              </label>
-              <select id="role" className="input" value={role} onChange={(e) => setRole(e.target.value)}>
-                <option value="application">application</option>
-                <option value="database">database</option>
-                <option value="storage">storage</option>
-                <option value="worker">worker</option>
-                <option value="ai-inference">ai-inference</option>
-                <option value="monitoring">monitoring</option>
-              </select>
-            </div>
-          </div>
-          <button type="submit" className="btn-primary" disabled={busy}>
-            {busy ? "Registering…" : "Register"}
-          </button>
+      <Modal open={showForm} onClose={() => setShowForm(false)} title="Registar node"
+        footer={<><Button onClick={() => setShowForm(false)}>Cancelar</Button><Button variant="primary" type="submit" form="node-form" disabled={create.busy}>{create.busy ? "A registar…" : "Registar"}</Button></>}>
+        <form id="node-form" onSubmit={register} className="space-y-4">
+          {create.error && <Alert tone="error">{create.error}</Alert>}
+          <Field label="Hostname">{(id) => <Input id={id} value={hostname} onChange={(e) => setHostname(e.target.value)} placeholder="nodera-prod-01" required />}</Field>
+          <Field label="Provider">{(id) => <Input id={id} value={provider} onChange={(e) => setProvider(e.target.value)} placeholder="hetzner, local, aws…" />}</Field>
+          <Field label="Role">{(id) => <Select id={id} value={role} onChange={(e) => setRole(e.target.value)}>{ROLES.map((r) => <option key={r}>{r}</option>)}</Select>}</Field>
         </form>
-      )}
-
-      {nodes.error && <ErrorBanner message={nodes.error} />}
-      {rowError && <ErrorBanner message={rowError} />}
-
-      <div className="card">
-        {nodes.loading ? (
-          <div className="px-4 py-10 text-center text-sm text-nd-muted">Loading…</div>
-        ) : (nodes.data?.items ?? []).length === 0 ? (
-          <div className="px-4 py-10 text-center text-sm text-nd-muted">
-            No nodes registered yet. This is real inventory, not a placeholder — register your first node above.
-          </div>
-        ) : (
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>Hostname</th>
-                <th>Provider</th>
-                <th>Role</th>
-                <th>Environment</th>
-                <th>Status</th>
-                <th>Capabilities</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {nodes.data!.items.map((n) => (
-                <tr key={n.id}>
-                  <td className="font-mono">{n.hostname}</td>
-                  <td>{n.provider}</td>
-                  <td>{n.role}</td>
-                  <td>{n.environment}</td>
-                  <td>
-                    <StatusBadge status={n.status} />
-                  </td>
-                  <td className="text-xs text-base-400">{n.capabilities.join(", ") || "—"}</td>
-                  <td className="space-x-2">
-                    {n.status !== "decommissioned" && (
-                      <>
-                        <select
-                          className="input inline-block w-28 py-1 text-xs"
-                          value=""
-                          onChange={(e) => e.target.value && reportStatus(n.id, e.target.value)}
-                        >
-                          <option value="" disabled>
-                            Set status…
-                          </option>
-                          <option value="online">online</option>
-                          <option value="offline">offline</option>
-                          <option value="degraded">degraded</option>
-                          <option value="unknown">unknown</option>
-                        </select>
-                        <button
-                          className="text-xs text-base-400 hover:text-danger"
-                          onClick={() => decommission(n.id)}
-                        >
-                          Decommission
-                        </button>
-                      </>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
-
-      {nodes.data?.has_more && (
-        <button className="btn-secondary mt-3" onClick={() => setVisibleLimit((n) => n + 50)}>
-          Load more
-        </button>
-      )}
+      </Modal>
+      <ConfirmDialog open={!!decom} onClose={() => setDecom(null)} onConfirm={decommission} danger confirmLabel="Desativar"
+        title="Desativar node?" description={`“${decom?.hostname}” passa a decommissioned (terminal — a linha mantém-se para histórico).`} />
     </div>
   );
 }

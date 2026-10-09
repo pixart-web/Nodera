@@ -1,169 +1,80 @@
 "use client";
 
 import { useState } from "react";
-import { api, ApiError } from "@/lib/api";
+import { AppWindow, Plus, Power } from "lucide-react";
+import { api } from "@/lib/api";
 import { useApi } from "@/lib/useApi";
-import { PageHeader } from "@/components/PageHeader";
-import { ErrorBanner } from "@/components/ErrorBanner";
+import { useAction } from "@/lib/useAction";
+import { PageHeader } from "@/components/ui/PageHeader";
+import { Section } from "@/components/ui/Card";
+import { Button } from "@/components/ui/Button";
+import { Alert } from "@/components/ui/Feedback";
+import { Badge } from "@/components/ui/Status";
+import { DataTable, type Column } from "@/components/ui/DataTable";
+import { ConfirmDialog, Modal } from "@/components/ui/Overlay";
+import { Field, Input, Select } from "@/components/ui/Forms";
+import { RowMenu } from "@/components/ui/RowMenu";
 import { StatusBadge } from "@/components/StatusBadge";
 import type { Application, Page } from "@/lib/types";
 
+const STATUSES = ["running", "stopped", "degraded", "failed", "unknown"];
+
 export default function ApplicationsPage() {
-  const [visibleLimit, setVisibleLimit] = useState(50);
-  const apps = useApi(() => api.get<Page<Application>>(`/api/v1/applications?limit=${visibleLimit}`), [visibleLimit]);
+  const [limit, setLimit] = useState(50);
+  const apps = useApi(() => api.get<Page<Application>>(`/api/v1/applications?limit=${limit}`), [limit]);
+  const create = useAction();
+  const row = useAction();
   const [showForm, setShowForm] = useState(false);
-  const [name, setName] = useState("");
-  const [kind, setKind] = useState("service");
-  const [formError, setFormError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [rowError, setRowError] = useState<string | null>(null);
+  const [name, setName] = useState(""); const [kind, setKind] = useState("service");
+  const [deregistering, setDeregistering] = useState<Application | null>(null);
 
-  async function reportStatus(id: string, status: string) {
-    setRowError(null);
-    try {
-      await api.post(`/api/v1/applications/${id}/status`, { status });
-      apps.reload();
-    } catch (err) {
-      setRowError(err instanceof ApiError ? err.message : "Failed to update application status");
-    }
-  }
-
-  async function deregister(id: string) {
-    setRowError(null);
-    try {
-      await api.post(`/api/v1/applications/${id}/deregister`);
-      apps.reload();
-    } catch (err) {
-      setRowError(err instanceof ApiError ? err.message : "Failed to deregister application");
-    }
-  }
-
-  async function registerApp(e: React.FormEvent) {
+  async function register(e: React.FormEvent) {
     e.preventDefault();
-    setFormError(null);
-    setBusy(true);
-    try {
-      await api.post("/api/v1/applications", { name, kind });
-      setName("");
-      setShowForm(false);
-      apps.reload();
-    } catch (err) {
-      setFormError(err instanceof ApiError ? err.message : "Failed to register application");
-    } finally {
-      setBusy(false);
-    }
+    const ok = await create.run(() => api.post("/api/v1/applications", { name, kind }), "Aplicação registada.", "Não foi possível registar a aplicação");
+    if (ok) { setName(""); setShowForm(false); apps.reload(); }
   }
+  async function setStatus(a: Application, status: string) {
+    if (await row.run(() => api.post(`/api/v1/applications/${a.id}/status`, { status }), `Estado de ${a.name}: ${status}.`)) apps.reload();
+  }
+  async function deregister() {
+    if (!deregistering) return;
+    if (await row.run(() => api.post(`/api/v1/applications/${deregistering.id}/deregister`), "Aplicação removida do registo.")) apps.reload();
+    setDeregistering(null);
+  }
+
+  const columns: Column<Application>[] = [
+    { key: "name", header: "Nome", primary: true, cell: (a) => <span className="font-mono text-sm font-medium">{a.name}</span> },
+    { key: "kind", header: "Tipo", cell: (a) => <Badge>{a.kind}</Badge> },
+    { key: "env", header: "Ambiente", cell: (a) => <span className="text-nd-muted">{a.environment}</span> },
+    { key: "st", header: "Estado", cell: (a) => <StatusBadge status={a.status} /> },
+    { key: "act", header: "", className: "w-12 text-right", hideOnMobile: true, cell: (a) => a.status === "deregistered" ? null : (
+      <RowMenu label={`Ações para ${a.name}`} items={[
+        ...STATUSES.map((s) => ({ label: `Marcar como ${s}`, onSelect: () => setStatus(a, s) })),
+        { label: "Remover do registo", icon: <Power />, danger: true, separatorBefore: true, onSelect: () => setDeregistering(a) },
+      ]} />) },
+  ];
 
   return (
     <div>
-      <div className="mb-6 flex flex-wrap items-end justify-between gap-3 [&>header]:mb-0">
-        <PageHeader title="Applications" description="Registered applications and services." />
-        <button className="btn-primary" onClick={() => setShowForm((v) => !v)}>
-          {showForm ? "Cancel" : "Register application"}
-        </button>
-      </div>
+      <PageHeader title="Aplicações" description="Aplicações e serviços registados na organização."
+        actions={<Button variant="primary" icon={<Plus className="h-4 w-4" />} onClick={() => { setShowForm(true); create.setError(null); }}>Registar aplicação</Button>} />
+      {row.error && <Alert tone="error" className="mb-4">{row.error}</Alert>}
+      <Section title="Registo de aplicações" description="Inventário real — o estado é reportado, não inferido.">
+        <DataTable caption="Aplicações" columns={columns} rows={apps.data?.items ?? null} loading={apps.loading} error={apps.error} onRetry={apps.reload} pageSize={10}
+          empty={{ icon: <AppWindow />, title: "Nenhuma aplicação registada", description: "Regista a primeira aplicação para a acompanhares aqui.", action: { label: "Registar aplicação", onClick: () => setShowForm(true) } }} />
+        {apps.data?.has_more && <div className="mt-3"><Button onClick={() => setLimit((n) => n + 50)}>Carregar mais</Button></div>}
+      </Section>
 
-      {showForm && (
-        <form onSubmit={registerApp} className="card mb-6 space-y-3 p-4">
-          {formError && <ErrorBanner message={formError} />}
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="label" htmlFor="app-name">
-                Name
-              </label>
-              <input
-                id="app-name"
-                className="input"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                required
-              />
-            </div>
-            <div>
-              <label className="label" htmlFor="app-kind">
-                Kind
-              </label>
-              <select id="app-kind" className="input" value={kind} onChange={(e) => setKind(e.target.value)}>
-                <option value="service">service</option>
-                <option value="web">web</option>
-                <option value="worker">worker</option>
-                <option value="job">job</option>
-                <option value="database">database</option>
-              </select>
-            </div>
-          </div>
-          <button type="submit" className="btn-primary" disabled={busy}>
-            {busy ? "Registering…" : "Register"}
-          </button>
+      <Modal open={showForm} onClose={() => setShowForm(false)} title="Registar aplicação"
+        footer={<><Button onClick={() => setShowForm(false)}>Cancelar</Button><Button variant="primary" type="submit" form="app-form" disabled={create.busy}>{create.busy ? "A registar…" : "Registar"}</Button></>}>
+        <form id="app-form" onSubmit={register} className="space-y-4">
+          {create.error && <Alert tone="error">{create.error}</Alert>}
+          <Field label="Nome">{(id) => <Input id={id} value={name} onChange={(e) => setName(e.target.value)} required />}</Field>
+          <Field label="Tipo">{(id) => <Select id={id} value={kind} onChange={(e) => setKind(e.target.value)}>{["service", "web", "worker", "job", "database"].map((k) => <option key={k}>{k}</option>)}</Select>}</Field>
         </form>
-      )}
-
-      {apps.error && <ErrorBanner message={apps.error} />}
-      {rowError && <ErrorBanner message={rowError} />}
-
-      <div className="card">
-        {apps.loading ? (
-          <div className="px-4 py-10 text-center text-sm text-nd-muted">Loading…</div>
-        ) : (apps.data?.items ?? []).length === 0 ? (
-          <div className="px-4 py-10 text-center text-sm text-nd-muted">No applications registered yet.</div>
-        ) : (
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Kind</th>
-                <th>Environment</th>
-                <th>Status</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {apps.data!.items.map((a) => (
-                <tr key={a.id}>
-                  <td className="font-mono">{a.name}</td>
-                  <td>{a.kind}</td>
-                  <td>{a.environment}</td>
-                  <td>
-                    <StatusBadge status={a.status} />
-                  </td>
-                  <td className="space-x-2">
-                    {a.status !== "deregistered" && (
-                      <>
-                        <select
-                          className="input inline-block w-28 py-1 text-xs"
-                          value=""
-                          onChange={(e) => e.target.value && reportStatus(a.id, e.target.value)}
-                        >
-                          <option value="" disabled>
-                            Set status…
-                          </option>
-                          <option value="running">running</option>
-                          <option value="stopped">stopped</option>
-                          <option value="degraded">degraded</option>
-                          <option value="failed">failed</option>
-                          <option value="unknown">unknown</option>
-                        </select>
-                        <button
-                          className="text-xs text-base-400 hover:text-danger"
-                          onClick={() => deregister(a.id)}
-                        >
-                          Deregister
-                        </button>
-                      </>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
-
-      {apps.data?.has_more && (
-        <button className="btn-secondary mt-3" onClick={() => setVisibleLimit((n) => n + 50)}>
-          Load more
-        </button>
-      )}
+      </Modal>
+      <ConfirmDialog open={!!deregistering} onClose={() => setDeregistering(null)} onConfirm={deregister} danger confirmLabel="Remover"
+        title="Remover do registo?" description={`“${deregistering?.name}” fica como deregistered (a linha mantém-se para histórico).`} />
     </div>
   );
 }

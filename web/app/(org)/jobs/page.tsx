@@ -1,189 +1,92 @@
 "use client";
 
 import { Suspense, useState } from "react";
-import { useSearchParams } from "next/navigation";
-import { api, ApiError } from "@/lib/api";
+import { useRouter, useSearchParams } from "next/navigation";
+import { Ban, Plus, RotateCw, Wrench } from "lucide-react";
+import { api } from "@/lib/api";
 import { useApi } from "@/lib/useApi";
-import { PageHeader } from "@/components/PageHeader";
-import { ErrorBanner } from "@/components/ErrorBanner";
+import { useAction } from "@/lib/useAction";
+import { PageHeader } from "@/components/ui/PageHeader";
+import { Section } from "@/components/ui/Card";
+import { Button } from "@/components/ui/Button";
+import { Alert, LoadingState } from "@/components/ui/Feedback";
+import { DataTable, type Column } from "@/components/ui/DataTable";
+import { Modal } from "@/components/ui/Overlay";
+import { Field, Input } from "@/components/ui/Forms";
+import { Segmented } from "@/components/ui/Tabs";
 import { StatusBadge } from "@/components/StatusBadge";
 import type { Job, Page } from "@/lib/types";
 
+const FILTERS = ["todos", "queued", "running", "succeeded", "failed", "cancelled"] as const;
+type Filter = (typeof FILTERS)[number];
+
 export default function JobsPage() {
-  return (
-    <Suspense fallback={<div className="text-sm text-base-400">Loading…</div>}>
-      <JobsPageInner />
-    </Suspense>
-  );
+  return <Suspense fallback={<LoadingState />}><JobsPageInner /></Suspense>;
 }
 
 function JobsPageInner() {
+  const router = useRouter();
   const searchParams = useSearchParams();
-  const statusFilter = searchParams.get("status") ?? "";
-  const [visibleLimit, setVisibleLimit] = useState(50);
+  const param = searchParams.get("status") ?? "";
+  const filter: Filter = (FILTERS as readonly string[]).includes(param) ? (param as Filter) : "todos";
+  const statusFilter = filter === "todos" ? "" : filter;
+  const [limit, setLimit] = useState(50);
 
-  const jobs = useApi(
-    () =>
-      api.get<Page<Job>>(
-        `/api/v1/jobs?limit=${visibleLimit}${statusFilter ? `&status=${statusFilter}` : ""}`,
-      ),
-    [statusFilter, visibleLimit],
-    { pollMs: 5000 },
-  );
-
+  const jobs = useApi(() => api.get<Page<Job>>(`/api/v1/jobs?limit=${limit}${statusFilter ? `&status=${statusFilter}` : ""}`), [statusFilter, limit], { pollMs: 5000 });
+  const enqueueAction = useAction();
+  const row = useAction();
   const [showForm, setShowForm] = useState(false);
-  const [type, setType] = useState("");
-  const [payload, setPayload] = useState("{}");
-  const [formError, setFormError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [type, setType] = useState(""); const [payload, setPayload] = useState("{}");
+  const [jsonError, setJsonError] = useState<string | null>(null);
 
   async function enqueue(e: React.FormEvent) {
     e.preventDefault();
-    setFormError(null);
-    let parsedPayload: unknown;
-    try {
-      parsedPayload = JSON.parse(payload);
-    } catch {
-      setFormError("Payload must be valid JSON");
-      return;
-    }
-    setBusy(true);
-    try {
-      await api.post("/api/v1/jobs", { type, payload: parsedPayload });
-      setType("");
-      setPayload("{}");
-      setShowForm(false);
-      jobs.reload();
-    } catch (err) {
-      setFormError(err instanceof ApiError ? err.message : "Failed to enqueue job");
-    } finally {
-      setBusy(false);
-    }
+    setJsonError(null);
+    let parsed: unknown;
+    try { parsed = JSON.parse(payload); } catch { setJsonError("O payload tem de ser JSON válido"); return; }
+    const ok = await enqueueAction.run(() => api.post("/api/v1/jobs", { type, payload: parsed }), "Job colocado em fila.", "Não foi possível colocar o job em fila");
+    if (ok) { setType(""); setPayload("{}"); setShowForm(false); jobs.reload(); }
+  }
+  // A failed cancel/retry just means the list shows the true state on reload.
+  async function act(path: string, success: string) {
+    await row.run(() => api.post(path), success);
+    jobs.reload();
   }
 
-  async function cancelJob(id: string) {
-    try {
-      await api.post(`/api/v1/jobs/${id}/cancel`);
-      jobs.reload();
-    } catch {
-      // The job list will simply not reflect a cancellation that failed
-      // (e.g. it already started running) — reload shows the true state.
-      jobs.reload();
-    }
-  }
-
-  async function retryJob(id: string) {
-    try {
-      await api.post(`/api/v1/jobs/${id}/retry`);
-      jobs.reload();
-    } catch {
-      // Same reasoning as cancelJob — reload shows the true state rather
-      // than assuming the retry request succeeded.
-      jobs.reload();
-    }
-  }
+  const columns: Column<Job>[] = [
+    { key: "type", header: "Tipo", primary: true, cell: (j) => <span className="font-mono text-xs font-medium">{j.type}</span> },
+    { key: "st", header: "Estado", cell: (j) => <StatusBadge status={j.status} /> },
+    { key: "att", header: "Tentativas", cell: (j) => <span className="tabular-nums text-nd-muted">{j.attempts}/{j.max_attempts}</span> },
+    { key: "cr", header: "Criado", cell: (j) => <span className="text-xs text-nd-faint">{new Date(j.created_at).toLocaleString("pt-PT")}</span> },
+    { key: "err", header: "Erro", cell: (j) => <span className="block max-w-xs truncate text-xs text-nd-danger">{j.error ?? ""}</span> },
+    { key: "act", header: "", className: "text-right", hideOnMobile: true, cell: (j) => (
+      <>
+        {j.status === "queued" && <Button size="sm" variant="danger" icon={<Ban className="h-3.5 w-3.5" />} onClick={() => act(`/api/v1/jobs/${j.id}/cancel`, "Job cancelado.")}>Cancelar</Button>}
+        {j.status === "failed" && <Button size="sm" icon={<RotateCw className="h-3.5 w-3.5" />} onClick={() => act(`/api/v1/jobs/${j.id}/retry`, "Job recolocado em fila.")}>Repetir</Button>}
+      </>) },
+  ];
 
   return (
     <div>
-      <div className="mb-6 flex flex-wrap items-end justify-between gap-3 [&>header]:mb-0">
-        <PageHeader
-          title="Jobs"
-          description="Postgres-backed job queue. No job type has a handler registered yet beyond what callers enqueue — see docs/ROADMAP.md. Refreshes automatically every 5s."
-        />
-        <button className="btn-primary" onClick={() => setShowForm((v) => !v)}>
-          {showForm ? "Cancel" : "Enqueue job"}
-        </button>
-      </div>
+      <PageHeader title="Jobs" description="Fila de jobs em Postgres. Atualiza automaticamente a cada 5 s."
+        actions={<Button variant="primary" icon={<Plus className="h-4 w-4" />} onClick={() => { setShowForm(true); enqueueAction.setError(null); setJsonError(null); }}>Novo job</Button>} />
+      <Alert tone="info" className="mb-4">Ainda não há handlers para tipos de job concretos — os jobs ficam registados conforme os chamadores os colocam em fila.</Alert>
+      {row.error && <Alert tone="error" className="mb-4">{row.error}</Alert>}
+      <Section title="Fila" actions={
+        <Segmented label="Filtrar por estado" options={FILTERS} value={filter} onChange={(f) => router.replace(f === "todos" ? "/jobs" : `/jobs?status=${f}`)} />}>
+        <DataTable caption="Jobs" columns={columns} rows={jobs.data?.items ?? null} loading={jobs.loading && !jobs.data} error={jobs.error} onRetry={jobs.reload} pageSize={10}
+          empty={{ icon: <Wrench />, title: statusFilter ? `Nenhum job com estado “${statusFilter}”` : "Nenhum job", description: "Os jobs aparecem aqui quando forem colocados em fila." }} />
+        {jobs.data?.has_more && <div className="mt-3"><Button onClick={() => setLimit((n) => n + 50)}>Carregar mais</Button></div>}
+      </Section>
 
-      {showForm && (
-        <form onSubmit={enqueue} className="card mb-6 space-y-3 p-4">
-          {formError && <ErrorBanner message={formError} />}
-          <div>
-            <label className="label" htmlFor="job-type">
-              Type
-            </label>
-            <input
-              id="job-type"
-              className="input"
-              value={type}
-              onChange={(e) => setType(e.target.value)}
-              placeholder="e.g. backup.create"
-              required
-            />
-          </div>
-          <div>
-            <label className="label" htmlFor="job-payload">
-              Payload (JSON)
-            </label>
-            <textarea
-              id="job-payload"
-              className="input font-mono"
-              rows={3}
-              value={payload}
-              onChange={(e) => setPayload(e.target.value)}
-            />
-          </div>
-          <button type="submit" className="btn-primary" disabled={busy}>
-            {busy ? "Enqueuing…" : "Enqueue"}
-          </button>
+      <Modal open={showForm} onClose={() => setShowForm(false)} title="Novo job"
+        footer={<><Button onClick={() => setShowForm(false)}>Cancelar</Button><Button variant="primary" type="submit" form="job-form" disabled={enqueueAction.busy}>{enqueueAction.busy ? "A enviar…" : "Colocar em fila"}</Button></>}>
+        <form id="job-form" onSubmit={enqueue} className="space-y-4">
+          {(enqueueAction.error || jsonError) && <Alert tone="error">{jsonError ?? enqueueAction.error}</Alert>}
+          <Field label="Tipo">{(id) => <Input id={id} value={type} onChange={(e) => setType(e.target.value)} placeholder="ex.: backup.create" required />}</Field>
+          <Field label="Payload (JSON)">{(id) => <textarea id={id} className="input font-mono" rows={4} value={payload} onChange={(e) => setPayload(e.target.value)} />}</Field>
         </form>
-      )}
-
-      {jobs.error && <ErrorBanner message={jobs.error} />}
-
-      <div className="card">
-        {jobs.loading ? (
-          <div className="px-4 py-10 text-center text-sm text-nd-muted">Loading…</div>
-        ) : (jobs.data?.items ?? []).length === 0 ? (
-          <div className="px-4 py-10 text-center text-sm text-nd-muted">No jobs{statusFilter ? ` with status "${statusFilter}"` : ""}.</div>
-        ) : (
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>Type</th>
-                <th>Status</th>
-                <th>Attempts</th>
-                <th>Created</th>
-                <th>Error</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {jobs.data!.items.map((j) => (
-                <tr key={j.id}>
-                  <td className="font-mono text-xs">{j.type}</td>
-                  <td>
-                    <StatusBadge status={j.status} />
-                  </td>
-                  <td className="text-xs text-base-300">
-                    {j.attempts}/{j.max_attempts}
-                  </td>
-                  <td className="text-xs text-base-400">{new Date(j.created_at).toLocaleString()}</td>
-                  <td className="max-w-xs truncate text-xs text-danger">{j.error ?? ""}</td>
-                  <td>
-                    {j.status === "queued" && (
-                      <button className="text-xs text-base-400 hover:text-danger" onClick={() => cancelJob(j.id)}>
-                        Cancel
-                      </button>
-                    )}
-                    {j.status === "failed" && (
-                      <button className="text-xs text-accent-400 hover:text-accent-300" onClick={() => retryJob(j.id)}>
-                        Retry
-                      </button>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
-
-      {jobs.data?.has_more && (
-        <button className="btn-secondary mt-3" onClick={() => setVisibleLimit((n) => n + 50)}>
-          Load more
-        </button>
-      )}
+      </Modal>
     </div>
   );
 }

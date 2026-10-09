@@ -1,551 +1,206 @@
 "use client";
 
-import { Fragment, useState } from "react";
+import { useState } from "react";
+import { Copy, KeyRound, Pencil, Plus, Power, Trash2, UserCog } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import { useApi } from "@/lib/useApi";
-import { PageHeader } from "@/components/PageHeader";
-import { ErrorBanner } from "@/components/ErrorBanner";
+import { useAction } from "@/lib/useAction";
+import { PageHeader } from "@/components/ui/PageHeader";
+import { Section } from "@/components/ui/Card";
+import { Button } from "@/components/ui/Button";
+import { Alert } from "@/components/ui/Feedback";
+import { Badge } from "@/components/ui/Status";
+import { DataTable, type Column } from "@/components/ui/DataTable";
+import { ConfirmDialog, Modal } from "@/components/ui/Overlay";
+import { Field, Input } from "@/components/ui/Forms";
+import { RowMenu } from "@/components/ui/RowMenu";
+import { useToast } from "@/components/ui/Toast";
 import { StatusBadge } from "@/components/StatusBadge";
 import type { AdminAPIToken, APIToken, CreatedAPIToken, ServiceAccount } from "@/lib/types";
 
-function parseScopes(raw: string): string[] {
-  return raw
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
+const parseScopes = (raw: string): string[] => raw.split(",").map((s) => s.trim()).filter(Boolean);
+
+function Scopes({ items }: { items: string[] }) {
+  return <div className="flex max-w-sm flex-wrap gap-1">{items.map((s) => <Badge key={s}>{s}</Badge>)}</div>;
 }
 
 // Shown once, right after a token is minted — the API never returns the raw
-// value again after this response (only its hash is stored).
-function NewTokenBanner({ token, onDismiss }: { token: string; onDismiss: () => void }) {
+// value again (only its hash is stored).
+function NewTokenModal({ token, onClose }: { token: string | null; onClose: () => void }) {
+  const toast = useToast();
   return (
-    <div className="mb-4 rounded-md border border-ok/30 bg-ok/10 px-3 py-3 text-sm">
-      <div className="mb-1 font-medium text-ok">Token created — copy it now, it won&apos;t be shown again</div>
-      <code className="block break-all rounded bg-base-950 px-2 py-1 font-mono text-xs text-base-100">{token}</code>
-      <button className="mt-2 text-xs text-base-400 hover:text-base-200" onClick={onDismiss}>
-        Dismiss
-      </button>
-    </div>
+    <Modal open={!!token} onClose={onClose} title="Token criado" description="Copia-o agora — não voltará a ser mostrado."
+      footer={<><Button icon={<Copy className="h-4 w-4" />} onClick={() => { navigator.clipboard?.writeText(token ?? "").then(() => toast.push("success", "Token copiado."), () => toast.push("error", "Não foi possível copiar.")); }}>Copiar</Button><Button variant="primary" onClick={onClose}>Já guardei</Button></>}>
+      <code className="block break-all rounded-nd border border-nd-border bg-[#050C17] p-3 font-mono text-xs text-nd-success">{token}</code>
+    </Modal>
   );
 }
 
 export default function AccessPage() {
   const myTokens = useApi(() => api.get<APIToken[]>("/api/v1/api-tokens"), []);
   const serviceAccounts = useApi(() => api.get<ServiceAccount[]>("/api/v1/service-accounts"), []);
-  // Org-wide token visibility requires organization.manage — a member
-  // without it gets FORBIDDEN, which we treat as "section not available"
-  // rather than an error to show (see the .catch below).
-  const orgTokens = useApi(
-    () => api.get<AdminAPIToken[]>("/api/v1/organization/api-tokens").catch((e) => {
-      if (e instanceof ApiError && e.code === "FORBIDDEN") return null;
-      throw e;
-    }),
-    [],
-  );
+  // Org-wide token visibility needs organization.manage — FORBIDDEN means
+  // "section not available", not an error to show.
+  const orgTokens = useApi(() => api.get<AdminAPIToken[]>("/api/v1/organization/api-tokens").catch((e) => {
+    if (e instanceof ApiError && e.code === "FORBIDDEN") return null;
+    throw e;
+  }), []);
 
+  const row = useAction();
   const [newToken, setNewToken] = useState<string | null>(null);
 
-  const [showTokenForm, setShowTokenForm] = useState(false);
-  const [tokenName, setTokenName] = useState("");
-  const [tokenScopes, setTokenScopes] = useState("");
-  const [tokenFormError, setTokenFormError] = useState<string | null>(null);
-  const [tokenBusy, setTokenBusy] = useState(false);
+  // --- my tokens ---
+  const tokenAction = useAction();
+  const [tokenForm, setTokenForm] = useState(false);
+  const [tName, setTName] = useState(""); const [tScopes, setTScopes] = useState("");
+  const [renaming, setRenaming] = useState<APIToken | null>(null); const [renameValue, setRenameValue] = useState("");
+  const renameAction = useAction();
+  const [revoking, setRevoking] = useState<{ id: string; name: string; org: boolean } | null>(null);
 
   async function createToken(e: React.FormEvent) {
     e.preventDefault();
-    setTokenFormError(null);
-    setTokenBusy(true);
-    try {
-      const created = await api.post<CreatedAPIToken>("/api/v1/api-tokens", {
-        name: tokenName,
-        scopes: parseScopes(tokenScopes),
-      });
-      setNewToken(created.token);
-      setTokenName("");
-      setTokenScopes("");
-      setShowTokenForm(false);
-      myTokens.reload();
-    } catch (err) {
-      setTokenFormError(err instanceof ApiError ? err.message : "Failed to create token");
-    } finally {
-      setTokenBusy(false);
+    let created: CreatedAPIToken | null = null;
+    if (await tokenAction.run(async () => { created = await api.post<CreatedAPIToken>("/api/v1/api-tokens", { name: tName, scopes: parseScopes(tScopes) }); }, undefined, "Não foi possível criar o token") && created) {
+      setNewToken((created as CreatedAPIToken).token); setTName(""); setTScopes(""); setTokenForm(false); myTokens.reload();
     }
   }
-
-  async function revokeToken(id: string) {
-    try {
-      await api.del(`/api/v1/api-tokens/${id}`);
-      myTokens.reload();
-    } catch {
-      myTokens.reload();
-    }
-  }
-
-  const [renamingTokenID, setRenamingTokenID] = useState<string | null>(null);
-  const [renameValue, setRenameValue] = useState("");
-  const [renameError, setRenameError] = useState<string | null>(null);
-  const [renameBusy, setRenameBusy] = useState(false);
-
-  function startRenaming(t: APIToken) {
-    setRenamingTokenID((cur) => (cur === t.id ? null : t.id));
-    setRenameValue(t.name);
-    setRenameError(null);
-  }
-
-  async function saveRename(e: React.FormEvent, id: string) {
+  async function rename(e: React.FormEvent) {
     e.preventDefault();
-    setRenameError(null);
-    setRenameBusy(true);
-    try {
-      await api.put(`/api/v1/api-tokens/${id}`, { name: renameValue });
-      setRenamingTokenID(null);
-      myTokens.reload();
-      orgTokens.reload();
-    } catch (err) {
-      setRenameError(err instanceof ApiError ? err.message : "Failed to rename token");
-    } finally {
-      setRenameBusy(false);
-    }
+    if (!renaming) return;
+    if (await renameAction.run(() => api.put(`/api/v1/api-tokens/${renaming.id}`, { name: renameValue }), "Token renomeado.")) { setRenaming(null); myTokens.reload(); orgTokens.reload(); }
+  }
+  async function revoke() {
+    if (!revoking) return;
+    // A failed revoke just means the reload shows the true state.
+    await row.run(() => api.del(revoking.org ? `/api/v1/organization/api-tokens/${revoking.id}` : `/api/v1/api-tokens/${revoking.id}`), "Token revogado.");
+    myTokens.reload(); orgTokens.reload(); setRevoking(null);
   }
 
-  async function revokeOrgToken(id: string) {
-    try {
-      await api.del(`/api/v1/organization/api-tokens/${id}`);
-      orgTokens.reload();
-    } catch {
-      orgTokens.reload();
-    }
-  }
+  // --- service accounts ---
+  const saAction = useAction();
+  const [saForm, setSaForm] = useState<{ sa: ServiceAccount | null } | null>(null);
+  const [saName, setSaName] = useState(""); const [saDesc, setSaDesc] = useState("");
+  const [issuing, setIssuing] = useState<ServiceAccount | null>(null);
+  const issueAction = useAction();
+  const [iName, setIName] = useState(""); const [iScopes, setIScopes] = useState("");
+  const [deletingSA, setDeletingSA] = useState<ServiceAccount | null>(null);
 
-  const [showSAForm, setShowSAForm] = useState(false);
-  const [saName, setSaName] = useState("");
-  const [saDescription, setSaDescription] = useState("");
-  const [saFormError, setSaFormError] = useState<string | null>(null);
-  const [saBusy, setSaBusy] = useState(false);
-
-  async function createServiceAccount(e: React.FormEvent) {
+  function openSAForm(sa: ServiceAccount | null) { setSaForm({ sa }); setSaName(sa?.name ?? ""); setSaDesc(sa?.description ?? ""); saAction.setError(null); }
+  async function saveSA(e: React.FormEvent) {
     e.preventDefault();
-    setSaFormError(null);
-    setSaBusy(true);
-    try {
-      await api.post("/api/v1/service-accounts", { name: saName, description: saDescription });
-      setSaName("");
-      setSaDescription("");
-      setShowSAForm(false);
-      serviceAccounts.reload();
-    } catch (err) {
-      setSaFormError(err instanceof ApiError ? err.message : "Failed to create service account");
-    } finally {
-      setSaBusy(false);
-    }
+    if (!saForm) return;
+    const sa = saForm.sa;
+    if (await saAction.run(() => (sa ? api.put(`/api/v1/service-accounts/${sa.id}`, { name: saName, description: saDesc }) : api.post("/api/v1/service-accounts", { name: saName, description: saDesc })), sa ? "Conta de serviço atualizada." : "Conta de serviço criada.")) { setSaForm(null); serviceAccounts.reload(); }
   }
-
-  async function disableServiceAccount(id: string) {
-    try {
-      await api.del(`/api/v1/service-accounts/${id}`);
-      serviceAccounts.reload();
-      orgTokens.reload();
-    } catch {
-      serviceAccounts.reload();
-    }
+  async function toggleSA(sa: ServiceAccount) {
+    const enable = sa.status !== "active";
+    await row.run(() => (enable ? api.post(`/api/v1/service-accounts/${sa.id}/enable`) : api.del(`/api/v1/service-accounts/${sa.id}`)), enable ? "Conta ativada." : "Conta desativada — os tokens foram revogados.");
+    serviceAccounts.reload(); orgTokens.reload();
   }
-
-  const [saStatusError, setSaStatusError] = useState<string | null>(null);
-
-  async function enableServiceAccount(id: string) {
-    setSaStatusError(null);
-    try {
-      await api.post(`/api/v1/service-accounts/${id}/enable`);
-      serviceAccounts.reload();
-    } catch (err) {
-      setSaStatusError(err instanceof ApiError ? err.message : "Failed to enable service account");
-    }
+  async function deleteSA() {
+    if (!deletingSA) return;
+    if (await row.run(() => api.del(`/api/v1/service-accounts/${deletingSA.id}/permanent`), "Conta de serviço eliminada.")) serviceAccounts.reload();
+    setDeletingSA(null);
   }
-
-  const [deletingSAID, setDeletingSAID] = useState<string | null>(null);
-
-  async function deleteServiceAccount(id: string) {
-    setSaStatusError(null);
-    setDeletingSAID(id);
-    try {
-      await api.del(`/api/v1/service-accounts/${id}/permanent`);
-      serviceAccounts.reload();
-    } catch (err) {
-      setSaStatusError(err instanceof ApiError ? err.message : "Failed to delete service account");
-    } finally {
-      setDeletingSAID(null);
-    }
-  }
-
-  const [editingSAID, setEditingSAID] = useState<string | null>(null);
-  const [editSAName, setEditSAName] = useState("");
-  const [editSADescription, setEditSADescription] = useState("");
-  const [editSAError, setEditSAError] = useState<string | null>(null);
-  const [editSABusy, setEditSABusy] = useState(false);
-
-  function startEditingSA(sa: ServiceAccount) {
-    setEditingSAID((cur) => (cur === sa.id ? null : sa.id));
-    setEditSAName(sa.name);
-    setEditSADescription(sa.description);
-    setEditSAError(null);
-  }
-
-  async function saveServiceAccount(e: React.FormEvent, id: string) {
+  async function issue(e: React.FormEvent) {
     e.preventDefault();
-    setEditSAError(null);
-    setEditSABusy(true);
-    try {
-      await api.put(`/api/v1/service-accounts/${id}`, { name: editSAName, description: editSADescription });
-      setEditingSAID(null);
-      serviceAccounts.reload();
-    } catch (err) {
-      setEditSAError(err instanceof ApiError ? err.message : "Failed to update service account");
-    } finally {
-      setEditSABusy(false);
+    if (!issuing) return;
+    let created: CreatedAPIToken | null = null;
+    if (await issueAction.run(async () => { created = await api.post<CreatedAPIToken>(`/api/v1/service-accounts/${issuing.id}/api-tokens`, { name: iName, scopes: parseScopes(iScopes) }); }, undefined, "Não foi possível emitir o token") && created) {
+      setNewToken((created as CreatedAPIToken).token); setIName(""); setIScopes(""); setIssuing(null); orgTokens.reload();
     }
   }
 
-  const [issuingFor, setIssuingFor] = useState<string | null>(null);
-  const [saTokenName, setSaTokenName] = useState("");
-  const [saTokenScopes, setSaTokenScopes] = useState("");
-  const [saTokenError, setSaTokenError] = useState<string | null>(null);
-  const [saTokenBusy, setSaTokenBusy] = useState(false);
-
-  async function issueServiceAccountToken(e: React.FormEvent, saId: string) {
-    e.preventDefault();
-    setSaTokenError(null);
-    setSaTokenBusy(true);
-    try {
-      const created = await api.post<CreatedAPIToken>(`/api/v1/service-accounts/${saId}/api-tokens`, {
-        name: saTokenName,
-        scopes: parseScopes(saTokenScopes),
-      });
-      setNewToken(created.token);
-      setSaTokenName("");
-      setSaTokenScopes("");
-      setIssuingFor(null);
-      orgTokens.reload();
-    } catch (err) {
-      setSaTokenError(err instanceof ApiError ? err.message : "Failed to issue token");
-    } finally {
-      setSaTokenBusy(false);
-    }
-  }
+  const myCols: Column<APIToken>[] = [
+    { key: "name", header: "Nome", primary: true, cell: (t) => <span className="font-mono text-xs font-medium">{t.name}</span> },
+    { key: "prefix", header: "Prefixo", cell: (t) => <span className="font-mono text-xs text-nd-muted">{t.token_prefix}…</span> },
+    { key: "scopes", header: "Scopes", cell: (t) => <Scopes items={t.scopes} /> },
+    { key: "used", header: "Último uso", cell: (t) => <span className="text-xs text-nd-faint">{t.last_used_at ? new Date(t.last_used_at).toLocaleString("pt-PT") : "nunca"}</span> },
+    { key: "act", header: "", className: "w-12 text-right", hideOnMobile: true, cell: (t) => (
+      <RowMenu label={`Ações para ${t.name}`} items={[
+        { label: "Renomear", icon: <Pencil />, onSelect: () => { setRenaming(t); setRenameValue(t.name); renameAction.setError(null); } },
+        { label: "Revogar", icon: <Trash2 />, danger: true, separatorBefore: true, onSelect: () => setRevoking({ id: t.id, name: t.name, org: false }) },
+      ]} />) },
+  ];
+  const saCols: Column<ServiceAccount>[] = [
+    { key: "name", header: "Nome", primary: true, cell: (sa) => <span className="font-mono text-sm font-medium">{sa.name}</span> },
+    { key: "desc", header: "Descrição", cell: (sa) => <span className="text-nd-muted">{sa.description || "—"}</span> },
+    { key: "st", header: "Estado", cell: (sa) => <StatusBadge status={sa.status} /> },
+    { key: "act", header: "", className: "w-12 text-right", hideOnMobile: true, cell: (sa) => (
+      <RowMenu label={`Ações para ${sa.name}`} items={[
+        { label: "Emitir token", icon: <KeyRound />, disabled: sa.status !== "active", onSelect: () => { setIssuing(sa); issueAction.setError(null); } },
+        { label: "Editar", icon: <Pencil />, onSelect: () => openSAForm(sa) },
+        { label: sa.status === "active" ? "Desativar" : "Ativar", icon: <Power />, onSelect: () => toggleSA(sa) },
+        { label: "Eliminar (desativa primeiro)", icon: <Trash2 />, danger: true, separatorBefore: true, disabled: sa.status === "active", onSelect: () => setDeletingSA(sa) },
+      ]} />) },
+  ];
+  const orgCols: Column<AdminAPIToken>[] = [
+    { key: "name", header: "Nome", primary: true, cell: (t) => <span className="font-mono text-xs font-medium">{t.name}</span> },
+    { key: "owner", header: "Dono", cell: (t) => <span className="text-xs text-nd-muted">{t.owner_label} <span className="text-nd-faint">({t.owner_type})</span></span> },
+    { key: "scopes", header: "Scopes", cell: (t) => <Scopes items={t.scopes} /> },
+    { key: "act", header: "", className: "text-right", hideOnMobile: true, cell: (t) => <Button size="sm" variant="danger" onClick={() => setRevoking({ id: t.id, name: t.name, org: true })}>Revogar</Button> },
+  ];
 
   return (
-    <div>
-      <PageHeader
-        title="Access"
-        description="API tokens and service accounts. Scopes can never exceed the granting user's own permissions."
-      />
+    <div className="space-y-6">
+      <PageHeader title="Acessos" description="Tokens de API e contas de serviço. Os scopes nunca podem exceder as permissões de quem os concede." />
+      {row.error && <Alert tone="error">{row.error}</Alert>}
 
-      {newToken && <NewTokenBanner token={newToken} onDismiss={() => setNewToken(null)} />}
+      <Section title="Os meus tokens de API" actions={<Button variant="primary" size="sm" icon={<Plus className="h-4 w-4" />} onClick={() => { setTokenForm(true); tokenAction.setError(null); }}>Criar token</Button>}>
+        <DataTable caption="Tokens de API" columns={myCols} rows={myTokens.data} loading={myTokens.loading} error={myTokens.error} onRetry={myTokens.reload}
+          empty={{ icon: <KeyRound />, title: "Ainda não tens tokens de API", action: { label: "Criar token", onClick: () => setTokenForm(true) } }} />
+      </Section>
 
-      {/* --- My API tokens --- */}
-      <div className="mb-8">
-        <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-base font-semibold text-nd-text">My API tokens</h2>
-          <button className="btn-primary" onClick={() => setShowTokenForm((v) => !v)}>
-            {showTokenForm ? "Cancel" : "Create token"}
-          </button>
-        </div>
+      <Section title="Contas de serviço" description="Identidades não humanas com os seus próprios tokens." actions={<Button variant="primary" size="sm" icon={<Plus className="h-4 w-4" />} onClick={() => openSAForm(null)}>Criar conta</Button>}>
+        <DataTable caption="Contas de serviço" columns={saCols} rows={serviceAccounts.data} loading={serviceAccounts.loading} error={serviceAccounts.error} onRetry={serviceAccounts.reload}
+          empty={{ icon: <UserCog />, title: "Nenhuma conta de serviço", action: { label: "Criar conta", onClick: () => openSAForm(null) } }} />
+      </Section>
 
-        {showTokenForm && (
-          <form onSubmit={createToken} className="card mb-4 space-y-3 p-4">
-            {tokenFormError && <ErrorBanner message={tokenFormError} />}
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="label" htmlFor="token-name">
-                  Name
-                </label>
-                <input id="token-name" className="input" value={tokenName} onChange={(e) => setTokenName(e.target.value)} required />
-              </div>
-              <div>
-                <label className="label" htmlFor="token-scopes">
-                  Scopes (comma-separated)
-                </label>
-                <input
-                  id="token-scopes"
-                  className="input font-mono"
-                  value={tokenScopes}
-                  onChange={(e) => setTokenScopes(e.target.value)}
-                  placeholder="infrastructure.read, audit.read"
-                  required
-                />
-              </div>
-            </div>
-            <button type="submit" className="btn-primary" disabled={tokenBusy}>
-              {tokenBusy ? "Creating…" : "Create"}
-            </button>
-          </form>
-        )}
-
-        {myTokens.error && <ErrorBanner message={myTokens.error} />}
-        <div className="card">
-          {myTokens.loading ? (
-            <div className="px-4 py-10 text-center text-sm text-nd-muted">Loading…</div>
-          ) : (myTokens.data ?? []).length === 0 ? (
-            <div className="px-4 py-10 text-center text-sm text-nd-muted">No API tokens yet.</div>
-          ) : (
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Prefix</th>
-                  <th>Scopes</th>
-                  <th>Last used</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                {myTokens.data!.map((t) => (
-                  <Fragment key={t.id}>
-                    <tr>
-                      <td className="font-mono text-xs">{t.name}</td>
-                      <td className="font-mono text-xs text-base-400">{t.token_prefix}…</td>
-                      <td className="text-xs text-base-300">{t.scopes.join(", ")}</td>
-                      <td className="text-xs text-base-400">{t.last_used_at ? new Date(t.last_used_at).toLocaleString() : "never"}</td>
-                      <td className="space-x-3">
-                        <button className="text-xs text-base-400 hover:text-base-200" onClick={() => startRenaming(t)}>
-                          {renamingTokenID === t.id ? "Close" : "Rename"}
-                        </button>
-                        <button className="text-xs text-base-400 hover:text-danger" onClick={() => revokeToken(t.id)}>
-                          Revoke
-                        </button>
-                      </td>
-                    </tr>
-                    {renamingTokenID === t.id && (
-                      <tr>
-                        <td colSpan={5} className="bg-base-800/40 p-3">
-                          <form onSubmit={(e) => saveRename(e, t.id)} className="flex items-center gap-3">
-                            {renameError && <ErrorBanner message={renameError} />}
-                            <input
-                              className="input flex-1"
-                              value={renameValue}
-                              onChange={(e) => setRenameValue(e.target.value)}
-                              required
-                            />
-                            <button type="submit" className="btn-primary" disabled={renameBusy}>
-                              {renameBusy ? "Saving…" : "Save"}
-                            </button>
-                          </form>
-                        </td>
-                      </tr>
-                    )}
-                  </Fragment>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
-      </div>
-
-      {/* --- Service accounts --- */}
-      <div className="mb-8">
-        <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-base font-semibold text-nd-text">Service accounts</h2>
-          <button className="btn-primary" onClick={() => setShowSAForm((v) => !v)}>
-            {showSAForm ? "Cancel" : "Create service account"}
-          </button>
-        </div>
-
-        {showSAForm && (
-          <form onSubmit={createServiceAccount} className="card mb-4 space-y-3 p-4">
-            {saFormError && <ErrorBanner message={saFormError} />}
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="label" htmlFor="sa-name">
-                  Name
-                </label>
-                <input id="sa-name" className="input" value={saName} onChange={(e) => setSaName(e.target.value)} required />
-              </div>
-              <div>
-                <label className="label" htmlFor="sa-description">
-                  Description
-                </label>
-                <input id="sa-description" className="input" value={saDescription} onChange={(e) => setSaDescription(e.target.value)} />
-              </div>
-            </div>
-            <button type="submit" className="btn-primary" disabled={saBusy}>
-              {saBusy ? "Creating…" : "Create"}
-            </button>
-          </form>
-        )}
-
-        {serviceAccounts.error && <ErrorBanner message={serviceAccounts.error} />}
-        {saStatusError && <ErrorBanner message={saStatusError} />}
-        <div className="card">
-          {serviceAccounts.loading ? (
-            <div className="px-4 py-10 text-center text-sm text-nd-muted">Loading…</div>
-          ) : (serviceAccounts.data ?? []).length === 0 ? (
-            <div className="px-4 py-10 text-center text-sm text-nd-muted">No service accounts yet.</div>
-          ) : (
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Description</th>
-                  <th>Status</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                {serviceAccounts.data!.map((sa) => (
-                  <Fragment key={sa.id}>
-                    <tr>
-                      <td className="font-mono">{sa.name}</td>
-                      <td className="text-xs text-base-300">{sa.description || "—"}</td>
-                      <td>
-                        <StatusBadge status={sa.status} />
-                      </td>
-                      <td className="space-x-3">
-                        {sa.status === "active" ? (
-                          <>
-                            <button
-                              className="text-xs text-accent-400 hover:text-accent-300"
-                              onClick={() => setIssuingFor(issuingFor === sa.id ? null : sa.id)}
-                            >
-                              {issuingFor === sa.id ? "Cancel" : "Issue token"}
-                            </button>
-                            <button className="text-xs text-base-400 hover:text-base-200" onClick={() => startEditingSA(sa)}>
-                              {editingSAID === sa.id ? "Close" : "Edit"}
-                            </button>
-                            <button className="text-xs text-base-400 hover:text-danger" onClick={() => disableServiceAccount(sa.id)}>
-                              Disable
-                            </button>
-                          </>
-                        ) : (
-                          <>
-                            <button className="text-xs text-base-400 hover:text-base-200" onClick={() => startEditingSA(sa)}>
-                              {editingSAID === sa.id ? "Close" : "Edit"}
-                            </button>
-                            <button
-                              className="text-xs text-accent-400 hover:text-accent-300"
-                              onClick={() => enableServiceAccount(sa.id)}
-                            >
-                              Enable
-                            </button>
-                            <button
-                              className="text-xs text-base-400 hover:text-danger disabled:text-base-600"
-                              disabled={deletingSAID === sa.id}
-                              onClick={() => deleteServiceAccount(sa.id)}
-                            >
-                              {deletingSAID === sa.id ? "Deleting…" : "Delete"}
-                            </button>
-                          </>
-                        )}
-                      </td>
-                    </tr>
-                    {issuingFor === sa.id && (
-                      <tr>
-                        <td colSpan={4} className="bg-base-800/40 p-3">
-                          <form onSubmit={(e) => issueServiceAccountToken(e, sa.id)} className="space-y-2">
-                            {saTokenError && <ErrorBanner message={saTokenError} />}
-                            <div className="grid grid-cols-2 gap-3">
-                              <input
-                                className="input"
-                                placeholder="Token name"
-                                value={saTokenName}
-                                onChange={(e) => setSaTokenName(e.target.value)}
-                                required
-                              />
-                              <input
-                                className="input font-mono"
-                                placeholder="Scopes, comma-separated"
-                                value={saTokenScopes}
-                                onChange={(e) => setSaTokenScopes(e.target.value)}
-                                required
-                              />
-                            </div>
-                            <button type="submit" className="btn-primary" disabled={saTokenBusy}>
-                              {saTokenBusy ? "Issuing…" : "Issue"}
-                            </button>
-                          </form>
-                        </td>
-                      </tr>
-                    )}
-                    {editingSAID === sa.id && (
-                      <tr>
-                        <td colSpan={4} className="bg-base-800/40 p-3">
-                          <form onSubmit={(e) => saveServiceAccount(e, sa.id)} className="space-y-2">
-                            {editSAError && <ErrorBanner message={editSAError} />}
-                            <div className="grid grid-cols-2 gap-3">
-                              <input
-                                className="input"
-                                placeholder="Name"
-                                value={editSAName}
-                                onChange={(e) => setEditSAName(e.target.value)}
-                                required
-                              />
-                              <input
-                                className="input"
-                                placeholder="Description"
-                                value={editSADescription}
-                                onChange={(e) => setEditSADescription(e.target.value)}
-                              />
-                            </div>
-                            <div className="flex items-center gap-3">
-                              <button type="submit" className="btn-primary" disabled={editSABusy}>
-                                {editSABusy ? "Saving…" : "Save changes"}
-                              </button>
-                              <button
-                                type="button"
-                                className="text-xs text-base-400 hover:text-base-200"
-                                onClick={() => setEditingSAID(null)}
-                              >
-                                Cancel
-                              </button>
-                            </div>
-                          </form>
-                        </td>
-                      </tr>
-                    )}
-                  </Fragment>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
-      </div>
-
-      {/* --- Organization-wide token visibility (organization.manage only) --- */}
       {orgTokens.data && (
-        <div>
-          <h2 className="mb-3 text-base font-semibold text-nd-text">All organization tokens</h2>
-          <div className="card">
-            {orgTokens.data.length === 0 ? (
-              <div className="px-4 py-10 text-center text-sm text-nd-muted">No tokens in this organization.</div>
-            ) : (
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th>Name</th>
-                    <th>Owner</th>
-                    <th>Scopes</th>
-                    <th></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {orgTokens.data.map((t) => (
-                    <tr key={t.id}>
-                      <td className="font-mono text-xs">{t.name}</td>
-                      <td className="text-xs text-base-300">
-                        {t.owner_label} <span className="text-base-500">({t.owner_type})</span>
-                      </td>
-                      <td className="text-xs text-base-300">{t.scopes.join(", ")}</td>
-                      <td>
-                        <button className="text-xs text-base-400 hover:text-danger" onClick={() => revokeOrgToken(t.id)}>
-                          Revoke
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </div>
-        </div>
+        <Section title="Todos os tokens da organização" description="Visível apenas com organization.manage.">
+          <DataTable caption="Tokens da organização" columns={orgCols} rows={orgTokens.data} loading={false} error={null} empty={{ icon: <KeyRound />, title: "Sem tokens nesta organização" }} />
+        </Section>
       )}
+
+      <NewTokenModal token={newToken} onClose={() => setNewToken(null)} />
+
+      <Modal open={tokenForm} onClose={() => setTokenForm(false)} title="Criar token de API" description="Os scopes têm de ser um subconjunto das tuas permissões."
+        footer={<><Button onClick={() => setTokenForm(false)}>Cancelar</Button><Button variant="primary" type="submit" form="token-form" disabled={tokenAction.busy}>{tokenAction.busy ? "A criar…" : "Criar"}</Button></>}>
+        <form id="token-form" onSubmit={createToken} className="space-y-4">
+          {tokenAction.error && <Alert tone="error">{tokenAction.error}</Alert>}
+          <Field label="Nome">{(id) => <Input id={id} value={tName} onChange={(e) => setTName(e.target.value)} required />}</Field>
+          <Field label="Scopes (vírgulas)">{(id) => <Input id={id} className="font-mono" value={tScopes} onChange={(e) => setTScopes(e.target.value)} placeholder="infrastructure.read, audit.read" required />}</Field>
+        </form>
+      </Modal>
+
+      <Modal open={!!renaming} onClose={() => setRenaming(null)} size="sm" title="Renomear token" description="Só o nome muda — os scopes ficam fixos desde a criação."
+        footer={<><Button onClick={() => setRenaming(null)}>Cancelar</Button><Button variant="primary" type="submit" form="rename-form" disabled={renameAction.busy}>Guardar</Button></>}>
+        <form id="rename-form" onSubmit={rename} className="space-y-4">
+          {renameAction.error && <Alert tone="error">{renameAction.error}</Alert>}
+          <Field label="Nome">{(id) => <Input id={id} value={renameValue} onChange={(e) => setRenameValue(e.target.value)} required />}</Field>
+        </form>
+      </Modal>
+
+      <Modal open={!!saForm} onClose={() => setSaForm(null)} title={saForm?.sa ? "Editar conta de serviço" : "Criar conta de serviço"}
+        footer={<><Button onClick={() => setSaForm(null)}>Cancelar</Button><Button variant="primary" type="submit" form="sa-form" disabled={saAction.busy}>{saAction.busy ? "A guardar…" : "Guardar"}</Button></>}>
+        <form id="sa-form" onSubmit={saveSA} className="space-y-4">
+          {saAction.error && <Alert tone="error">{saAction.error}</Alert>}
+          <Field label="Nome">{(id) => <Input id={id} value={saName} onChange={(e) => setSaName(e.target.value)} required />}</Field>
+          <Field label="Descrição">{(id) => <Input id={id} value={saDesc} onChange={(e) => setSaDesc(e.target.value)} />}</Field>
+        </form>
+      </Modal>
+
+      <Modal open={!!issuing} onClose={() => setIssuing(null)} title={`Emitir token para ${issuing?.name ?? ""}`}
+        footer={<><Button onClick={() => setIssuing(null)}>Cancelar</Button><Button variant="primary" type="submit" form="issue-form" disabled={issueAction.busy}>{issueAction.busy ? "A emitir…" : "Emitir"}</Button></>}>
+        <form id="issue-form" onSubmit={issue} className="space-y-4">
+          {issueAction.error && <Alert tone="error">{issueAction.error}</Alert>}
+          <Field label="Nome do token">{(id) => <Input id={id} value={iName} onChange={(e) => setIName(e.target.value)} required />}</Field>
+          <Field label="Scopes (vírgulas)">{(id) => <Input id={id} className="font-mono" value={iScopes} onChange={(e) => setIScopes(e.target.value)} required />}</Field>
+        </form>
+      </Modal>
+
+      <ConfirmDialog open={!!revoking} onClose={() => setRevoking(null)} onConfirm={revoke} danger confirmLabel="Revogar" title="Revogar token?" description={`“${revoking?.name}” deixa de funcionar de imediato.`} />
+      <ConfirmDialog open={!!deletingSA} onClose={() => setDeletingSA(null)} onConfirm={deleteSA} danger confirmLabel="Eliminar" title="Eliminar conta de serviço?" description={`“${deletingSA?.name}” e todos os tokens que alguma vez emitiu serão eliminados definitivamente.`} />
     </div>
   );
 }

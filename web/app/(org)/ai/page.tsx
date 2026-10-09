@@ -1,937 +1,272 @@
 "use client";
 
-import { Fragment, useState } from "react";
-import { api, ApiError } from "@/lib/api";
+import { useState } from "react";
+import { BarChart3, BrainCircuit, Cpu, MessageSquare, Pencil, Plus, Send, Server, Trash2 } from "lucide-react";
+import { api } from "@/lib/api";
 import { useApi } from "@/lib/useApi";
-import { PageHeader } from "@/components/PageHeader";
-import { ErrorBanner } from "@/components/ErrorBanner";
+import { useAction } from "@/lib/useAction";
+import { PageHeader } from "@/components/ui/PageHeader";
+import { Card, Section } from "@/components/ui/Card";
+import { Button } from "@/components/ui/Button";
+import { Alert, EmptyState, LoadingState } from "@/components/ui/Feedback";
+import { Badge } from "@/components/ui/Status";
+import { DataTable, type Column } from "@/components/ui/DataTable";
+import { ConfirmDialog, Modal } from "@/components/ui/Overlay";
+import { Field, Input, Select } from "@/components/ui/Forms";
+import { RowMenu } from "@/components/ui/RowMenu";
+import { TabPanel, Tabs } from "@/components/ui/Tabs";
 import { StatusBadge } from "@/components/StatusBadge";
 import type { AIModel, AIProfile, AIProvider, AIUsageRecord, ChatResult, Page } from "@/lib/types";
 
-function parseList(raw: string): string[] {
-  return raw
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
+const parseList = (raw: string): string[] => raw.split(",").map((s) => s.trim()).filter(Boolean);
+const PRIVACY = ["public", "internal", "confidential", "restricted"];
+const PRIVACY_TONE: Record<string, "green" | "blue" | "orange" | "red"> = { public: "green", internal: "blue", confidential: "orange", restricted: "red" };
+
+function Chips({ items }: { items: string[] }) {
+  return items.length === 0 ? <span className="text-nd-faint">—</span> : <div className="flex flex-wrap gap-1">{items.map((i) => <Badge key={i}>{i}</Badge>)}</div>;
 }
 
 function ChatPanel({ profiles, onSent }: { profiles: AIProfile[]; onSent: () => void }) {
-  const [profileKey, setProfileKey] = useState("");
-  const [message, setMessage] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<ChatResult | null>(null);
-  const [busy, setBusy] = useState(false);
+  const action = useAction();
+  const [profileKey, setProfileKey] = useState(""); const [message, setMessage] = useState("");
+  const [asked, setAsked] = useState<string | null>(null); const [result, setResult] = useState<ChatResult | null>(null);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    setError(null);
-    setResult(null);
-    setBusy(true);
-    try {
-      const res = await api.post<ChatResult>("/api/v1/ai/chat", {
-        profile_key: profileKey,
-        messages: [{ role: "user", content: message }],
-      });
-      setResult(res);
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Failed to reach the AI gateway");
-    } finally {
-      setBusy(false);
-      // Chat.ai.chat writes a usage record whether it succeeds or fails
-      // (a resolve failure still records the error) — reload either way.
-      onSent();
-    }
+    setResult(null); setAsked(message);
+    let res: ChatResult | null = null;
+    await action.run(async () => { res = await api.post<ChatResult>("/api/v1/ai/chat", { profile_key: profileKey, messages: [{ role: "user", content: message }] }); }, undefined, "Não foi possível contactar o AI Gateway");
+    if (res) { setResult(res); setMessage(""); }
+    // ai.chat records a usage row whether it succeeds or fails — reload either way.
+    onSent();
   }
 
+  if (profiles.length === 0) return <Card><EmptyState icon={<MessageSquare />} title="Cria primeiro um perfil" description="O chat passa sempre por um perfil de IA — nunca diretamente por um provider." /></Card>;
   return (
-    <form onSubmit={submit} className="card space-y-3 p-4">
-      {error && <ErrorBanner message={error} />}
-      <div>
-        <label className="label" htmlFor="chat-profile">
-          Profile
-        </label>
-        <select
-          id="chat-profile"
-          className="input"
-          value={profileKey}
-          onChange={(e) => setProfileKey(e.target.value)}
-          required
-        >
-          <option value="" disabled>
-            Select a profile…
-          </option>
-          {profiles.map((p) => (
-            <option key={p.key} value={p.key}>
-              {p.key} ({p.privacy_level})
-            </option>
-          ))}
-        </select>
+    <Card className="p-5">
+      <div className="nd-scroll mb-4 min-h-[160px] space-y-3 rounded-nd bg-nd-elevated p-4">
+        {!asked && !action.busy && <p className="text-sm text-nd-faint">Escolhe um perfil e envia uma mensagem. O router decide o provider/modelo segundo a política de privacidade do perfil.</p>}
+        {asked && <div className="ml-auto max-w-[80%] rounded-nd bg-nd-primary/20 px-3.5 py-2.5 text-sm text-nd-text">{asked}</div>}
+        {action.busy && <p className="text-sm text-nd-muted">A pensar…</p>}
+        {action.error && <Alert tone="error">{action.error}</Alert>}
+        {result && (
+          <div className="max-w-[85%] rounded-nd border border-nd-border bg-nd-surface px-3.5 py-2.5">
+            <p className="whitespace-pre-wrap text-sm text-nd-text">{result.content}</p>
+            <p className="mt-2 text-xs text-nd-faint">{result.provider_key} / {result.model} — {result.input_tokens} in · {result.output_tokens} out</p>
+          </div>)}
       </div>
-      <div>
-        <label className="label" htmlFor="chat-message">
-          Message
-        </label>
-        <textarea
-          id="chat-message"
-          className="input"
-          rows={3}
-          value={message}
-          onChange={(e) => setMessage(e.target.value)}
-          required
-        />
-      </div>
-      <button type="submit" className="btn-primary" disabled={busy || profiles.length === 0}>
-        {busy ? "Sending…" : "Send"}
-      </button>
-      {profiles.length === 0 && <p className="text-xs text-base-400">Create a profile below first.</p>}
-      {result && (
-        <div className="rounded-md border border-base-600 bg-base-950 p-3 text-xs">
-          <div className="whitespace-pre-wrap text-base-200">{result.content}</div>
-          <div className="mt-2 text-base-500">
-            {result.provider_key} / {result.model} — {result.input_tokens} in / {result.output_tokens} out tokens
-          </div>
-        </div>
-      )}
-    </form>
+      <form onSubmit={submit} className="grid gap-3 sm:grid-cols-[220px_1fr_auto]">
+        <Select aria-label="Perfil" value={profileKey} onChange={(e) => setProfileKey(e.target.value)} required>
+          <option value="" disabled>Perfil…</option>
+          {profiles.map((p) => <option key={p.key} value={p.key}>{p.key} ({p.privacy_level})</option>)}
+        </Select>
+        <Input aria-label="Mensagem" value={message} onChange={(e) => setMessage(e.target.value)} placeholder="Escreve uma mensagem…" required />
+        <Button variant="primary" type="submit" disabled={action.busy} icon={<Send className="h-4 w-4" />}>Enviar</Button>
+      </form>
+    </Card>
   );
 }
 
-function CreateProfileForm({ onCreated }: { onCreated: () => void }) {
-  const [key, setKey] = useState("");
-  const [description, setDescription] = useState("");
-  const [privacyLevel, setPrivacyLevel] = useState("internal");
-  const [preferredModelIds, setPreferredModelIds] = useState("");
-  const [fallbackModelIds, setFallbackModelIds] = useState("");
-  const [requiredCapabilities, setRequiredCapabilities] = useState("");
-  const [temperature, setTemperature] = useState("0.7");
-  const [maxTokens, setMaxTokens] = useState("2048");
-  const [timeoutSeconds, setTimeoutSeconds] = useState("60");
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
+function ProfileModal({ profile, open, onClose, onSaved }: { profile: AIProfile | null; open: boolean; onClose: () => void; onSaved: () => void }) {
+  const action = useAction();
+  const blank = { key: "", description: "", privacy: "internal", preferred: "", fallback: "", caps: "", temp: "0.7", max: "2048", timeout: "60" };
+  const [f, setF] = useState(blank);
+  const [loaded, setLoaded] = useState<string | null>(null);
+  const key = open ? (profile?.id ?? "new") : null;
+  if (key !== loaded) {
+    setLoaded(key);
+    if (open) setF(profile ? { key: profile.key, description: profile.description, privacy: profile.privacy_level, preferred: profile.preferred_model_ids.join(", "), fallback: profile.fallback_model_ids.join(", "), caps: profile.required_capabilities.join(", "), temp: String(profile.temperature), max: String(profile.max_tokens), timeout: String(profile.timeout_seconds) } : blank);
+  }
+  const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setF((s) => ({ ...s, [k]: e.target.value }));
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    setError(null);
-    setBusy(true);
-    try {
-      await api.post<AIProfile>("/api/v1/ai/profiles", {
-        key,
-        description,
-        privacy_level: privacyLevel,
-        preferred_model_ids: parseList(preferredModelIds),
-        fallback_model_ids: parseList(fallbackModelIds),
-        required_capabilities: parseList(requiredCapabilities),
-        temperature: Number(temperature),
-        max_tokens: Number(maxTokens),
-        timeout_seconds: Number(timeoutSeconds),
-      });
-      setKey("");
-      setDescription("");
-      setPreferredModelIds("");
-      setFallbackModelIds("");
-      setRequiredCapabilities("");
-      onCreated();
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Failed to create profile");
-    } finally {
-      setBusy(false);
-    }
+    const body = { description: f.description, privacy_level: f.privacy, preferred_model_ids: parseList(f.preferred), fallback_model_ids: parseList(f.fallback), required_capabilities: parseList(f.caps), temperature: Number(f.temp), max_tokens: Number(f.max), timeout_seconds: Number(f.timeout) };
+    const ok = await action.run(() => (profile ? api.put(`/api/v1/ai/profiles/${profile.id}`, body) : api.post("/api/v1/ai/profiles", { key: f.key, ...body })), profile ? "Perfil atualizado." : "Perfil criado.");
+    if (ok) { onSaved(); onClose(); }
   }
-
   return (
-    <form onSubmit={submit} className="card mb-4 space-y-3 p-4">
-      {error && <ErrorBanner message={error} />}
-      <div className="grid grid-cols-2 gap-3">
-        <div>
-          <label className="label" htmlFor="profile-key">
-            Key
-          </label>
-          <input id="profile-key" className="input font-mono" value={key} onChange={(e) => setKey(e.target.value)} required />
+    <Modal open={open} onClose={onClose} size="lg" title={profile ? `Editar ${profile.key}` : "Novo perfil de IA"} description="Um perfil descreve o que a aplicação precisa; o router escolhe o provider/modelo. A key é imutável."
+      footer={<><Button onClick={onClose}>Cancelar</Button><Button variant="primary" type="submit" form="profile-form" disabled={action.busy}>{action.busy ? "A guardar…" : "Guardar"}</Button></>}>
+      <form id="profile-form" onSubmit={submit} className="space-y-4">
+        {action.error && <Alert tone="error">{action.error}</Alert>}
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field label="Key">{(id) => <Input id={id} className="font-mono" value={f.key} onChange={set("key")} disabled={!!profile} required />}</Field>
+          <Field label="Nível de privacidade" hint="restricted nunca é encaminhado para a cloud.">{(id) => <Select id={id} value={f.privacy} onChange={set("privacy")}>{PRIVACY.map((p) => <option key={p}>{p}</option>)}</Select>}</Field>
         </div>
-        <div>
-          <label className="label" htmlFor="profile-privacy">
-            Privacy level
-          </label>
-          <select
-            id="profile-privacy"
-            className="input"
-            value={privacyLevel}
-            onChange={(e) => setPrivacyLevel(e.target.value)}
-          >
-            <option value="public">public</option>
-            <option value="internal">internal</option>
-            <option value="confidential">confidential</option>
-            <option value="restricted">restricted</option>
-          </select>
+        <Field label="Descrição">{(id) => <Input id={id} value={f.description} onChange={set("description")} />}</Field>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field label="Modelos preferidos (provider/modelo)">{(id) => <Input id={id} className="font-mono" value={f.preferred} onChange={set("preferred")} placeholder="ollama/qwen3" />}</Field>
+          <Field label="Modelos de fallback">{(id) => <Input id={id} className="font-mono" value={f.fallback} onChange={set("fallback")} />}</Field>
         </div>
-      </div>
-      <div>
-        <label className="label" htmlFor="profile-description">
-          Description
-        </label>
-        <input id="profile-description" className="input" value={description} onChange={(e) => setDescription(e.target.value)} />
-      </div>
-      <div className="grid grid-cols-2 gap-3">
-        <div>
-          <label className="label" htmlFor="profile-preferred">
-            Preferred model ids (comma-separated, provider_key/model_identifier)
-          </label>
-          <input
-            id="profile-preferred"
-            className="input font-mono"
-            value={preferredModelIds}
-            onChange={(e) => setPreferredModelIds(e.target.value)}
-            placeholder="local-echo/echo-1"
-            required
-          />
+        <Field label="Capabilities necessárias (vírgulas)">{(id) => <Input id={id} className="font-mono" value={f.caps} onChange={set("caps")} placeholder="chat" />}</Field>
+        <div className="grid gap-4 sm:grid-cols-3">
+          <Field label="Temperature">{(id) => <Input id={id} type="number" step="0.1" value={f.temp} onChange={set("temp")} />}</Field>
+          <Field label="Max tokens">{(id) => <Input id={id} type="number" value={f.max} onChange={set("max")} />}</Field>
+          <Field label="Timeout (s)">{(id) => <Input id={id} type="number" value={f.timeout} onChange={set("timeout")} />}</Field>
         </div>
-        <div>
-          <label className="label" htmlFor="profile-fallback">
-            Fallback model ids (comma-separated)
-          </label>
-          <input
-            id="profile-fallback"
-            className="input font-mono"
-            value={fallbackModelIds}
-            onChange={(e) => setFallbackModelIds(e.target.value)}
-          />
-        </div>
-      </div>
-      <div>
-        <label className="label" htmlFor="profile-capabilities">
-          Required capabilities (comma-separated)
-        </label>
-        <input
-          id="profile-capabilities"
-          className="input font-mono"
-          value={requiredCapabilities}
-          onChange={(e) => setRequiredCapabilities(e.target.value)}
-        />
-      </div>
-      <div className="grid grid-cols-3 gap-3">
-        <div>
-          <label className="label" htmlFor="profile-temp">
-            Temperature
-          </label>
-          <input
-            id="profile-temp"
-            className="input"
-            type="number"
-            step="0.1"
-            value={temperature}
-            onChange={(e) => setTemperature(e.target.value)}
-          />
-        </div>
-        <div>
-          <label className="label" htmlFor="profile-max-tokens">
-            Max tokens
-          </label>
-          <input
-            id="profile-max-tokens"
-            className="input"
-            type="number"
-            value={maxTokens}
-            onChange={(e) => setMaxTokens(e.target.value)}
-          />
-        </div>
-        <div>
-          <label className="label" htmlFor="profile-timeout">
-            Timeout (seconds)
-          </label>
-          <input
-            id="profile-timeout"
-            className="input"
-            type="number"
-            value={timeoutSeconds}
-            onChange={(e) => setTimeoutSeconds(e.target.value)}
-          />
-        </div>
-      </div>
-      <button type="submit" className="btn-primary" disabled={busy}>
-        {busy ? "Creating…" : "Create profile"}
-      </button>
-    </form>
+      </form>
+    </Modal>
   );
 }
 
-function EditProfileForm({ profile, onDone }: { profile: AIProfile; onDone: () => void }) {
-  const [description, setDescription] = useState(profile.description);
-  const [privacyLevel, setPrivacyLevel] = useState<string>(profile.privacy_level);
-  const [preferredModelIds, setPreferredModelIds] = useState(profile.preferred_model_ids.join(", "));
-  const [fallbackModelIds, setFallbackModelIds] = useState(profile.fallback_model_ids.join(", "));
-  const [requiredCapabilities, setRequiredCapabilities] = useState(profile.required_capabilities.join(", "));
-  const [temperature, setTemperature] = useState(String(profile.temperature));
-  const [maxTokens, setMaxTokens] = useState(String(profile.max_tokens));
-  const [timeoutSeconds, setTimeoutSeconds] = useState(String(profile.timeout_seconds));
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-
+function ProviderModal({ open, onClose, onSaved }: { open: boolean; onClose: () => void; onSaved: () => void }) {
+  const action = useAction();
+  const [key, setKey] = useState(""); const [kind, setKind] = useState("cloud"); const [name, setName] = useState(""); const [status, setStatus] = useState("active");
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    setError(null);
-    setBusy(true);
-    try {
-      await api.put<AIProfile>(`/api/v1/ai/profiles/${profile.id}`, {
-        description,
-        privacy_level: privacyLevel,
-        preferred_model_ids: parseList(preferredModelIds),
-        fallback_model_ids: parseList(fallbackModelIds),
-        required_capabilities: parseList(requiredCapabilities),
-        temperature: Number(temperature),
-        max_tokens: Number(maxTokens),
-        timeout_seconds: Number(timeoutSeconds),
-      });
-      onDone();
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Failed to update profile");
-    } finally {
-      setBusy(false);
-    }
+    if (await action.run(() => api.post("/api/v1/ai/providers", { key, kind, display_name: name, status }), "Provider guardado.")) { setKey(""); setName(""); onSaved(); onClose(); }
   }
-
   return (
-    <form onSubmit={submit} className="space-y-3">
-      {error && <ErrorBanner message={error} />}
-      <div className="grid grid-cols-2 gap-3">
-        <div>
-          <label className="label" htmlFor="edit-profile-key">
-            Key
-          </label>
-          <input id="edit-profile-key" className="input font-mono" value={profile.key} disabled />
+    <Modal open={open} onClose={onClose} title="Registar / atualizar provider" description="Regista apenas uma linha descobrível — se é realmente invocável depende de um adapter Go registado no arranque. Requer permissão de plataforma."
+      footer={<><Button onClick={onClose}>Cancelar</Button><Button variant="primary" type="submit" form="provider-form" disabled={action.busy}>Guardar</Button></>}>
+      <form id="provider-form" onSubmit={submit} className="space-y-4">
+        {action.error && <Alert tone="error">{action.error}</Alert>}
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field label="Key">{(id) => <Input id={id} className="font-mono" value={key} onChange={(e) => setKey(e.target.value)} required />}</Field>
+          <Field label="Nome">{(id) => <Input id={id} value={name} onChange={(e) => setName(e.target.value)} required />}</Field>
+          <Field label="Tipo">{(id) => <Select id={id} value={kind} onChange={(e) => setKind(e.target.value)}><option>cloud</option><option>local</option></Select>}</Field>
+          <Field label="Estado">{(id) => <Select id={id} value={status} onChange={(e) => setStatus(e.target.value)}>{["active", "disabled", "unconfigured", "unavailable"].map((s) => <option key={s}>{s}</option>)}</Select>}</Field>
         </div>
-        <div>
-          <label className="label" htmlFor="edit-profile-privacy">
-            Privacy level
-          </label>
-          <select
-            id="edit-profile-privacy"
-            className="input"
-            value={privacyLevel}
-            onChange={(e) => setPrivacyLevel(e.target.value)}
-          >
-            <option value="public">public</option>
-            <option value="internal">internal</option>
-            <option value="confidential">confidential</option>
-            <option value="restricted">restricted</option>
-          </select>
-        </div>
-      </div>
-      <div>
-        <label className="label" htmlFor="edit-profile-description">
-          Description
-        </label>
-        <input
-          id="edit-profile-description"
-          className="input"
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-        />
-      </div>
-      <div className="grid grid-cols-2 gap-3">
-        <div>
-          <label className="label" htmlFor="edit-profile-preferred">
-            Preferred model ids (comma-separated, provider_key/model_identifier)
-          </label>
-          <input
-            id="edit-profile-preferred"
-            className="input font-mono"
-            value={preferredModelIds}
-            onChange={(e) => setPreferredModelIds(e.target.value)}
-            required
-          />
-        </div>
-        <div>
-          <label className="label" htmlFor="edit-profile-fallback">
-            Fallback model ids (comma-separated)
-          </label>
-          <input
-            id="edit-profile-fallback"
-            className="input font-mono"
-            value={fallbackModelIds}
-            onChange={(e) => setFallbackModelIds(e.target.value)}
-          />
-        </div>
-      </div>
-      <div>
-        <label className="label" htmlFor="edit-profile-capabilities">
-          Required capabilities (comma-separated)
-        </label>
-        <input
-          id="edit-profile-capabilities"
-          className="input font-mono"
-          value={requiredCapabilities}
-          onChange={(e) => setRequiredCapabilities(e.target.value)}
-        />
-      </div>
-      <div className="grid grid-cols-3 gap-3">
-        <div>
-          <label className="label" htmlFor="edit-profile-temp">
-            Temperature
-          </label>
-          <input
-            id="edit-profile-temp"
-            className="input"
-            type="number"
-            step="0.1"
-            value={temperature}
-            onChange={(e) => setTemperature(e.target.value)}
-          />
-        </div>
-        <div>
-          <label className="label" htmlFor="edit-profile-max-tokens">
-            Max tokens
-          </label>
-          <input
-            id="edit-profile-max-tokens"
-            className="input"
-            type="number"
-            value={maxTokens}
-            onChange={(e) => setMaxTokens(e.target.value)}
-          />
-        </div>
-        <div>
-          <label className="label" htmlFor="edit-profile-timeout">
-            Timeout (seconds)
-          </label>
-          <input
-            id="edit-profile-timeout"
-            className="input"
-            type="number"
-            value={timeoutSeconds}
-            onChange={(e) => setTimeoutSeconds(e.target.value)}
-          />
-        </div>
-      </div>
-      <div className="flex items-center gap-3">
-        <button type="submit" className="btn-primary" disabled={busy}>
-          {busy ? "Saving…" : "Save changes"}
-        </button>
-        <button type="button" className="text-xs text-base-400 hover:text-base-200" onClick={onDone}>
-          Cancel
-        </button>
-      </div>
-    </form>
+      </form>
+    </Modal>
   );
 }
 
-function RegisterProviderForm({ onDone }: { onDone: () => void }) {
-  const [key, setKey] = useState("");
-  const [kind, setKind] = useState("cloud");
-  const [displayName, setDisplayName] = useState("");
-  const [status, setStatus] = useState("active");
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-
+function ModelModal({ providers, open, onClose, onSaved }: { providers: AIProvider[]; open: boolean; onClose: () => void; onSaved: () => void }) {
+  const action = useAction();
+  const [pk, setPk] = useState(""); const [mid, setMid] = useState(""); const [name, setName] = useState(""); const [caps, setCaps] = useState(""); const [ctx, setCtx] = useState("8192"); const [status, setStatus] = useState("available");
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    setError(null);
-    setBusy(true);
-    try {
-      await api.post<AIProvider>("/api/v1/ai/providers", { key, kind, display_name: displayName, status });
-      setKey("");
-      setDisplayName("");
-      onDone();
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Failed to register provider");
-    } finally {
-      setBusy(false);
-    }
+    if (await action.run(() => api.post("/api/v1/ai/models", { provider_key: pk, model_identifier: mid, display_name: name, capabilities: parseList(caps), context_window: Number(ctx), status }), "Modelo guardado.")) { setMid(""); setName(""); setCaps(""); onSaved(); onClose(); }
   }
-
   return (
-    <form onSubmit={submit} className="card mb-4 space-y-3 p-4">
-      {error && <ErrorBanner message={error} />}
-      <div className="grid grid-cols-2 gap-3">
-        <input className="input font-mono" placeholder="key" value={key} onChange={(e) => setKey(e.target.value)} required />
-        <input
-          className="input"
-          placeholder="Display name"
-          value={displayName}
-          onChange={(e) => setDisplayName(e.target.value)}
-          required
-        />
-      </div>
-      <div className="grid grid-cols-2 gap-3">
-        <select className="input" value={kind} onChange={(e) => setKind(e.target.value)}>
-          <option value="cloud">cloud</option>
-          <option value="local">local</option>
-        </select>
-        <select className="input" value={status} onChange={(e) => setStatus(e.target.value)}>
-          <option value="active">active</option>
-          <option value="disabled">disabled</option>
-          <option value="unconfigured">unconfigured</option>
-          <option value="unavailable">unavailable</option>
-        </select>
-      </div>
-      <p className="text-xs text-base-400">
-        This registers a discoverable row only — whether the provider is actually callable depends on a matching Go
-        adapter being registered at server boot (see docs/AI_ARCHITECTURE.md).
-      </p>
-      <button type="submit" className="btn-primary" disabled={busy}>
-        {busy ? "Saving…" : "Register / update provider"}
-      </button>
-    </form>
+    <Modal open={open} onClose={onClose} title="Registar / atualizar modelo" description="Requer permissão de plataforma (platform.ai.models.manage)."
+      footer={<><Button onClick={onClose}>Cancelar</Button><Button variant="primary" type="submit" form="model-form" disabled={action.busy}>Guardar</Button></>}>
+      <form id="model-form" onSubmit={submit} className="space-y-4">
+        {action.error && <Alert tone="error">{action.error}</Alert>}
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field label="Provider">{(id) => <Select id={id} value={pk} onChange={(e) => setPk(e.target.value)} required><option value="" disabled>Escolher…</option>{providers.map((p) => <option key={p.key} value={p.key}>{p.key}</option>)}</Select>}</Field>
+          <Field label="Identificador do modelo">{(id) => <Input id={id} className="font-mono" value={mid} onChange={(e) => setMid(e.target.value)} required />}</Field>
+          <Field label="Nome">{(id) => <Input id={id} value={name} onChange={(e) => setName(e.target.value)} />}</Field>
+          <Field label="Context window">{(id) => <Input id={id} type="number" value={ctx} onChange={(e) => setCtx(e.target.value)} />}</Field>
+          <Field label="Capabilities (vírgulas)">{(id) => <Input id={id} className="font-mono" value={caps} onChange={(e) => setCaps(e.target.value)} placeholder="chat" />}</Field>
+          <Field label="Estado">{(id) => <Select id={id} value={status} onChange={(e) => setStatus(e.target.value)}>{["available", "unavailable", "deprecated"].map((s) => <option key={s}>{s}</option>)}</Select>}</Field>
+        </div>
+      </form>
+    </Modal>
   );
 }
 
-function RegisterModelForm({ providers, onDone }: { providers: AIProvider[]; onDone: () => void }) {
-  const [providerKey, setProviderKey] = useState("");
-  const [modelIdentifier, setModelIdentifier] = useState("");
-  const [displayName, setDisplayName] = useState("");
-  const [capabilities, setCapabilities] = useState("");
-  const [contextWindow, setContextWindow] = useState("8192");
-  const [status, setStatus] = useState("available");
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-
-  async function submit(e: React.FormEvent) {
-    e.preventDefault();
-    setError(null);
-    setBusy(true);
-    try {
-      await api.post<AIModel>("/api/v1/ai/models", {
-        provider_key: providerKey,
-        model_identifier: modelIdentifier,
-        display_name: displayName,
-        capabilities: parseList(capabilities),
-        context_window: Number(contextWindow),
-        status,
-      });
-      setModelIdentifier("");
-      setDisplayName("");
-      setCapabilities("");
-      onDone();
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Failed to register model");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <form onSubmit={submit} className="card mb-4 space-y-3 p-4">
-      {error && <ErrorBanner message={error} />}
-      <div className="grid grid-cols-2 gap-3">
-        <select className="input" value={providerKey} onChange={(e) => setProviderKey(e.target.value)} required>
-          <option value="" disabled>
-            Select a provider…
-          </option>
-          {providers.map((p) => (
-            <option key={p.key} value={p.key}>
-              {p.key}
-            </option>
-          ))}
-        </select>
-        <input
-          className="input font-mono"
-          placeholder="model_identifier"
-          value={modelIdentifier}
-          onChange={(e) => setModelIdentifier(e.target.value)}
-          required
-        />
-      </div>
-      <input
-        className="input"
-        placeholder="Display name"
-        value={displayName}
-        onChange={(e) => setDisplayName(e.target.value)}
-        required
-      />
-      <div className="grid grid-cols-3 gap-3">
-        <input
-          className="input font-mono"
-          placeholder="capabilities (comma-separated)"
-          value={capabilities}
-          onChange={(e) => setCapabilities(e.target.value)}
-        />
-        <input
-          className="input"
-          type="number"
-          placeholder="context_window"
-          value={contextWindow}
-          onChange={(e) => setContextWindow(e.target.value)}
-        />
-        <select className="input" value={status} onChange={(e) => setStatus(e.target.value)}>
-          <option value="available">available</option>
-          <option value="unavailable">unavailable</option>
-          <option value="deprecated">deprecated</option>
-        </select>
-      </div>
-      <button type="submit" className="btn-primary" disabled={busy || providers.length === 0}>
-        {busy ? "Saving…" : "Register / update model"}
-      </button>
-      {providers.length === 0 && <p className="text-xs text-base-400">Register a provider first.</p>}
-    </form>
-  );
-}
+const TABS = [
+  { id: "chat", label: "Chat", icon: <MessageSquare className="h-4 w-4" /> },
+  { id: "profiles", label: "Perfis", icon: <BrainCircuit className="h-4 w-4" /> },
+  { id: "registry", label: "Providers & Modelos", icon: <Server className="h-4 w-4" /> },
+  { id: "usage", label: "Uso", icon: <BarChart3 className="h-4 w-4" /> },
+];
 
 export default function AIPage() {
   const profiles = useApi(() => api.get<AIProfile[]>("/api/v1/ai/profiles"), []);
   const providers = useApi(() => api.get<AIProvider[]>("/api/v1/ai/providers"), []);
   const models = useApi(() => api.get<AIModel[]>("/api/v1/ai/models"), []);
   const [usageLimit, setUsageLimit] = useState(20);
-  const [usageProfileFilter, setUsageProfileFilter] = useState("");
-  const [usageProviderFilter, setUsageProviderFilter] = useState("");
-  const usage = useApi(
-    () =>
-      api.get<Page<AIUsageRecord>>(
-        `/api/v1/ai/usage?limit=${usageLimit}${
-          usageProfileFilter ? `&profile_key=${encodeURIComponent(usageProfileFilter)}` : ""
-        }${usageProviderFilter ? `&provider_key=${encodeURIComponent(usageProviderFilter)}` : ""}`,
-      ),
-    [usageLimit, usageProfileFilter, usageProviderFilter],
-  );
+  const [uProfile, setUProfile] = useState(""); const [uProvider, setUProvider] = useState("");
+  const usage = useApi(() => api.get<Page<AIUsageRecord>>(`/api/v1/ai/usage?limit=${usageLimit}${uProfile ? `&profile_key=${encodeURIComponent(uProfile)}` : ""}${uProvider ? `&provider_key=${encodeURIComponent(uProvider)}` : ""}`), [usageLimit, uProfile, uProvider]);
 
-  const [showProfileForm, setShowProfileForm] = useState(false);
-  const [showProviderForm, setShowProviderForm] = useState(false);
-  const [showModelForm, setShowModelForm] = useState(false);
-  const [editingProfileID, setEditingProfileID] = useState<string | null>(null);
-  const [deleteProfileError, setDeleteProfileError] = useState<string | null>(null);
-  const [deletingProfileID, setDeletingProfileID] = useState<string | null>(null);
+  const row = useAction();
+  const [tab, setTab] = useState("chat");
+  const [profileModal, setProfileModal] = useState<{ profile: AIProfile | null } | null>(null);
+  const [providerModal, setProviderModal] = useState(false); const [modelModal, setModelModal] = useState(false);
+  const [delProfile, setDelProfile] = useState<AIProfile | null>(null);
+  const [delProvider, setDelProvider] = useState<AIProvider | null>(null);
+  const [delModel, setDelModel] = useState<AIModel | null>(null);
 
-  async function deleteProfile(p: AIProfile) {
-    setDeleteProfileError(null);
-    setDeletingProfileID(p.id);
-    try {
-      await api.del(`/api/v1/ai/profiles/${p.id}`);
-      profiles.reload();
-    } catch (err) {
-      setDeleteProfileError(err instanceof ApiError ? err.message : "Failed to delete profile");
-    } finally {
-      setDeletingProfileID(null);
-    }
-  }
+  async function deleteProfile() { if (delProfile && await row.run(() => api.del(`/api/v1/ai/profiles/${delProfile.id}`), "Perfil eliminado.")) profiles.reload(); setDelProfile(null); }
+  async function deleteProvider() { if (delProvider && await row.run(() => api.del(`/api/v1/ai/providers/${encodeURIComponent(delProvider.key)}`), "Provider eliminado (e os seus modelos).")) { providers.reload(); models.reload(); } setDelProvider(null); }
+  async function deleteModel() { if (delModel && await row.run(() => api.del(`/api/v1/ai/providers/${encodeURIComponent(delModel.provider_key)}/models/${encodeURIComponent(delModel.model_identifier)}`), "Modelo eliminado.")) models.reload(); setDelModel(null); }
 
-  const [deleteProviderError, setDeleteProviderError] = useState<string | null>(null);
-  const [deletingProviderKey, setDeletingProviderKey] = useState<string | null>(null);
-
-  async function deleteProvider(key: string) {
-    setDeleteProviderError(null);
-    setDeletingProviderKey(key);
-    try {
-      await api.del(`/api/v1/ai/providers/${encodeURIComponent(key)}`);
-      providers.reload();
-      models.reload();
-    } catch (err) {
-      setDeleteProviderError(err instanceof ApiError ? err.message : "Failed to delete provider");
-    } finally {
-      setDeletingProviderKey(null);
-    }
-  }
-
-  const [deleteModelError, setDeleteModelError] = useState<string | null>(null);
-  const [deletingModelKey, setDeletingModelKey] = useState<string | null>(null);
-
-  async function deleteModel(providerKey: string, modelIdentifier: string) {
-    const key = `${providerKey}/${modelIdentifier}`;
-    setDeleteModelError(null);
-    setDeletingModelKey(key);
-    try {
-      await api.del(`/api/v1/ai/providers/${encodeURIComponent(providerKey)}/models/${encodeURIComponent(modelIdentifier)}`);
-      models.reload();
-    } catch (err) {
-      setDeleteModelError(err instanceof ApiError ? err.message : "Failed to delete model");
-    } finally {
-      setDeletingModelKey(null);
-    }
-  }
+  const profileCols: Column<AIProfile>[] = [
+    { key: "key", header: "Perfil", primary: true, cell: (p) => <div><p className="font-mono text-xs font-medium">{p.key}</p><p className="text-xs text-nd-muted">{p.description || "—"}</p></div> },
+    { key: "priv", header: "Privacidade", cell: (p) => <Badge tone={PRIVACY_TONE[p.privacy_level] ?? "neutral"}>{p.privacy_level}</Badge> },
+    { key: "pref", header: "Preferidos", cell: (p) => <Chips items={p.preferred_model_ids} /> },
+    { key: "fb", header: "Fallback", cell: (p) => <Chips items={p.fallback_model_ids} /> },
+    { key: "params", header: "Parâmetros", cell: (p) => <span className="text-xs text-nd-muted">T {p.temperature} · {p.max_tokens} tok · {p.timeout_seconds}s</span> },
+    { key: "act", header: "", className: "w-12 text-right", hideOnMobile: true, cell: (p) => (
+      <RowMenu label={`Ações para ${p.key}`} items={[
+        { label: "Editar", icon: <Pencil />, onSelect: () => setProfileModal({ profile: p }) },
+        { label: "Eliminar", icon: <Trash2 />, danger: true, separatorBefore: true, onSelect: () => setDelProfile(p) },
+      ]} />) },
+  ];
+  const providerCols: Column<AIProvider>[] = [
+    { key: "key", header: "Provider", primary: true, cell: (p) => <div><p className="font-mono text-xs font-medium">{p.key}</p><p className="text-xs text-nd-muted">{p.display_name}</p></div> },
+    { key: "kind", header: "Tipo", cell: (p) => <Badge tone={p.kind === "local" ? "green" : "blue"}>{p.kind}</Badge> },
+    { key: "st", header: "Estado", cell: (p) => <StatusBadge status={p.status} /> },
+    { key: "act", header: "", className: "w-12 text-right", hideOnMobile: true, cell: (p) => <RowMenu label={`Ações para ${p.key}`} items={[{ label: "Eliminar", icon: <Trash2 />, danger: true, onSelect: () => setDelProvider(p) }]} /> },
+  ];
+  type ModelRow = AIModel;
+  const modelCols: Column<ModelRow>[] = [
+    { key: "m", header: "Modelo", primary: true, cell: (m) => <span className="font-mono text-xs font-medium">{m.provider_key}/{m.model_identifier}</span> },
+    { key: "name", header: "Nome", cell: (m) => m.display_name },
+    { key: "caps", header: "Capabilities", cell: (m) => <Chips items={m.capabilities} /> },
+    { key: "ctx", header: "Contexto", cell: (m) => <span className="tabular-nums text-nd-muted">{m.context_window}</span> },
+    { key: "st", header: "Estado", cell: (m) => <StatusBadge status={m.status} /> },
+    { key: "act", header: "", className: "w-12 text-right", hideOnMobile: true, cell: (m) => <RowMenu label={`Ações para ${m.model_identifier}`} items={[{ label: "Eliminar", icon: <Trash2 />, danger: true, onSelect: () => setDelModel(m) }]} /> },
+  ];
+  const usageCols: Column<AIUsageRecord>[] = [
+    { key: "p", header: "Perfil", primary: true, cell: (u) => <span className="font-mono text-xs font-medium">{u.profile_key}</span> },
+    { key: "m", header: "Provider / modelo", cell: (u) => <span className="font-mono text-xs text-nd-muted">{u.provider_key}/{u.model_identifier}</span> },
+    { key: "c", header: "Classificação", cell: (u) => <Badge>{u.classification}</Badge> },
+    { key: "t", header: "Tokens", cell: (u) => <span className="tabular-nums text-nd-muted">{u.input_tokens} → {u.output_tokens}</span> },
+    { key: "l", header: "Latência", cell: (u) => <span className="tabular-nums text-nd-muted">{u.latency_ms} ms</span> },
+    { key: "s", header: "Estado", cell: (u) => <StatusBadge status={u.status} /> },
+    { key: "w", header: "Quando", cell: (u) => <span className="text-xs text-nd-faint">{new Date(u.created_at).toLocaleString("pt-PT")}</span> },
+  ];
 
   return (
     <div>
-      <PageHeader
-        title="AI Gateway"
-        description="Deterministic, privacy-policy-enforcing routing. Providers/models are a platform-wide registry — a row here is only discoverable, not necessarily callable (that depends on a Go adapter registered at server boot)."
-      />
+      <PageHeader title="AI Gateway" description="Routing determinístico com política de privacidade. Providers e modelos são um registo da plataforma — uma linha aqui é descobrível, não necessariamente invocável." />
+      {row.error && <Alert tone="error" className="mb-4">{row.error}</Alert>}
+      <Tabs label="Secções do AI Gateway" tabs={TABS} active={tab} onChange={setTab} />
 
-      <div className="mb-8">
-        <h2 className="mb-3 text-base font-semibold text-nd-text">Chat</h2>
-        {profiles.error && <ErrorBanner message={profiles.error} />}
-        {!profiles.loading && <ChatPanel profiles={profiles.data ?? []} onSent={() => usage.reload()} />}
-      </div>
+      <TabPanel id="chat" active={tab}>
+        {profiles.loading ? <LoadingState /> : <ChatPanel profiles={profiles.data ?? []} onSent={() => usage.reload()} />}
+      </TabPanel>
 
-      <div className="mb-8">
-        <h2 className="mb-3 text-base font-semibold text-nd-text">Usage</h2>
-        <div className="mb-3 flex items-center gap-3">
-          <select
-            className="input"
-            value={usageProfileFilter}
-            onChange={(e) => {
-              setUsageProfileFilter(e.target.value);
-              setUsageLimit(20);
-            }}
-          >
-            <option value="">All profiles</option>
-            {(profiles.data ?? []).map((p) => (
-              <option key={p.key} value={p.key}>
-                {p.key}
-              </option>
-            ))}
-          </select>
-          <select
-            className="input"
-            value={usageProviderFilter}
-            onChange={(e) => {
-              setUsageProviderFilter(e.target.value);
-              setUsageLimit(20);
-            }}
-          >
-            <option value="">All providers</option>
-            {(providers.data ?? []).map((p) => (
-              <option key={p.key} value={p.key}>
-                {p.key}
-              </option>
-            ))}
-          </select>
-        </div>
-        {usage.error && <ErrorBanner message={usage.error} />}
-        <div className="card">
-          {usage.loading ? (
-            <div className="px-4 py-10 text-center text-sm text-nd-muted">Loading…</div>
-          ) : (usage.data?.items ?? []).length === 0 ? (
-            <div className="px-4 py-10 text-center text-sm text-nd-muted">No AI usage recorded yet — this fills in as Chat is used.</div>
-          ) : (
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Profile</th>
-                  <th>Provider / model</th>
-                  <th>Tokens</th>
-                  <th>Latency</th>
-                  <th>Status</th>
-                  <th>When</th>
-                </tr>
-              </thead>
-              <tbody>
-                {usage.data!.items.map((u) => (
-                  <tr key={u.id}>
-                    <td className="font-mono text-xs">{u.profile_key}</td>
-                    <td className="font-mono text-xs text-base-300">
-                      {u.provider_key ? `${u.provider_key}/${u.model_identifier}` : "—"}
-                    </td>
-                    <td className="text-xs text-base-400">
-                      {u.total_tokens} <span className="text-base-500">({u.classification})</span>
-                    </td>
-                    <td className="text-xs text-base-400">{u.latency_ms !== null ? `${u.latency_ms}ms` : "—"}</td>
-                    <td className={`text-xs ${u.status === "success" ? "text-ok" : "text-danger"}`}>{u.status}</td>
-                    <td className="text-xs text-base-400">{new Date(u.created_at).toLocaleString()}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
-        {usage.data?.has_more && (
-          <button className="btn-secondary mt-3" onClick={() => setUsageLimit((n) => n + 20)}>
-            Load more
-          </button>
-        )}
-      </div>
+      <TabPanel id="profiles" active={tab}>
+        <Section title="Perfis" description="Específicos da organização." actions={<Button variant="primary" size="sm" icon={<Plus className="h-4 w-4" />} onClick={() => setProfileModal({ profile: null })}>Novo perfil</Button>}>
+          <DataTable caption="Perfis de IA" columns={profileCols} rows={profiles.data} loading={profiles.loading} error={profiles.error} onRetry={profiles.reload} empty={{ icon: <BrainCircuit />, title: "Nenhum perfil", action: { label: "Novo perfil", onClick: () => setProfileModal({ profile: null }) } }} />
+        </Section>
+      </TabPanel>
 
-      <div className="mb-8">
-        <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-base font-semibold text-nd-text">Profiles</h2>
-          <button className="btn-primary" onClick={() => setShowProfileForm((v) => !v)}>
-            {showProfileForm ? "Cancel" : "Create profile"}
-          </button>
+      <TabPanel id="registry" active={tab}>
+        <div className="space-y-6">
+          <Section title="Providers" actions={<Button variant="primary" size="sm" icon={<Plus className="h-4 w-4" />} onClick={() => setProviderModal(true)}>Registar provider</Button>}>
+            <DataTable caption="Providers" columns={providerCols} rows={providers.data} loading={providers.loading} error={providers.error} onRetry={providers.reload} empty={{ icon: <Server />, title: "Nenhum provider registado" }} />
+          </Section>
+          <Section title="Modelos" actions={<Button variant="primary" size="sm" icon={<Plus className="h-4 w-4" />} onClick={() => setModelModal(true)}>Registar modelo</Button>}>
+            <DataTable caption="Modelos" columns={modelCols} rows={models.data} loading={models.loading} error={models.error} onRetry={models.reload} empty={{ icon: <Cpu />, title: "Nenhum modelo registado" }} />
+          </Section>
         </div>
-        {showProfileForm && (
-          <CreateProfileForm
-            onCreated={() => {
-              setShowProfileForm(false);
-              profiles.reload();
-            }}
-          />
-        )}
-        {profiles.error && <ErrorBanner message={profiles.error} />}
-        {deleteProfileError && <ErrorBanner message={deleteProfileError} />}
-        <div className="card">
-          {profiles.loading ? (
-            <div className="px-4 py-10 text-center text-sm text-nd-muted">Loading…</div>
-          ) : (profiles.data ?? []).length === 0 ? (
-            <div className="px-4 py-10 text-center text-sm text-nd-muted">No AI profiles yet.</div>
-          ) : (
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Key</th>
-                  <th>Privacy</th>
-                  <th>Preferred models</th>
-                  <th>Fallback models</th>
-                  <th>Max tokens</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                {profiles.data!.map((p) => (
-                  <Fragment key={p.id}>
-                    <tr>
-                      <td className="font-mono text-xs">{p.key}</td>
-                      <td>
-                        <span className="badge bg-base-500/20 text-base-300">{p.privacy_level}</span>
-                      </td>
-                      <td className="font-mono text-xs text-base-300">{p.preferred_model_ids.join(", ")}</td>
-                      <td className="font-mono text-xs text-base-400">{p.fallback_model_ids.join(", ") || "—"}</td>
-                      <td className="text-xs text-base-400">{p.max_tokens}</td>
-                      <td className="space-x-3">
-                        <button
-                          className="text-xs text-base-400 hover:text-base-200"
-                          onClick={() => setEditingProfileID((cur) => (cur === p.id ? null : p.id))}
-                        >
-                          {editingProfileID === p.id ? "Close" : "Edit"}
-                        </button>
-                        <button
-                          className="text-xs text-base-400 hover:text-danger disabled:text-base-600"
-                          disabled={deletingProfileID === p.id}
-                          onClick={() => deleteProfile(p)}
-                        >
-                          {deletingProfileID === p.id ? "Deleting…" : "Delete"}
-                        </button>
-                      </td>
-                    </tr>
-                    {editingProfileID === p.id && (
-                      <tr>
-                        <td colSpan={6} className="bg-base-800/40 p-3">
-                          <EditProfileForm
-                            profile={p}
-                            onDone={() => {
-                              setEditingProfileID(null);
-                              profiles.reload();
-                            }}
-                          />
-                        </td>
-                      </tr>
-                    )}
-                  </Fragment>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
-      </div>
+      </TabPanel>
 
-      <div className="mb-8">
-        <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-base font-semibold text-nd-text">Providers</h2>
-          <button className="btn-primary" onClick={() => setShowProviderForm((v) => !v)}>
-            {showProviderForm ? "Cancel" : "Register provider"}
-          </button>
-        </div>
-        {showProviderForm && (
-          <RegisterProviderForm
-            onDone={() => {
-              setShowProviderForm(false);
-              providers.reload();
-            }}
-          />
-        )}
-        {providers.error && <ErrorBanner message={providers.error} />}
-        {deleteProviderError && <ErrorBanner message={deleteProviderError} />}
-        <div className="card">
-          {providers.loading ? (
-            <div className="px-4 py-10 text-center text-sm text-nd-muted">Loading…</div>
-          ) : (providers.data ?? []).length === 0 ? (
-            <div className="px-4 py-10 text-center text-sm text-nd-muted">No providers registered.</div>
-          ) : (
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Key</th>
-                  <th>Kind</th>
-                  <th>Display name</th>
-                  <th>Status</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                {providers.data!.map((p) => (
-                  <tr key={p.key}>
-                    <td className="font-mono text-xs">{p.key}</td>
-                    <td className="text-xs text-base-300">{p.kind}</td>
-                    <td className="text-xs text-base-300">{p.display_name}</td>
-                    <td>
-                      <StatusBadge status={p.status} />
-                    </td>
-                    <td>
-                      <button
-                        className="text-xs text-base-400 hover:text-danger disabled:text-base-600"
-                        disabled={deletingProviderKey === p.key}
-                        onClick={() => deleteProvider(p.key)}
-                      >
-                        {deletingProviderKey === p.key ? "Deleting…" : "Delete"}
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
-      </div>
+      <TabPanel id="usage" active={tab}>
+        <Section title="Uso" description="Registo real de chamadas ao gateway — nunca o conteúdo dos prompts.">
+          <div className="mb-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-[220px_220px]">
+            <Select aria-label="Filtrar por perfil" value={uProfile} onChange={(e) => { setUProfile(e.target.value); setUsageLimit(20); }}><option value="">Todos os perfis</option>{(profiles.data ?? []).map((p) => <option key={p.key}>{p.key}</option>)}</Select>
+            <Select aria-label="Filtrar por provider" value={uProvider} onChange={(e) => { setUProvider(e.target.value); setUsageLimit(20); }}><option value="">Todos os providers</option>{(providers.data ?? []).map((p) => <option key={p.key}>{p.key}</option>)}</Select>
+          </div>
+          <DataTable caption="Uso de IA" columns={usageCols} rows={usage.data?.items ?? null} loading={usage.loading && !usage.data} error={usage.error} onRetry={usage.reload} pageSize={10}
+            empty={{ icon: <BarChart3 />, title: "Ainda sem uso registado", description: "Preenche-se à medida que o chat é usado." }} />
+          {usage.data?.has_more && <div className="mt-3"><Button onClick={() => setUsageLimit((n) => n + 20)}>Carregar mais</Button></div>}
+        </Section>
+      </TabPanel>
 
-      <div>
-        <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-base font-semibold text-nd-text">Models</h2>
-          <button className="btn-primary" onClick={() => setShowModelForm((v) => !v)}>
-            {showModelForm ? "Cancel" : "Register model"}
-          </button>
-        </div>
-        {showModelForm && (
-          <RegisterModelForm
-            providers={providers.data ?? []}
-            onDone={() => {
-              setShowModelForm(false);
-              models.reload();
-            }}
-          />
-        )}
-        {models.error && <ErrorBanner message={models.error} />}
-        {deleteModelError && <ErrorBanner message={deleteModelError} />}
-        <div className="card">
-          {models.loading ? (
-            <div className="px-4 py-10 text-center text-sm text-nd-muted">Loading…</div>
-          ) : (models.data ?? []).length === 0 ? (
-            <div className="px-4 py-10 text-center text-sm text-nd-muted">No models registered.</div>
-          ) : (
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Provider</th>
-                  <th>Identifier</th>
-                  <th>Display name</th>
-                  <th>Context window</th>
-                  <th>Status</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                {models.data!.map((m) => {
-                  const key = `${m.provider_key}/${m.model_identifier}`;
-                  return (
-                    <tr key={key}>
-                      <td className="font-mono text-xs">{m.provider_key}</td>
-                      <td className="font-mono text-xs text-base-300">{m.model_identifier}</td>
-                      <td className="text-xs text-base-300">{m.display_name}</td>
-                      <td className="text-xs text-base-400">{m.context_window}</td>
-                      <td>
-                        <StatusBadge status={m.status} />
-                      </td>
-                      <td>
-                        <button
-                          className="text-xs text-base-400 hover:text-danger disabled:text-base-600"
-                          disabled={deletingModelKey === key}
-                          onClick={() => deleteModel(m.provider_key, m.model_identifier)}
-                        >
-                          {deletingModelKey === key ? "Deleting…" : "Delete"}
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          )}
-        </div>
-      </div>
+      <ProfileModal open={!!profileModal} profile={profileModal?.profile ?? null} onClose={() => setProfileModal(null)} onSaved={() => profiles.reload()} />
+      <ProviderModal open={providerModal} onClose={() => setProviderModal(false)} onSaved={() => providers.reload()} />
+      <ModelModal open={modelModal} providers={providers.data ?? []} onClose={() => setModelModal(false)} onSaved={() => models.reload()} />
+      <ConfirmDialog open={!!delProfile} onClose={() => setDelProfile(null)} onConfirm={deleteProfile} danger confirmLabel="Eliminar" title="Eliminar perfil?" description={`“${delProfile?.key}” — as aplicações que o usam por key deixam de funcionar.`} />
+      <ConfirmDialog open={!!delProvider} onClose={() => setDelProvider(null)} onConfirm={deleteProvider} danger confirmLabel="Eliminar" title="Eliminar provider?" description={`“${delProvider?.key}” e todos os seus modelos serão eliminados do registo da plataforma.`} />
+      <ConfirmDialog open={!!delModel} onClose={() => setDelModel(null)} onConfirm={deleteModel} danger confirmLabel="Eliminar" title="Eliminar modelo?" description={`${delModel?.provider_key}/${delModel?.model_identifier}`} />
     </div>
   );
 }
