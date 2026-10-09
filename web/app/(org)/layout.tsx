@@ -1,105 +1,22 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
-import { api } from "@/lib/api";
-import { clearSession, getCurrentOrgId, getStoredUser } from "@/lib/session";
-
-const NAV = [
-  { href: "/dashboard", label: "Dashboard" },
-  { href: "/infrastructure", label: "Infrastructure" },
-  { href: "/applications", label: "Applications" },
-  { href: "/jobs", label: "Jobs" },
-  { href: "/tools", label: "Tools" },
-  { href: "/agents", label: "Agents" },
-  { href: "/ai", label: "AI Gateway" },
-  { href: "/secrets", label: "Secrets" },
-  { href: "/access", label: "Access" },
-  { href: "/settings", label: "Settings" },
-  { href: "/audit", label: "Audit" },
-];
+import { useRouter } from "next/navigation";
+import { AppShell } from "@/components/shell/AppShell";
+import { getCurrentOrgId, getStoredUser } from "@/lib/session";
 
 export default function OrgLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
-  const pathname = usePathname();
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    if (!getStoredUser()) {
-      router.replace("/login");
-      return;
-    }
-    if (!getCurrentOrgId()) {
-      router.replace("/orgs");
-      return;
-    }
+    if (!getStoredUser()) { router.replace("/login"); return; }
+    if (!getCurrentOrgId()) { router.replace("/orgs"); return; }
     setReady(true);
   }, [router]);
 
   if (!ready) {
-    return <div className="flex min-h-screen items-center justify-center text-base-400">Loading…</div>;
+    return <div className="flex min-h-screen items-center justify-center bg-nd-bg text-nd-muted" role="status">A carregar…</div>;
   }
-
-  const user = getStoredUser();
-
-  async function logout() {
-    try {
-      await api.post("/api/v1/auth/logout", undefined, false);
-    } catch {
-      // Best-effort — even if the request fails, clear the local hint and
-      // send the user to /login; a stale server-side session left behind
-      // is bounded by its own TTL and every subsequent request from this
-      // browser will simply 401 with no cookie to send.
-    }
-    clearSession();
-    router.replace("/login");
-  }
-
-  return (
-    <div className="flex min-h-screen">
-      <aside className="flex w-56 shrink-0 flex-col border-r border-base-800 bg-base-900">
-        <div className="border-b border-base-800 px-4 py-4">
-          <div className="font-mono text-lg font-semibold text-base-100">nodera</div>
-        </div>
-        <nav className="flex-1 space-y-0.5 px-2 py-3">
-          {NAV.map((item) => {
-            const active = pathname === item.href;
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                className={`block rounded-md px-3 py-1.5 text-sm transition-colors ${
-                  active
-                    ? "bg-accent-600/15 text-accent-400"
-                    : "text-base-300 hover:bg-base-800 hover:text-base-100"
-                }`}
-              >
-                {item.label}
-              </Link>
-            );
-          })}
-        </nav>
-        <div className="border-t border-base-800 px-4 py-3">
-          <button
-            onClick={() => router.push("/orgs")}
-            className="mb-2 block w-full truncate text-left text-xs text-base-400 hover:text-base-200"
-          >
-            Switch organization
-          </button>
-          <div className="flex items-center justify-between">
-            <Link href="/account" className="truncate text-xs text-base-400 hover:text-base-200" title="Account settings">
-              {user?.email}
-            </Link>
-            <button onClick={logout} className="text-xs text-base-400 hover:text-danger">
-              Sign out
-            </button>
-          </div>
-        </div>
-      </aside>
-      <main className="min-w-0 flex-1 overflow-x-auto">
-        <div className="mx-auto max-w-6xl px-6 py-8">{children}</div>
-      </main>
-    </div>
-  );
+  return <AppShell>{children}</AppShell>;
 }

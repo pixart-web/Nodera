@@ -4,9 +4,67 @@
 
 :root {
   color-scheme: dark;
+
+  /* Nodera design tokens — dark-first. Components consume these through
+     Tailwind (tailwind.config.ts) and never hardcode hex values. */
+  --color-bg: 7 17 31;            /* #07111F */
+  --color-bg-elevated: 10 22 38;  /* #0A1626 */
+  --color-surface: 13 27 42;      /* #0D1B2A */
+  --color-surface-hover: 18 36 56;
+  --color-surface-raised: 22 42 64;
+  --color-border: 30 48 70;
+  --color-border-strong: 44 66 92;
+  --color-text: 232 238 247;
+  --color-text-muted: 139 154 177;
+  --color-text-faint: 94 111 135;
+  --color-primary: 59 130 246;
+  --color-primary-soft: 96 165 250;
+  --color-secondary: 139 92 246;
+  --color-success: 34 197 94;
+  --color-warning: 245 158 11;
+  --color-danger: 239 68 68;
+  --color-info: 56 189 248;
+
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --shadow-card: 0 1px 0 rgb(255 255 255 / 0.02) inset, 0 8px 24px -12px rgb(0 0 0 / 0.55);
+  --shadow-pop: 0 18px 48px -12px rgb(0 0 0 / 0.7);
+  --ease: cubic-bezier(0.2, 0, 0, 1);
+  --t-fast: 150ms;
+  --t-base: 200ms;
+  --t-slow: 250ms;
+  --sidebar-w: 240px;
+  --topbar-h: 64px;
 }
 
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+:focus-visible {
+  outline: 2px solid rgb(var(--color-primary-soft));
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+.nd-scroll::-webkit-scrollbar { width: 8px; height: 8px; }
+.nd-scroll::-webkit-scrollbar-thumb { background: rgb(var(--color-border-strong)); border-radius: 8px; }
+
+@keyframes nd-fade-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+@keyframes nd-pop-in { from { opacity: 0; transform: scale(0.97); } to { opacity: 1; transform: none; } }
+@keyframes nd-slide-in { from { transform: translateX(-100%); } to { transform: none; } }
+@keyframes nd-slide-in-right { from { transform: translateX(100%); } to { transform: none; } }
+@keyframes nd-pulse { 50% { opacity: 0.45; } }
+.nd-fade-in { animation: nd-fade-in var(--t-slow) var(--ease); }
+.nd-pop-in { animation: nd-pop-in var(--t-base) var(--ease); }
+
 body {
+  font-family: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
   background-color: theme("colors.base.950");
   color: theme("colors.base.100");
 }
