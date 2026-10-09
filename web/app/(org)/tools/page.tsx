@@ -15,6 +15,7 @@ import { Modal } from "@/components/ui/Overlay";
 import { Field, Input, Select } from "@/components/ui/Forms";
 import { RowMenu } from "@/components/ui/RowMenu";
 import { StatusBadge } from "@/components/StatusBadge";
+import { useToast } from "@/components/ui/Toast";
 import type { Approval, ExecuteResult, OrganizationToolSetting, Tool } from "@/lib/types";
 
 const DEFAULT_TTL = 24 * 60 * 60;
@@ -98,6 +99,7 @@ export default function ToolsPage() {
   const [statusFilter, setStatusFilter] = useState("pending");
   const approvals = useApi(() => api.get<Approval[]>(`/api/v1/approvals${statusFilter ? `?status=${statusFilter}` : ""}`), [statusFilter], { pollMs: 7000 });
   const decideAction = useAction();
+  const toast = useToast();
   const [executing, setExecuting] = useState<Tool | null>(null);
   const [ttlTool, setTtlTool] = useState<Tool | null>(null);
   const [deciding, setDeciding] = useState<{ a: Approval; approve: boolean } | null>(null);
@@ -107,7 +109,16 @@ export default function ToolsPage() {
     e.preventDefault();
     if (!deciding) return;
     const { a, approve } = deciding;
-    if (await decideAction.run(() => api.post(`/api/v1/approvals/${a.id}/decide`, { approve, reason }), approve ? "Pedido aprovado." : "Pedido rejeitado.")) { setDeciding(null); setReason(""); approvals.reload(); }
+    let outcome: Approval | null = null;
+    // The toast must reflect what actually happened: an approved request whose
+    // tool has no backend ends as execution_failed, not as a success.
+    if (await decideAction.run(async () => { outcome = await api.post<Approval>(`/api/v1/approvals/${a.id}/decide`, { approve, reason }); })) {
+      const st = (outcome as Approval | null)?.status;
+      if (!approve) toast.push("success", "Pedido rejeitado.");
+      else if (st === "executed") toast.push("success", "Aprovado e executado.");
+      else toast.push("warning", `Aprovado, mas a execução terminou como ${st ?? "desconhecido"} — vê o resultado no pedido.`);
+      setDeciding(null); setReason(""); approvals.reload();
+    }
   }
   async function cancel(a: Approval) {
     if (await decideAction.run(() => api.post(`/api/v1/approvals/${a.id}/cancel`), "Pedido cancelado.")) approvals.reload();

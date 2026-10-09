@@ -73,7 +73,11 @@ async function request<T>(path: string, opts: RequestOptions = {}): Promise<T> {
     // "probably logged in" hint (lib/session.ts) is now stale. Clear it
     // and send the user back to /login rather than leaving them staring
     // at a page that will fail every subsequent call the same way.
-    if (res.status === 401 && code === "UNAUTHENTICATED" && !opts.skipAuth && typeof window !== "undefined") {
+    // The change-password endpoint also answers 401 for a wrong *current
+    // password* while the session itself is perfectly valid — treating that
+    // as an expired session would log the user out for a typo.
+    const sessionEndpoint = !path.startsWith("/api/v1/account/password");
+    if (res.status === 401 && code === "UNAUTHENTICATED" && !opts.skipAuth && sessionEndpoint && typeof window !== "undefined") {
       clearSession();
       window.location.href = "/login";
     }
