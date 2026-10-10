@@ -487,12 +487,13 @@ type Certs struct {
 	mu      sync.Mutex
 	Issued  int
 	Revoked map[string]bool
+	info    map[string]providers.CertInfo
 	// Validity controls the issued certificate's lifetime (default 90 days).
 	Validity time.Duration
 }
 
 func NewCerts(f *Faults) *Certs {
-	return &Certs{f: f, Revoked: map[string]bool{}, Validity: 90 * 24 * time.Hour}
+	return &Certs{f: f, Revoked: map[string]bool{}, info: map[string]providers.CertInfo{}, Validity: 90 * 24 * time.Hour}
 }
 func (c *Certs) Name() string { return "mock" }
 func (c *Certs) bundle(domains []string) providers.CertBundle {
@@ -502,11 +503,16 @@ func (c *Certs) bundle(domains []string) providers.CertBundle {
 	c.mu.Unlock()
 	now := time.Now()
 	// MOCK material — clearly not a real certificate.
-	return providers.CertBundle{
+	b := providers.CertBundle{
 		CertPEM: []byte("-----BEGIN MOCK CERTIFICATE-----\n" + strings.Join(domains, ",") + "\n-----END MOCK CERTIFICATE-----\n"),
 		KeyPEM:  []byte(fmt.Sprintf("-----BEGIN MOCK PRIVATE KEY-----\nmock-%d\n-----END MOCK PRIVATE KEY-----\n", n)),
 		Issuer:  "Nodera Mock CA", Serial: fmt.Sprintf("mock-%06d", n), NotBefore: now, NotAfter: now.Add(c.Validity),
 	}
+	c.mu.Lock()
+	c.info[string(b.CertPEM)+b.Serial] = providers.CertInfo{Issuer: b.Issuer, Serial: b.Serial, Subject: strings.Join(domains, ","), DNSNames: domains, NotBefore: b.NotBefore, NotAfter: b.NotAfter}
+	c.info[string(b.CertPEM)] = c.info[string(b.CertPEM)+b.Serial]
+	c.mu.Unlock()
+	return b
 }
 func (c *Certs) Issue(_ context.Context, r providers.IssueRequest) (providers.CertBundle, error) {
 	if err := c.f.hit("cert.issue"); err != nil {
@@ -532,6 +538,11 @@ func (c *Certs) Revoke(_ context.Context, serial string) error {
 func (c *Certs) Inspect(_ context.Context, pem []byte) (providers.CertInfo, error) {
 	if !bytes.Contains(pem, []byte("MOCK CERTIFICATE")) {
 		return providers.CertInfo{}, errors.New("mock: not a mock certificate")
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if i, ok := c.info[string(pem)]; ok {
+		return i, nil
 	}
 	return providers.CertInfo{Issuer: "Nodera Mock CA"}, nil
 }

@@ -26,9 +26,11 @@ import (
 	"github.com/nodera/nodera/internal/ai/providers/openai"
 	"github.com/nodera/nodera/internal/applications"
 	"github.com/nodera/nodera/internal/audit"
+	"github.com/nodera/nodera/internal/backups"
 	"github.com/nodera/nodera/internal/identity"
 	"github.com/nodera/nodera/internal/infrastructure"
 	"github.com/nodera/nodera/internal/jobs"
+	"github.com/nodera/nodera/internal/network"
 	"github.com/nodera/nodera/internal/nodeagent"
 	"github.com/nodera/nodera/internal/ops"
 	"github.com/nodera/nodera/internal/platform/authctx"
@@ -192,7 +194,12 @@ func run() error {
 		Pool: pool, Projects: projectsSvc, Secrets: secretsSvc, Providers: prov,
 		Network: cfg.Runtime.DockerNetwork, BaseDomain: cfg.Runtime.BaseDomain,
 	})
+	backupsSvc := backups.New(pool, auditSvc, projectsSvc, prov)
+	backupsSvc.Register(opsEngine)
+	networkSvc := network.New(pool, auditSvc, secretsSvc, prov)
+	networkSvc.Register(opsEngine)
 	opsEngine.BridgeTools(toolsSvc)
+	go runMaintenance(ctx, log, backupsSvc, networkSvc)
 
 	worker := jobs.NewWorker(pool)
 	opsEngine.RegisterWorker(worker)
@@ -216,6 +223,8 @@ func run() error {
 		nodeagent:          nodeAgentSvc,
 		projects:           projectsSvc,
 		ops:                opsEngine,
+		backups:            backupsSvc,
+		network:            networkSvc,
 		prov:               prov,
 		providerMode:       cfg.Runtime.ProviderMode,
 		environment:        cfg.Env,
@@ -389,6 +398,30 @@ func runNodeAgentSweep(ctx context.Context, log *slog.Logger, svc *nodeagent.Ser
 		case <-t.C:
 			if err := svc.Sweep(ctx); err != nil {
 				log.Error("node agent sweep failed", "error", err)
+			}
+		}
+	}
+}
+
+// runMaintenance drives time-based work: scheduled backups, backup retention,
+// and certificate expiry/renewal. Each tick is idempotent (period-keyed
+// submissions), so running several API instances is safe.
+func runMaintenance(ctx context.Context, log *slog.Logger, b *backups.Service, n *network.Service) {
+	t := time.NewTicker(time.Minute)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case now := <-t.C:
+			if _, err := b.RunDuePolicies(ctx, now); err != nil {
+				log.Error("scheduled backups failed", "error", err)
+			}
+			if _, err := b.EnforceRetention(ctx, now); err != nil {
+				log.Error("backup retention failed", "error", err)
+			}
+			if _, err := n.Sweep(ctx, now); err != nil {
+				log.Error("certificate sweep failed", "error", err)
 			}
 		}
 	}

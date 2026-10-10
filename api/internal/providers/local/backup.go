@@ -46,6 +46,10 @@ func (b *Backups) Create(ctx context.Context, id string, src providers.BackupSou
 	var buf bytes.Buffer
 	gz := gzip.NewWriter(&buf)
 	tw := tar.NewWriter(gz)
+	base, err := b.src.AbsPath(".")
+	if err != nil {
+		return providers.BackupArtifact{}, err
+	}
 	for _, p := range src.Paths {
 		full, err := b.src.AbsPath(p)
 		if err != nil {
@@ -56,7 +60,7 @@ func (b *Backups) Create(ctx context.Context, id string, src providers.BackupSou
 			if err != nil || !info.Mode().IsRegular() {
 				return nil // symlinks/devices are never archived
 			}
-			rel, _ := filepath.Rel(filepath.Dir(root), path)
+			rel, _ := filepath.Rel(base, path) // keep the path relative to the FS root so Restore puts files back where they were
 			hdr := &tar.Header{Name: "files/" + filepath.ToSlash(rel), Mode: 0o640, Size: info.Size()}
 			if err := tw.WriteHeader(hdr); err != nil {
 				return err

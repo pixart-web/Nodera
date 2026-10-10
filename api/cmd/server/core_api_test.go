@@ -19,8 +19,10 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/nodera/nodera/internal/audit"
+	"github.com/nodera/nodera/internal/backups"
 	"github.com/nodera/nodera/internal/identity"
 	"github.com/nodera/nodera/internal/jobs"
+	"github.com/nodera/nodera/internal/network"
 	"github.com/nodera/nodera/internal/ops"
 	"github.com/nodera/nodera/internal/platform/logger"
 	"github.com/nodera/nodera/internal/platformauth"
@@ -62,6 +64,10 @@ func newCoreEnv(t *testing.T, email string) (*coreEnv, apiDeps) {
 	proj := projects.New(pool, auditSvc)
 	eng := ops.New(pool, auditSvc)
 	provisioning.Register(eng, provisioning.Deps{Pool: pool, Projects: proj, Secrets: sec, Providers: set})
+	bk := backups.New(pool, auditSvc, proj, set)
+	bk.Register(eng)
+	nw := network.New(pool, auditSvc, sec, set)
+	nw.Register(eng)
 	toolsSvc := tools.New(pool, auditSvc)
 	eng.BridgeTools(toolsSvc)
 	worker := jobs.NewWorker(pool)
@@ -70,7 +76,7 @@ func newCoreEnv(t *testing.T, email string) (*coreEnv, apiDeps) {
 	d := apiDeps{
 		log: logger.New("test"), identity: identitySvc, tenancy: tenancySvc, audit: auditSvc, rbac: rbacSvc,
 		platform: platformSvc, pool: pool, sessionTTL: 24 * time.Hour,
-		projects: proj, ops: eng, prov: set, providerMode: "mock", environment: "test", tools: toolsSvc,
+		projects: proj, backups: bk, network: nw, ops: eng, prov: set, providerMode: "mock", environment: "test", tools: toolsSvc,
 	}
 	srv := httptest.NewServer(newRouter(d))
 	t.Cleanup(srv.Close)
@@ -221,5 +227,50 @@ func TestCoreAPI_ErrorsAuthAndIsolation(t *testing.T) {
 	spoof.org = org.ID
 	if st, _, _ := spoof.do(t, "GET", "/projects", nil); st != 403 && st != 404 {
 		t.Fatalf("org spoofing = %d, want 403/404", st)
+	}
+}
+
+func TestInfraAPI_DomainsSSLBackups(t *testing.T) {
+	e, _ := newCoreEnv(t, "infra-api-"+uuid.NewString()[:6]+"@example.com")
+	ctx := context.Background()
+
+	st, dom, _ := e.do(t, "POST", "/domains", map[string]string{"name": "Shop.Example.com"})
+	if st != 201 || dom["name"] != "shop.example.com" {
+		t.Fatalf("add domain: %d %v", st, dom)
+	}
+	did := dom["id"].(string)
+	if st, _, _ := e.do(t, "POST", "/domains", map[string]string{"name": "not a domain"}); st != 400 {
+		t.Fatalf("invalid domain = %d", st)
+	}
+	if st, _, _ := e.do(t, "POST", "/domains/"+did+"/records", map[string]any{"type": "A", "name": "@", "value": "198.51.100.7"}); st != 200 {
+		t.Fatalf("add record = %d", st)
+	}
+	if st, _, _ := e.do(t, "POST", "/domains/"+did+"/records", map[string]any{"type": "A", "name": "@", "value": "nope"}); st != 400 {
+		t.Fatalf("bad record = %d", st)
+	}
+	st, ref, _ := e.do(t, "POST", "/domains/"+did+"/certificate", nil)
+	if st != 202 {
+		t.Fatalf("issue = %d %v", st, ref)
+	}
+	e.worker.RunOnce(ctx)
+	st, page, _ := e.do(t, "GET", "/certificates", nil)
+	items, _ := page["items"].([]any)
+	if st != 200 || len(items) != 1 || items[0].(map[string]any)["status"] != "valid" {
+		t.Fatalf("certificates: %d %v", st, page)
+	}
+	if st, _, raw := e.do(t, "GET", "/certificates", nil); st != 200 || bytes.Contains(raw, []byte("PRIVATE KEY")) {
+		t.Fatal("private key material must never be returned by the API")
+	}
+
+	// Removing a domain is a gateway action: 202 + approval, domain still there.
+	st, del, _ := e.do(t, "DELETE", "/domains/"+did, nil)
+	if st != 202 || del["approval_id"] == nil {
+		t.Fatalf("remove domain: %d %v", st, del)
+	}
+	if st, _, _ := e.do(t, "GET", "/domains/"+did, nil); st != 200 {
+		t.Fatal("domain must remain until approval")
+	}
+	if st, _, _ := e.do(t, "GET", "/backups/"+uuid.NewString(), nil); st != 404 {
+		t.Fatalf("unknown backup = %d", st)
 	}
 }

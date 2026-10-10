@@ -63,6 +63,9 @@ type Project struct {
 	UpdatedAt      time.Time      `json:"updated_at"`
 }
 
+// WorkspacePath is the project's directory under the filesystem provider root.
+func WorkspacePath(slug string) string { return "projects/" + slug }
+
 var slugRe = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,48}[a-z0-9])?$`)
 
 // Slugify derives a URL/container-safe slug from a name.

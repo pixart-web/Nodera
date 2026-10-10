@@ -61,6 +61,13 @@ func (r *Run) resultJSON() json.RawMessage {
 
 // Log appends a job log line. Secrets must never be passed here.
 func (r *Run) Log(level, msg string, meta map[string]any) {
+	switch level {
+	case "warn":
+		level = "warning"
+	case "debug", "info", "success", "warning", "error":
+	default:
+		level = "info"
+	}
 	if meta == nil {
 		meta = map[string]any{}
 	}
