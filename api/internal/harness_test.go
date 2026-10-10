@@ -137,3 +137,7 @@ func slugify(email string) string {
 	}
 	return string(out)
 }
+
+func auditFilter(ac authctx.AuthContext) audit.QueryFilter {
+	return audit.QueryFilter{OrganizationID: ac.OrganizationID, Limit: 200}
+}

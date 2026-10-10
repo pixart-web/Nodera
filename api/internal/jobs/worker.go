@@ -18,6 +18,11 @@ import (
 // a per-job context from the job's timeout_seconds).
 type Handler func(ctx context.Context, j Job) (result json.RawMessage, err error)
 
+// ErrCancelled is returned (wrapped) by a handler that stopped because a
+// cancellation was requested; the worker then records status 'cancelled'
+// instead of 'failed' and never retries it.
+var ErrCancelled = errors.New("job cancelled")
+
 // Worker polls the jobs table directly with `FOR UPDATE SKIP LOCKED`
 // (ADR-003: Postgres is the durable source of truth; this works with zero
 // Redis dependency). Multiple Worker instances (e.g. one per process) can
@@ -147,6 +152,10 @@ func (w *Worker) execute(ctx context.Context, j Job) {
 	defer cancel()
 
 	result, err := w.runWithRecover(jobCtx, handler, j)
+	if errors.Is(err, ErrCancelled) {
+		w.finishWithStatus(ctx, j, nil, StatusCancelled, err.Error())
+		return
+	}
 	if err != nil {
 		log.Warn("job failed", "error", err, "attempt", j.Attempts, "max_attempts", j.MaxAttempts)
 		if j.Attempts < j.MaxAttempts {
@@ -176,11 +185,15 @@ func (w *Worker) finish(ctx context.Context, j Job, result json.RawMessage, errM
 	if errMsg != "" {
 		status = StatusFailed
 	}
+	w.finishWithStatus(ctx, j, result, status, errMsg)
+}
+
+func (w *Worker) finishWithStatus(ctx context.Context, j Job, result json.RawMessage, status Status, errMsg string) {
 	if result == nil {
 		result = json.RawMessage(`null`)
 	}
 	if _, err := w.pool.Exec(ctx, `
-		UPDATE jobs SET status = $2, result = $3, error = NULLIF($4, ''), progress = 100,
+		UPDATE jobs SET status = $2, result = $3, error = NULLIF($4, ''), progress = CASE WHEN $2 = 'succeeded' THEN 100 ELSE progress END,
 		                finished_at = now(), updated_at = now()
 		WHERE id = $1
 	`, j.ID, status, result, errMsg); err != nil {
@@ -202,3 +215,8 @@ type panicError struct{ v any }
 func (e panicError) Error() string { return "job handler panicked" }
 
 func errPanic(v any) error { return panicError{v: v} }
+
+// RunOnce claims and executes at most one queued job, returning whether one
+// was found. Exposed so tests (and one-shot CLI tooling) can drive the queue
+// deterministically instead of sleeping on the poll interval.
+func (w *Worker) RunOnce(ctx context.Context) bool { return w.claimAndRunOne(ctx) }
