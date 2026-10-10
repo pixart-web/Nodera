@@ -97,6 +97,13 @@ type RuntimeConfig struct {
 	DockerNetwork string
 	// BaseDomain, when set, makes provisioning add Traefik routing labels.
 	BaseDomain string
+	// MariaDBContainer, with MariaDBRootPassword, enables the real database
+	// provider (docker mode only): an existing MariaDB container the API
+	// manages through `docker exec`. WordPressDBHost is the hostname WordPress
+	// containers use to reach it on the shared Docker network.
+	MariaDBContainer    string
+	MariaDBRootPassword string
+	WordPressDBHost     string
 	// AllowInternalMonitoring lets monitors probe private addresses (dev only).
 	AllowInternalMonitoring bool
 }
@@ -174,6 +181,9 @@ func Load() (Config, error) {
 			DockerBin:               getEnvDefault("NODERA_DOCKER_BIN", "docker"),
 			DockerNetwork:           os.Getenv("NODERA_DOCKER_NETWORK"),
 			BaseDomain:              os.Getenv("NODERA_BASE_DOMAIN"),
+			MariaDBContainer:        os.Getenv("NODERA_MARIADB_CONTAINER"),
+			MariaDBRootPassword:     os.Getenv("NODERA_MARIADB_ROOT_PASSWORD"),
+			WordPressDBHost:         getEnvDefault("NODERA_WORDPRESS_DB_HOST", "db"),
 			AllowInternalMonitoring: os.Getenv("NODERA_MONITOR_ALLOW_INTERNAL") == "true",
 		},
 		Platform: PlatformConfig{

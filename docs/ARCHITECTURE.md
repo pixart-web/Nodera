@@ -153,3 +153,38 @@ don't yet.
 See the root `README.md` "Status" table for the authoritative implemented /
 foundation / planned breakdown per module — kept there instead of duplicated
 here so it can't drift.
+
+## 9. Control plane (operations engine) — IMPLEMENTED
+
+Nodera is an **infrastructure operating system**, not a dashboard: every important action is an *operation*.
+
+```
+HTTP request ─ authn/authz (RBAC, tenancy) ─▶ ops.Engine.Submit ─▶ jobs table (idempotency key, correlation id)
+                                     │                                   │  FOR UPDATE SKIP LOCKED worker
+                dangerous? ──▶ Tool Gateway ──▶ human approval ───────────┘
+                                                                          ▼
+                              Operation: Validate → Steps (persisted, each with idempotent Undo) → Result
+                                                                          │ failure/cancel: reverse-order rollback
+                                      providers.Set (interfaces) ◀────────┘        audit + notification + SSE stream
+```
+
+* **Engines depend only on provider interfaces** (`internal/providers`): Container, Filesystem, Database, DNS, Certificate, Backup, Monitoring, Node, Git.
+  Implementations: `mock/` (in-memory, fault injection), `local/` (real FS, tar.gz backups, local X.509 CA, DNS zone store, SSRF-guarded monitoring),
+  `docker/` (argv-only CLI adapter). A nil provider means "not configured": engines refuse to run instead of simulating.
+  `/system/info` and `/ready` report each capability as `real | local | mock | not_configured`.
+* **Engines:** `projects` + `provisioning` (clients, projects, `project.provision/delete`), `backups`, `network` (domains/DNS/SSL), `deployments`, `sitemig`
+  (migrations), `wordpress` (clone/update/health), `monitoring` (monitors/rules/incidents), `notifications`, `logs` (+retention), `flags`, `dashboard` (+search),
+  `aiplans`, `nodeagent`, `devseed`.
+* **Traceability:** one correlation id links request → job → operation steps/logs → audit rows → notifications.
+* **Approvals:** operations that declare a `ToolKey` can only be submitted through the Tool Gateway (`ops.Engine.Submit` refuses them). The gateway handler
+  calls `SubmitTrusted` after a human decision, so the approval state machine's at-most-once execution applies to every dangerous operation:
+  `project.delete`, `backup.restore`, `backup.delete`, `domain.remove`, `migration.cutover`, `deployment.production` (and `database.delete`, `credential.rotate` are registered tools without an operation yet).
+* **Multi-tenancy:** every table carries `organization_id`; every query filters on it; project-scoped sub-resources return 404 (not an empty 200) for another tenant's project.
+  Cross-tenant tests exist per engine plus a table-driven IDOR suite.
+* **Realtime:** SSE (`/operations/{id}/stream`, `/events`) — fetch-based on the client because `EventSource` cannot send the `X-Nodera-Org` header.
+* **Background loops** (one process, safe with several instances): job worker, node-agent sweeper, scheduled backups + retention + certificate renewal (period-keyed idempotency),
+  monitor runner (`SKIP LOCKED`), alert evaluator, data-retention sweeper.
+* **Node Agent:** pull model, signed both ways, allowlisted commands only — see `docs/NODE-AGENT.md`.
+* **AI:** proposes plans only; a human approves and runs each step under their own permissions — see `docs/SECURITY.md` "AI operations layer".
+
+Engine docs: `BACKUPS.md`, `DEPLOYMENTS.md`, `MIGRATION.md`, `MONITORING.md`, `NODE-AGENT.md`.

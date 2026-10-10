@@ -538,6 +538,39 @@ fix requires a Next.js 16 major upgrade (breaking change), deliberately
 not taken during this foundation-building pass; tracked in
 `docs/ROADMAP.md`.
 
+## Control plane security (operations engine) — IMPLEMENTED
+
+Regression coverage lives in `api/cmd/server/security_test.go` (runs the real router against Postgres).
+
+| Threat | Control | Test |
+|---|---|---|
+| SQL injection | parameterised queries only; `LIKE` wildcards escaped in every search; no string-built SQL | hostile payloads across every list/search/filter parameter; tables intact, no cross-tenant rows |
+| XSS | JSON-only API, `nosniff`, `Content-Type: application/json`; the UI renders text nodes, never `dangerouslySetInnerHTML` | `<script>` stored as data and returned inert |
+| CSRF | cookie sessions + double-submit token; bearer tokens are not ambient | cookie request without the header → 403 on every new mutating route |
+| SSRF | `internal/platform/netpolicy` for monitors, webhooks, `check_ssl`; pinned dial address, no redirects; bare IPv6 literals classified | loopback/metadata/private targets blocked by the real local provider; webhook targets rejected at creation |
+| IDOR / cross-tenant | every query filters on `organization_id`; project sub-resources 404 for foreign projects; `X-Nodera-Org` must match membership | table-driven read + write attempts on every resource type with a second tenant |
+| Privilege escalation | permission per operation, enforced in the service layer (not the router); dangerous operations unreachable without the gateway | member token against every mutating route → 403 |
+| Secret leakage | passwords/keys only in `internal/secrets` (AES-GCM); redaction (`internal/platform/redact`) on log ingest, operation logs and container logs; credentials never in `source_config`, audit or errors; private keys never in a column | scans of API responses, audit and job logs for generated secrets and `PRIVATE KEY` |
+| Path traversal | `SafeJoin`/rooted filesystem provider (symlink-safe), upload/zip path validators, agent path validators | upload `..`/absolute/backslash/empty segments, zip-slip archive, agent `filesystem.*` |
+| Command injection | no shell anywhere: Docker adapter and agent use argv arrays; image/ref/name/tag/repository validators | hostile image tags, refs, repos, container names, agent params |
+| Replay / forged agents | Ed25519 signed requests + nonce table + ±60 s window; signed, agent-bound, expiring commands; allowlist twice | replay, tamper, stale, unsigned, wrong agent, cross-agent result forgery, oversized body |
+| Abuse | per-actor API budget (1200/min), dangerous-request budget (30/h), per-agent and enrolment limits, login/signup/AI limits | budget exhaustion returns 429 + `Retry-After` |
+| Dangerous operations | approval gateway, atomic single execution, safety snapshots, automatic rollback | restore/cutover/delete/production-deploy all require a human decision |
+
+### AI operations layer
+
+The model is untrusted. It receives only the project's name/type/status and the list of operations the caller can already run
+(never secrets or config). Its answer is parsed as data (≤ 32 KiB, ≤ 8 steps), unknown operation names are dropped, and each step is vetted
+against the real registry (`Engine.Check`: permission, flag, payload, preconditions). A human approves the plan (`approvals.decide`) and runs steps
+in order under **their own** permissions; dangerous steps still need gateway approval. A row lock prevents double-running a step. There is no path from model text to a shell or an arbitrary provider call.
+
+### Known limits (honest list)
+
+* The Node Agent and Docker adapter are tested with mocks/in-process; they have not run against a real remote node.
+* Email delivery is not implemented (reported as such). Password-reset flow does not exist (no mail transport), so there is nothing to rate limit yet.
+* Dev keys persisted in `NODERA_DATA_DIR` are a convenience; production requires explicit keys and refuses to start without them.
+* Rate limiters for the new budgets are in-process (per instance); login/signup/AI limiters can use Redis.
+
 ## Not yet implemented / deliberately deferred
 
 - CSRF protection (not yet relevant — no cookie-based auth flow exists; the

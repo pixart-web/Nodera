@@ -8,6 +8,7 @@ import (
 	"github.com/nodera/nodera/internal/providers"
 	"github.com/nodera/nodera/internal/providers/docker"
 	"github.com/nodera/nodera/internal/providers/local"
+	"github.com/nodera/nodera/internal/providers/mariadb"
 	"github.com/nodera/nodera/internal/providers/mock"
 )
 
@@ -31,6 +32,13 @@ func buildProviders(cfg config.Config) (providers.Set, error) {
 		}
 		if rt.ProviderMode == "docker" {
 			set.Containers = docker.New(rt.DockerBin)
+			if rt.MariaDBContainer != "" {
+				db, err := mariadb.New(rt.DockerBin, rt.MariaDBContainer, rt.MariaDBRootPassword)
+				if err != nil {
+					return providers.Set{}, fmt.Errorf("mariadb provider: %w", err)
+				}
+				set.DB = db
+			}
 		}
 		return set, nil
 	}

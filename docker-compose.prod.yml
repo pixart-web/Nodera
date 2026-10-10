@@ -57,6 +57,10 @@ services:
       # `docker` needs the host Docker socket (see the volume) — only enable on the managed node.
       NODERA_PROVIDER_MODE: ${NODERA_PROVIDER_MODE:-local}
       NODERA_DOCKER_NETWORK: ${NODERA_DOCKER_NETWORK:-proxy-public}
+      # Existing MariaDB container for WordPress sites (docker mode): managed through `docker exec`.
+      NODERA_MARIADB_CONTAINER: ${NODERA_MARIADB_CONTAINER:-}
+      NODERA_MARIADB_ROOT_PASSWORD: ${NODERA_MARIADB_ROOT_PASSWORD:-}
+      NODERA_WORDPRESS_DB_HOST: ${NODERA_WORDPRESS_DB_HOST:-mariadb}
       NODERA_BASE_DOMAIN: ${NODERA_BASE_DOMAIN:-}
       NODERA_ANTHROPIC_API_KEY: ${NODERA_ANTHROPIC_API_KEY:-}
       NODERA_OPENAI_API_KEY: ${NODERA_OPENAI_API_KEY:-}

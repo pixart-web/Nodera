@@ -15,6 +15,7 @@ import { ConfirmDialog, Modal } from "@/components/ui/Overlay";
 import { Field, Input, Select } from "@/components/ui/Forms";
 import { RowMenu } from "@/components/ui/RowMenu";
 import { StatusBadge } from "@/components/StatusBadge";
+import { NodeAgentsSection } from "@/components/ops/NodeAgentsSection";
 import type { Node as NoderaNode, Page } from "@/lib/types";
 
 const STATUSES = ["online", "offline", "degraded", "unknown"];
@@ -67,6 +68,8 @@ export default function InfrastructurePage() {
           empty={{ icon: <Server />, title: "Nenhum node registado", description: "Isto é inventário real, não um placeholder — regista o primeiro node.", action: { label: "Registar node", onClick: () => setShowForm(true) } }} />
         {nodes.data?.has_more && <div className="mt-3"><Button onClick={() => setLimit((n) => n + 50)}>Carregar mais</Button></div>}
       </Section>
+
+      <div className="mt-6"><NodeAgentsSection nodes={(nodes.data?.items ?? []).filter((n) => n.status !== "decommissioned").map((n) => ({ id: n.id, hostname: n.hostname }))} /></div>
 
       <Modal open={showForm} onClose={() => setShowForm(false)} title="Registar node"
         footer={<><Button onClick={() => setShowForm(false)}>Cancelar</Button><Button variant="primary" type="submit" form="node-form" disabled={create.busy}>{create.busy ? "A registar…" : "Registar"}</Button></>}>

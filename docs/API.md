@@ -203,6 +203,24 @@ without a throttle a stolen/leaked session token would let an attacker
 brute-force the account's real password with no friction. Exceeding any
 of them returns `429` with code `RATE_LIMITED` — see `docs/SECURITY.md`.
 
+## Control-plane API (operations engine)
+
+The authoritative list is `GET /openapi.json` (`/docs` for Swagger UI) — a test fails if a route is registered without being documented.
+Conventions:
+
+* Everything is under `/api/v1` (agent wire protocol: `/agent/v1`, own version axis). Organisation routes need `X-Nodera-Org` with a session token.
+* **Errors:** `{"error":{"code","message","details?","request_id"}}`. `details` is client-safe structured context (e.g. `{"field":"name"}`); `request_id` correlates with logs and audit.
+* **Operations:** actions that change infrastructure answer `202 {"job_id","created"}`. Follow with `GET /operations/{id}` (+ `/steps`, `/logs`) or the SSE stream
+  `GET /operations/{id}/stream` (`log`, `status`, `end` events; resume with `Last-Event-ID`). `Idempotency-Key` makes retries safe.
+* **Dangerous actions** (`DELETE /projects/{id}`, `POST /backups/{id}/restore`, `DELETE /backups/{id}`, `DELETE /domains/{id}`, `POST /migrations/{id}/cutover`,
+  production `POST /projects/{id}/deployments`) answer `202 {"status":"approval_required","approval_id"}`; nothing runs until `POST /approvals/{id}/decide` approves.
+* **Lists** are paginated (`limit`/`offset`, `has_more`) and searchable where it makes sense (`q`, `status`, `kind`, `project_id`, …).
+* **Permissions:** `GET /permissions/mine` lists the caller's keys (UI convenience only; the backend authorises every request).
+
+Resource groups: system/dashboard/search/flags/events, clients, projects (+overview, provision, databases, applications, containers, operations, container-logs),
+operations, backups + policies, domains + records + propagation, certificates, deployments, git repositories, migrations, WordPress (clone/update/health),
+monitors, metrics, alert rules, incidents, notifications + channels, logs, retention, AI plans, node agents.
+
 ## Not yet implemented
 
 - Generating the OpenAPI spec from code instead of hand-maintaining it

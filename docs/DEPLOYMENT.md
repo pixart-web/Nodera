@@ -1,13 +1,45 @@
 # Deployment
 
-Status: **PLANNED**. Nodera runs locally today (see `README.md`); no
-production deployment exists. This document records what production
-deployment will need, and explicitly the Hetzner values that **cannot** be
-filled in yet (rule 30).
+Status: **images, dev compose and a production compose template exist and build**; nothing has been
+deployed to the Hetzner node yet, so everything marked *unverified* below is exactly that.
+
+## Artifacts
+
+| File | Purpose |
+|---|---|
+| `api/Dockerfile` (`--target server`, `--target agent`) | non-root Alpine images; server has a healthcheck on `/health`; the agent image is for each managed node |
+| `web/Dockerfile` | Next standalone build; `NEXT_PUBLIC_NODERA_API_URL` is a **build arg** (it is inlined into the browser bundle) |
+| `docker-compose.yml` | local development stack (postgres, redis, api, web, optional agent profile) |
+| `docker-compose.prod.yml` | production template: required secrets (`${VAR:?}`), no published DB ports, read-only roots, `cap_drop: ALL`, Traefik labels, external `proxy-public` network, agent as a separate profile |
+| `.github/workflows/ci.yml` | builds all three images and validates both compose files |
+
+```bash
+cp .env.example .env.production   # fill in real values; never commit
+docker compose -f docker-compose.prod.yml --env-file .env.production up -d
+docker compose -f docker-compose.prod.yml --profile agent up -d agent   # on each managed node
+```
+
+## First-deploy checklist for `nodera-prod-01` (Docker + Traefik, existing MariaDB, Nodera PostgreSQL, Redis)
+
+1. Create the secrets: `openssl rand -base64 32` for `NODERA_SECRETS_ENCRYPTION_KEY` and `NODERA_AGENT_SIGNING_KEY`
+   (**keep them: losing the first makes stored secrets unreadable; changing the second invalidates enrolled agents**), a strong `NODERA_POSTGRES_PASSWORD`.
+2. Set `NODERA_API_HOST`, `NODERA_WEB_HOST`, `NODERA_CORS_ORIGINS` (= the web origin), `NODERA_PROXY_NETWORK` (default `proxy-public`), `NODERA_CERT_RESOLVER`.
+3. Production DB role with `UPDATE`/`DELETE` revoked on `audit_log` (see `docs/SECURITY.md`).
+4. Bootstrap the first platform admin once with `NODERA_PLATFORM_BOOTSTRAP_ADMIN_EMAIL`.
+5. Enrol an agent for the node (`docs/NODE-AGENT.md`), then switch the API to `NODERA_PROVIDER_MODE=docker` **only on the node that owns the Docker socket**
+   (or keep the API in `local` mode and let the agent drive Docker).
+6. Existing MariaDB: the database provider interface is ready (`providers.DatabaseProvider`); a MariaDB adapter is **not written** (see audit) —
+   until then WordPress provisioning needs `mock` or an adapter.
+7. Point DNS at Traefik; Traefik's Let's Encrypt resolver issues the public certificates for the Nodera hosts.
+
+## What is NOT verified until it runs on the real node
+
+Traefik routing labels against your Traefik version, the Docker socket / `group_add` GID, the MariaDB adapter, Let's Encrypt/Cloudflare/Hetzner adapters,
+real backups to off-box storage, and every `Hetzner` provider call. None of these are hardcoded; they are configuration + adapters still to be written.
 
 ## What's needed before a first production deploy
 
-1. **A container image for the Core API.** Not built yet — `api/` compiles
+1. **A container image for the Core API.** *Done* (`api/Dockerfile`). Original note: `api/` compiles
    to a single static-ish Go binary (`cmd/server`), so a minimal
    `FROM gcr.io/distroless/static` (or `scratch` + CA certs) multi-stage
    Dockerfile is the natural shape once this is prioritized. Dev's

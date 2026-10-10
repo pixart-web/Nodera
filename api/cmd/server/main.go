@@ -221,7 +221,7 @@ func run() error {
 	opsEngine := ops.New(pool, auditSvc)
 	provisioning.Register(opsEngine, provisioning.Deps{
 		Pool: pool, Projects: projectsSvc, Secrets: secretsSvc, Providers: prov,
-		Network: cfg.Runtime.DockerNetwork, BaseDomain: cfg.Runtime.BaseDomain,
+		Network: cfg.Runtime.DockerNetwork, BaseDomain: cfg.Runtime.BaseDomain, DBHost: cfg.Runtime.WordPressDBHost,
 	})
 	backupsSvc := backups.New(pool, auditSvc, projectsSvc, prov)
 	backupsSvc.Register(opsEngine)
@@ -233,7 +233,7 @@ func run() error {
 	migrationsSvc.Register(opsEngine)
 	wordpressSvc := wordpress.New(pool, projectsSvc, backupsSvc, provisioning.Deps{
 		Pool: pool, Projects: projectsSvc, Secrets: secretsSvc, Providers: prov,
-		Network: cfg.Runtime.DockerNetwork, BaseDomain: cfg.Runtime.BaseDomain,
+		Network: cfg.Runtime.DockerNetwork, BaseDomain: cfg.Runtime.BaseDomain, DBHost: cfg.Runtime.WordPressDBHost,
 	})
 	wordpressSvc.Register(opsEngine)
 	notifPolicy := netpolicy.Policy{Level: netpolicy.PublicOnly}

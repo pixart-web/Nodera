@@ -33,6 +33,9 @@ type Deps struct {
 	Providers providers.Set
 	// Network is the Docker network containers join (e.g. "proxy-public").
 	Network string
+	// DBHost is the hostname WordPress containers use to reach the database
+	// server on the Docker network (default "db").
+	DBHost string
 	// BaseDomain, when set, adds Traefik routing labels for <slug>.<BaseDomain>.
 	BaseDomain string
 }
@@ -327,7 +330,7 @@ func (o *provision) containerSpec(ctx context.Context, r *ops.Run) (providers.Co
 			spec.Image = img // set by wordpress.update
 		}
 		spec.Env = map[string]string{
-			"WORDPRESS_DB_HOST": "db", "WORDPRESS_DB_NAME": db, "WORDPRESS_DB_USER": user, "WORDPRESS_DB_PASSWORD": pws,
+			"WORDPRESS_DB_HOST": dbHost(o.d), "WORDPRESS_DB_NAME": db, "WORDPRESS_DB_USER": user, "WORDPRESS_DB_PASSWORD": pws,
 		}
 		spec.Volumes = []providers.VolumeMount{{Source: ws + "/data", Target: "/var/www/html"}}
 	default:
@@ -471,3 +474,10 @@ func (x *Provision) ContainerSpec(ctx context.Context, r *ops.Run, image string)
 
 // ContainerName is the deterministic container name for a project slug.
 func ContainerName(slug string) string { return "nodera-" + slug }
+
+func dbHost(d Deps) string {
+	if d.DBHost != "" {
+		return d.DBHost
+	}
+	return "db"
+}

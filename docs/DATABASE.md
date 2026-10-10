@@ -31,6 +31,18 @@ applied automatically, in order, on every process start
 | `0009_secrets.sql` | `secrets` |
 | `0010_tools_get_server_metrics.sql` | data-only: flips `tools.implemented` to `true` for `get_server_metrics` now that it has a real handler |
 | `0011_tools_check_ssl.sql` | data-only: same, for `check_ssl` |
+| `0012`–`0020` | agents.manage permission, approval TTL overrides, node decommission and application deregister statuses, approval cancelled/executing states, platform authorization / audit permission / platform secrets |
+| `0021_core_domain.sql` | `clients`, `projects` (soft delete, unique slug per org), `project_databases` (password only as a secret *reference*), `applications.project_id`, 29 granular permissions granted to owner/admin (member gets the `*.read` set) |
+| `0022_operations_engine.sql` | `jobs` extended (operation, project, paused/waiting/rolling_back, cancel flag), `job_steps`, `job_logs`, `node_agent_registrations`, `node_agents`, `node_agent_nonces` (replay table), `node_agent_commands`, `feature_flags`, `organization_feature_flags` |
+| `0023_network_ssl.sql` | `domains`, `dns_records`, `certificates` (one live certificate per domain), `certificate_orders` |
+| `0024_backups.sql` | `backup_targets`, `backups`, `backup_policies`, `restores` |
+| `0025_deployments_migrations.sql` | `deployments`, `deployment_artifacts`, `site_migrations` |
+| `0026_monitoring_incidents.sql` | `monitors`, `metric_samples`, `alert_rules`, `incidents` (live-dedupe unique index), `incident_events`, `alerts`, `notification_channels`, `notifications`, `notification_reads`, `log_entries`, `retention_policies` |
+| `0027_operation_tools.sql` | data-only: the eight dangerous operations registered as gateway tools (`implemented = true`) |
+| `0028_certificate_material.sql` | `certificates.cert_pem`, `subject_names` (the private key is **never** a column: it lives encrypted in `secrets`) |
+| `0029_deployment_constraints.sql` | one active deployment per project/environment; deployment stage/file count; one active migration per target domain |
+| `0030_migration_states.sql` | `planned`/`preflight_failed` states, staging db, safety backup, source URL |
+| `0031_ai_plans.sql` | `ai_plans` (AI proposes, humans approve and run) |
 
 ## Conventions
 
@@ -40,6 +52,9 @@ applied automatically, in order, on every process start
 - Enumerated string columns use `CHECK` constraints rather than Postgres
   `ENUM` types, so adding a new status value is a simple migration rather
   than an `ALTER TYPE`.
+- Soft delete (`deleted_at`) on clients/projects/domains; partial unique indexes make names reusable after deletion.
+- Integrity rules live in the database, not only in code: one live certificate per domain, one live incident per dedupe key,
+  one active deployment per project/environment, one active migration per target domain, nonce primary key for agent replay protection.
 - Secrets are never columns in these tables — see `docs/SECURITY.md`.
 
 ## Tests against a real database
