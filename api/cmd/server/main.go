@@ -30,6 +30,7 @@ import (
 	"github.com/nodera/nodera/internal/backups"
 	"github.com/nodera/nodera/internal/dashboard"
 	"github.com/nodera/nodera/internal/deployments"
+	"github.com/nodera/nodera/internal/devseed"
 	"github.com/nodera/nodera/internal/flags"
 	"github.com/nodera/nodera/internal/identity"
 	"github.com/nodera/nodera/internal/infrastructure"
@@ -228,6 +229,23 @@ func run() error {
 	aiplansSvc := aiplans.New(pool, auditSvc, aiSvc, opsEngine, toolsSvc)
 	opsEngine.BridgeTools(toolsSvc)
 	go runObservability(ctx, log, monitoringSvc, logsSvc)
+	demoSeed := func() {}
+	if os.Getenv("NODERA_DEMO_SEED") == "true" {
+		if cfg.Runtime.ProviderMode != "mock" || cfg.Env == "production" {
+			return fmt.Errorf("NODERA_DEMO_SEED=true requires NODERA_PROVIDER_MODE=mock and a non-production environment")
+		}
+		demoSeed = func() {
+			res, err := devseed.Run(ctx, devseed.Deps{
+				Pool: pool, Identity: identitySvc, Tenancy: tenancySvc, Projects: projectsSvc, Ops: opsEngine,
+				Network: networkSvc, Monitoring: monitoringSvc, Notify: notificationsSvc, Password: os.Getenv("NODERA_SEED_PASSWORD"),
+			})
+			if err != nil {
+				log.Error("demo seed failed", "error", err)
+				return
+			}
+			log.Warn("DEMO MODE: seeded DEVELOPMENT data on mock providers", "email", res.Email, "password", res.Password)
+		}
+	}
 	go runMaintenance(ctx, log, backupsSvc, networkSvc)
 
 	worker := jobs.NewWorker(pool)
@@ -282,6 +300,7 @@ func run() error {
 	}
 
 	handler := newRouter(deps)
+	go demoSeed() // after the worker is running; the seed waits on real operations
 
 	srv := &http.Server{
 		Addr:              cfg.HTTP.Addr,
