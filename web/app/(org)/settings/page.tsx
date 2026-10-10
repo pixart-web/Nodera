@@ -7,6 +7,7 @@ import { api } from "@/lib/api";
 import { useApi } from "@/lib/useApi";
 import { useAction } from "@/lib/useAction";
 import { PageHeader } from "@/components/ui/PageHeader";
+import { ChannelsPanel, FeatureFlagsPanel, RetentionPanel } from "@/components/settings/PlatformPanels";
 import { Card, Section } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Alert, ErrorState, LoadingState } from "@/components/ui/Feedback";
@@ -129,6 +130,9 @@ const TABS = [
   { id: "org", label: "Organização", icon: <Building2 className="h-4 w-4" /> },
   { id: "roles", label: "Roles", icon: <ShieldCheck className="h-4 w-4" /> },
   { id: "members", label: "Membros", icon: <Users className="h-4 w-4" /> },
+  { id: "features", label: "Funcionalidades", icon: <ShieldCheck className="h-4 w-4" /> },
+  { id: "channels", label: "Notificações", icon: <Users className="h-4 w-4" /> },
+  { id: "retention", label: "Retenção", icon: <Building2 className="h-4 w-4" /> },
 ];
 
 export default function SettingsPage() {
@@ -201,6 +205,10 @@ export default function SettingsPage() {
           <DataTable caption="Membros" columns={memberCols} rows={members.data ? members.data.map((m) => ({ ...m, id: m.user_id })) : null} loading={members.loading} error={members.error} onRetry={members.reload} empty={{ icon: <Users />, title: "Sem membros" }} />
         </Section>
       </TabPanel>
+
+      <TabPanel id="features" active={tab}><FeatureFlagsPanel /></TabPanel>
+      <TabPanel id="channels" active={tab}><ChannelsPanel /></TabPanel>
+      <TabPanel id="retention" active={tab}><RetentionPanel /></TabPanel>
 
       <RoleModal open={!!roleModal} role={roleModal?.role ?? null} onClose={() => setRoleModal(null)} onSaved={() => roles.reload()} />
       <AddMemberModal open={addMember} onClose={() => setAddMember(false)} onDone={() => members.reload()} />

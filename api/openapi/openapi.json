@@ -4087,7 +4087,10 @@
                         "$ref": "#/components/schemas/SearchHit"
                       }
                     }
-                  }
+                  },
+                  "required": [
+                    "hits"
+                  ]
                 }
               }
             }
@@ -4171,7 +4174,8 @@
                     "type": "boolean",
                     "nullable": true
                   }
-                }
+                },
+                "required": []
               }
             }
           }
@@ -5894,7 +5898,10 @@
                     "synced": {
                       "type": "integer"
                     }
-                  }
+                  },
+                  "required": [
+                    "synced"
+                  ]
                 }
               }
             }
@@ -6365,7 +6372,12 @@
                       "private": {
                         "type": "boolean"
                       }
-                    }
+                    },
+                    "required": [
+                      "full_name",
+                      "default_branch",
+                      "private"
+                    ]
                   }
                 }
               }
@@ -6947,7 +6959,13 @@
                     "has_more": {
                       "type": "boolean"
                     }
-                  }
+                  },
+                  "required": [
+                    "items",
+                    "limit",
+                    "offset",
+                    "has_more"
+                  ]
                 }
               }
             }
@@ -7036,7 +7054,8 @@
                   "interval_seconds": {
                     "type": "integer"
                   }
-                }
+                },
+                "required": []
               }
             }
           }
@@ -7476,7 +7495,8 @@
                   "note": {
                     "type": "string"
                   }
-                }
+                },
+                "required": []
               }
             }
           }
@@ -7580,7 +7600,10 @@
                     "unread": {
                       "type": "integer"
                     }
-                  }
+                  },
+                  "required": [
+                    "unread"
+                  ]
                 }
               }
             }
@@ -7625,7 +7648,8 @@
                   "all": {
                     "type": "boolean"
                   }
-                }
+                },
+                "required": []
               }
             }
           }
@@ -7892,7 +7916,10 @@
                         "type": "string"
                       }
                     }
-                  }
+                  },
+                  "required": [
+                    "lines"
+                  ]
                 }
               }
             }
@@ -8504,7 +8531,11 @@
                     "server_public_key": {
                       "type": "string"
                     }
-                  }
+                  },
+                  "required": [
+                    "agent_id",
+                    "server_public_key"
+                  ]
                 }
               }
             }
@@ -8537,7 +8568,11 @@
                       "type": "string"
                     }
                   }
-                }
+                },
+                "required": [
+                  "token",
+                  "public_key"
+                ]
               }
             }
           }
@@ -8617,7 +8652,8 @@
                   "metrics": {
                     "type": "object"
                   }
-                }
+                },
+                "required": []
               }
             }
           }
@@ -8702,7 +8738,17 @@
                       "signature": {
                         "type": "string"
                       }
-                    }
+                    },
+                    "required": [
+                      "id",
+                      "request_id",
+                      "agent_id",
+                      "op",
+                      "params",
+                      "issued_at",
+                      "expires_at",
+                      "signature"
+                    ]
                   }
                 }
               }
@@ -8720,7 +8766,8 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "properties": {}
+                "properties": {},
+                "required": []
               }
             }
           }
@@ -8766,6 +8813,16 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Command id from the poll response"
           }
         ],
         "responses": {
@@ -8794,7 +8851,10 @@
                   "error": {
                     "type": "string"
                   }
-                }
+                },
+                "required": [
+                  "ok"
+                ]
               }
             }
           }
@@ -8914,6 +8974,45 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/api/v1/permissions/mine": {
+      "get": {
+        "tags": [
+          "core"
+        ],
+        "summary": "The caller's permission keys in this organisation (UI convenience; the backend still authorises every request)",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OrgHeader"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "permissions": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "permissions"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthenticated"
           }
         }
       }
@@ -10513,7 +10612,17 @@
             "type": "string",
             "format": "date-time"
           }
-        }
+        },
+        "required": [
+          "id",
+          "organization_id",
+          "name",
+          "contact_email",
+          "notes",
+          "project_count",
+          "created_at",
+          "updated_at"
+        ]
       },
       "ClientInput": {
         "type": "object",
@@ -10596,7 +10705,21 @@
             "type": "string",
             "format": "date-time"
           }
-        }
+        },
+        "required": [
+          "id",
+          "organization_id",
+          "client_id",
+          "node_id",
+          "name",
+          "slug",
+          "kind",
+          "status",
+          "description",
+          "config",
+          "created_at",
+          "updated_at"
+        ]
       },
       "ProjectInput": {
         "type": "object",
@@ -10654,7 +10777,8 @@
             "type": "object",
             "additionalProperties": true
           }
-        }
+        },
+        "required": []
       },
       "ProjectOverview": {
         "type": "object",
@@ -10673,7 +10797,12 @@
             "format": "date-time",
             "nullable": true
           }
-        }
+        },
+        "required": [
+          "project",
+          "counts",
+          "last_activity"
+        ]
       },
       "JobRef": {
         "type": "object",
@@ -10686,6 +10815,10 @@
             "type": "boolean"
           }
         },
+        "required": [
+          "job_id",
+          "created"
+        ],
         "description": "Returned when an operation is queued (202). created=false means an idempotent duplicate returned the existing job."
       },
       "GatewayResult": {
@@ -10705,6 +10838,11 @@
             "nullable": true
           }
         },
+        "required": [
+          "status",
+          "result",
+          "approval_id"
+        ],
         "description": "Dangerous operations answer 202 with approval_required; nothing runs until a human approves."
       },
       "Operation": {
@@ -10770,7 +10908,20 @@
             "format": "date-time",
             "nullable": true
           }
-        }
+        },
+        "required": [
+          "id",
+          "operation",
+          "status",
+          "progress",
+          "project_id",
+          "correlation_id",
+          "rolled_back",
+          "cancel_requested",
+          "created_at",
+          "started_at",
+          "finished_at"
+        ]
       },
       "OperationStep": {
         "type": "object",
@@ -10797,7 +10948,15 @@
             "format": "date-time",
             "nullable": true
           }
-        }
+        },
+        "required": [
+          "seq",
+          "name",
+          "status",
+          "error",
+          "started_at",
+          "finished_at"
+        ]
       },
       "OperationLog": {
         "type": "object",
@@ -10826,7 +10985,14 @@
             "type": "string",
             "format": "date-time"
           }
-        }
+        },
+        "required": [
+          "id",
+          "step_seq",
+          "level",
+          "message",
+          "ts"
+        ]
       },
       "Backup": {
         "type": "object",
@@ -10885,7 +11051,15 @@
             "format": "date-time",
             "nullable": true
           }
-        }
+        },
+        "required": [
+          "id",
+          "project_id",
+          "type",
+          "status",
+          "size_bytes",
+          "created_at"
+        ]
       },
       "BackupRequest": {
         "type": "object",
@@ -10903,7 +11077,8 @@
           "retention_days": {
             "type": "integer"
           }
-        }
+        },
+        "required": []
       },
       "BackupPolicy": {
         "type": "object",
@@ -10938,7 +11113,16 @@
             "format": "date-time",
             "nullable": true
           }
-        }
+        },
+        "required": [
+          "id",
+          "project_id",
+          "schedule",
+          "type",
+          "retention_days",
+          "enabled",
+          "last_run_at"
+        ]
       },
       "BackupPolicyInput": {
         "type": "object",
@@ -11002,7 +11186,18 @@
             "type": "string",
             "format": "date-time"
           }
-        }
+        },
+        "required": [
+          "id",
+          "project_id",
+          "name",
+          "status",
+          "dns_status",
+          "ssl_status",
+          "dns_provider",
+          "verified_at",
+          "created_at"
+        ]
       },
       "DNSRecord": {
         "type": "object",
@@ -11038,7 +11233,15 @@
           "priority": {
             "type": "integer"
           }
-        }
+        },
+        "required": [
+          "id",
+          "domain_id",
+          "type",
+          "name",
+          "value",
+          "ttl"
+        ]
       },
       "DNSRecordInput": {
         "type": "object",
@@ -11084,7 +11287,12 @@
           "error": {
             "type": "string"
           }
-        }
+        },
+        "required": [
+          "record",
+          "propagated",
+          "error"
+        ]
       },
       "Certificate": {
         "type": "object",
@@ -11148,6 +11356,21 @@
             "format": "date-time"
           }
         },
+        "required": [
+          "id",
+          "domain_id",
+          "domain",
+          "status",
+          "provider",
+          "issuer",
+          "serial",
+          "not_before",
+          "not_after",
+          "days_left",
+          "auto_renew",
+          "has_private_key",
+          "created_at"
+        ],
         "description": "The private key is never returned by any endpoint."
       },
       "Deployment": {
@@ -11221,7 +11444,18 @@
             "format": "date-time",
             "nullable": true
           }
-        }
+        },
+        "required": [
+          "id",
+          "project_id",
+          "source",
+          "ref",
+          "environment",
+          "status",
+          "stage",
+          "file_count",
+          "created_at"
+        ]
       },
       "DeploymentInput": {
         "type": "object",
@@ -11379,7 +11613,20 @@
             "format": "date-time",
             "nullable": true
           }
-        }
+        },
+        "required": [
+          "id",
+          "project_id",
+          "source_kind",
+          "source_config",
+          "target_domain",
+          "status",
+          "phase",
+          "has_source_archive",
+          "health_score",
+          "created_at",
+          "updated_at"
+        ]
       },
       "Monitor": {
         "type": "object",
@@ -11441,7 +11688,20 @@
             "type": "string",
             "format": "date-time"
           }
-        }
+        },
+        "required": [
+          "id",
+          "project_id",
+          "kind",
+          "name",
+          "target",
+          "interval_seconds",
+          "enabled",
+          "last_status",
+          "last_checked_at",
+          "last_latency_ms",
+          "created_at"
+        ]
       },
       "MonitorInput": {
         "type": "object",
@@ -11504,7 +11764,14 @@
             "type": "string",
             "format": "date-time"
           }
-        }
+        },
+        "required": [
+          "metric",
+          "value",
+          "node_id",
+          "project_id",
+          "at"
+        ]
       },
       "AlertRule": {
         "type": "object",
@@ -11552,7 +11819,17 @@
             "type": "string",
             "format": "date-time"
           }
-        }
+        },
+        "required": [
+          "id",
+          "name",
+          "condition",
+          "threshold",
+          "severity",
+          "channels",
+          "enabled",
+          "created_at"
+        ]
       },
       "AlertRuleInput": {
         "type": "object",
@@ -11660,10 +11937,30 @@
                   "type": "string",
                   "format": "date-time"
                 }
-              }
+              },
+              "required": [
+                "kind",
+                "message",
+                "actor",
+                "at"
+              ]
             }
           }
-        }
+        },
+        "required": [
+          "id",
+          "project_id",
+          "rule_id",
+          "title",
+          "severity",
+          "status",
+          "resource_type",
+          "resource_id",
+          "detected_at",
+          "acknowledged_at",
+          "resolved_at",
+          "closed_at"
+        ]
       },
       "Notification": {
         "type": "object",
@@ -11694,7 +11991,17 @@
             "type": "string",
             "format": "date-time"
           }
-        }
+        },
+        "required": [
+          "id",
+          "kind",
+          "title",
+          "body",
+          "resource_type",
+          "resource_id",
+          "read",
+          "created_at"
+        ]
       },
       "NotificationChannel": {
         "type": "object",
@@ -11720,7 +12027,14 @@
           "enabled": {
             "type": "boolean"
           }
-        }
+        },
+        "required": [
+          "id",
+          "kind",
+          "name",
+          "target",
+          "enabled"
+        ]
       },
       "NotificationChannelInput": {
         "type": "object",
@@ -11772,6 +12086,15 @@
             "format": "date-time"
           }
         },
+        "required": [
+          "id",
+          "project_id",
+          "source",
+          "service",
+          "level",
+          "message",
+          "at"
+        ],
         "description": "Messages are redacted for credentials before storage."
       },
       "RetentionPolicy": {
@@ -11787,6 +12110,11 @@
             "type": "boolean"
           }
         },
+        "required": [
+          "resource",
+          "retention_days",
+          "default"
+        ],
         "description": "retention_days 0 = keep forever (no default and no policy)."
       },
       "FeatureFlag": {
@@ -11808,7 +12136,14 @@
           "enabled": {
             "type": "boolean"
           }
-        }
+        },
+        "required": [
+          "key",
+          "description",
+          "default",
+          "override",
+          "enabled"
+        ]
       },
       "DashboardSummary": {
         "type": "object",
@@ -11868,6 +12203,18 @@
             }
           }
         },
+        "required": [
+          "projects",
+          "nodes",
+          "monitors",
+          "open_incidents",
+          "certificates",
+          "backups",
+          "operations_24h",
+          "recent_operations",
+          "pending_approvals",
+          "sections"
+        ],
         "description": "Sections the caller may not read are omitted."
       },
       "SearchHit": {
@@ -11888,7 +12235,14 @@
           "path": {
             "type": "string"
           }
-        }
+        },
+        "required": [
+          "type",
+          "id",
+          "title",
+          "hint",
+          "path"
+        ]
       },
       "SystemInfo": {
         "type": "object",
@@ -11919,7 +12273,13 @@
           "environment": {
             "type": "string"
           }
-        }
+        },
+        "required": [
+          "provider_mode",
+          "capabilities",
+          "demo",
+          "environment"
+        ]
       },
       "WordPressHealth": {
         "type": "object",
@@ -11952,10 +12312,21 @@
                 "detail": {
                   "type": "string"
                 }
-              }
+              },
+              "required": [
+                "id",
+                "title",
+                "status",
+                "detail"
+              ]
             }
           }
-        }
+        },
+        "required": [
+          "healthy",
+          "score",
+          "checks"
+        ]
       },
       "AIPlan": {
         "type": "object",
@@ -12023,7 +12394,19 @@
                   "format": "uuid",
                   "nullable": true
                 }
-              }
+              },
+              "required": [
+                "index",
+                "operation",
+                "payload",
+                "rationale",
+                "dangerous",
+                "valid",
+                "issue",
+                "status",
+                "job_id",
+                "approval_id"
+              ]
             }
           },
           "model": {
@@ -12039,6 +12422,16 @@
             "nullable": true
           }
         },
+        "required": [
+          "id",
+          "project_id",
+          "goal",
+          "summary",
+          "status",
+          "steps",
+          "model",
+          "created_at"
+        ],
         "description": "The AI only proposes. Steps are vetted against the real operation registry; a human approves and runs each step with their own permissions."
       },
       "NodeAgent": {
@@ -12087,7 +12480,15 @@
             "format": "date-time",
             "nullable": true
           }
-        }
+        },
+        "required": [
+          "id",
+          "node_id",
+          "status",
+          "version",
+          "capabilities",
+          "registered_at"
+        ]
       },
       "AgentRegistration": {
         "type": "object",
@@ -12104,6 +12505,11 @@
             "format": "uuid"
           }
         },
+        "required": [
+          "token",
+          "expires_at",
+          "node_id"
+        ],
         "description": "The one-time enrolment token is shown exactly once and stored only as a hash."
       },
       "QueuedCommand": {
@@ -12122,7 +12528,13 @@
           "status": {
             "type": "string"
           }
-        }
+        },
+        "required": [
+          "id",
+          "request_id",
+          "op",
+          "status"
+        ]
       },
       "ClientPage": {
         "type": "object",
@@ -12142,7 +12554,13 @@
           "has_more": {
             "type": "boolean"
           }
-        }
+        },
+        "required": [
+          "items",
+          "limit",
+          "offset",
+          "has_more"
+        ]
       },
       "ProjectPage": {
         "type": "object",
@@ -12162,7 +12580,13 @@
           "has_more": {
             "type": "boolean"
           }
-        }
+        },
+        "required": [
+          "items",
+          "limit",
+          "offset",
+          "has_more"
+        ]
       },
       "OperationPage": {
         "type": "object",
@@ -12182,7 +12606,13 @@
           "has_more": {
             "type": "boolean"
           }
-        }
+        },
+        "required": [
+          "items",
+          "limit",
+          "offset",
+          "has_more"
+        ]
       },
       "BackupPage": {
         "type": "object",
@@ -12202,7 +12632,13 @@
           "has_more": {
             "type": "boolean"
           }
-        }
+        },
+        "required": [
+          "items",
+          "limit",
+          "offset",
+          "has_more"
+        ]
       },
       "DomainPage": {
         "type": "object",
@@ -12222,7 +12658,13 @@
           "has_more": {
             "type": "boolean"
           }
-        }
+        },
+        "required": [
+          "items",
+          "limit",
+          "offset",
+          "has_more"
+        ]
       },
       "CertificatePage": {
         "type": "object",
@@ -12242,7 +12684,13 @@
           "has_more": {
             "type": "boolean"
           }
-        }
+        },
+        "required": [
+          "items",
+          "limit",
+          "offset",
+          "has_more"
+        ]
       },
       "DeploymentPage": {
         "type": "object",
@@ -12262,7 +12710,13 @@
           "has_more": {
             "type": "boolean"
           }
-        }
+        },
+        "required": [
+          "items",
+          "limit",
+          "offset",
+          "has_more"
+        ]
       },
       "MigrationPage": {
         "type": "object",
@@ -12282,7 +12736,13 @@
           "has_more": {
             "type": "boolean"
           }
-        }
+        },
+        "required": [
+          "items",
+          "limit",
+          "offset",
+          "has_more"
+        ]
       },
       "MonitorPage": {
         "type": "object",
@@ -12302,7 +12762,13 @@
           "has_more": {
             "type": "boolean"
           }
-        }
+        },
+        "required": [
+          "items",
+          "limit",
+          "offset",
+          "has_more"
+        ]
       },
       "IncidentPage": {
         "type": "object",
@@ -12322,7 +12788,13 @@
           "has_more": {
             "type": "boolean"
           }
-        }
+        },
+        "required": [
+          "items",
+          "limit",
+          "offset",
+          "has_more"
+        ]
       },
       "NotificationPage": {
         "type": "object",
@@ -12342,7 +12814,13 @@
           "has_more": {
             "type": "boolean"
           }
-        }
+        },
+        "required": [
+          "items",
+          "limit",
+          "offset",
+          "has_more"
+        ]
       },
       "LogEntryPage": {
         "type": "object",
@@ -12362,7 +12840,13 @@
           "has_more": {
             "type": "boolean"
           }
-        }
+        },
+        "required": [
+          "items",
+          "limit",
+          "offset",
+          "has_more"
+        ]
       },
       "AIPlanPage": {
         "type": "object",
@@ -12382,7 +12866,13 @@
           "has_more": {
             "type": "boolean"
           }
-        }
+        },
+        "required": [
+          "items",
+          "limit",
+          "offset",
+          "has_more"
+        ]
       },
       "ProjectDatabase": {
         "type": "object",
@@ -12408,7 +12898,15 @@
             "format": "date-time"
           }
         },
-        "description": "Credentials are never returned."
+        "description": "Credentials are never returned.",
+        "required": [
+          "id",
+          "name",
+          "engine",
+          "username",
+          "status",
+          "created_at"
+        ]
       },
       "ProjectApplication": {
         "type": "object",
@@ -12429,7 +12927,14 @@
           "status": {
             "type": "string"
           }
-        }
+        },
+        "required": [
+          "id",
+          "name",
+          "kind",
+          "environment",
+          "status"
+        ]
       },
       "ProjectContainers": {
         "type": "object",
@@ -12460,10 +12965,20 @@
                   "format": "date-time",
                   "nullable": true
                 }
-              }
+              },
+              "required": [
+                "id",
+                "name",
+                "image",
+                "state"
+              ]
             }
           }
-        }
+        },
+        "required": [
+          "available",
+          "containers"
+        ]
       }
     }
   }

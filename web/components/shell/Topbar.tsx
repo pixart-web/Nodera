@@ -1,11 +1,12 @@
 "use client";
 
-import { Bell, ChevronDown, LogOut, Menu, Search, User as UserIcon, Settings } from "lucide-react";
+import { ChevronDown, LogOut, Menu, Search, User as UserIcon, Settings } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { Avatar } from "@/components/ui/Avatar";
 import { Dropdown } from "@/components/ui/Dropdown";
 import { IconButton } from "@/components/ui/Button";
 import { Logo } from "./Logo";
+import { NotificationBell } from "./NotificationBell";
 import { clearSession, getStoredUser } from "@/lib/session";
 import { api } from "@/lib/api";
 
@@ -35,10 +36,7 @@ export function Topbar({ onMenu, onSearch }: { onMenu: () => void; onSearch: () 
 
       <div className="ml-auto flex items-center gap-1.5">
         <IconButton label="Pesquisar" onClick={onSearch} className="md:hidden"><Search className="h-5 w-5" /></IconButton>
-        <span className="relative">
-          <IconButton label="Notificações"><Bell className="h-5 w-5" /></IconButton>
-          <span aria-hidden className="absolute right-2 top-2 h-2 w-2 rounded-full bg-nd-danger ring-2 ring-nd-bg" />
-        </span>
+        <NotificationBell />
         <Dropdown label="Menu do utilizador" items={[
           { label: "A minha conta", icon: <UserIcon />, onSelect: () => router.push("/account") },
           { label: "Definições", icon: <Settings />, onSelect: () => router.push("/settings") },

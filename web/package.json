@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
-    "gen:types": "openapi-typescript ../api/openapi/openapi.json -o lib/api-types.generated.ts"
+    "gen:types": "openapi-typescript ../api/openapi/openapi.json -o lib/api-types.generated.ts",
+    "test": "vitest run"
   },
   "dependencies": {
     "lucide-react": "^1.54.0",
@@ -24,6 +25,7 @@
     "openapi-typescript": "^7.13.0",
     "postcss": "^8.4.0",
     "tailwindcss": "^3.4.0",
-    "typescript": "^5.7.0"
+    "typescript": "^5.7.0",
+    "vitest": "^3.2.7"
   }
 }

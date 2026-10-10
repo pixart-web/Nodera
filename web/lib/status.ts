@@ -24,3 +24,22 @@ export const STATUS: Record<ResourceStatus, StatusToken> = {
   PENDING: { label: "A propagar", tooltip: "A aguardar propagação", text: "text-nd-info", bg: "bg-nd-info/10", ring: "border-nd-info/25", dot: "bg-nd-info" },
   UNKNOWN: { label: "Desconhecido", tooltip: "Estado desconhecido", text: "text-nd-muted", bg: "bg-nd-muted/10", ring: "border-nd-muted/25", dot: "bg-nd-muted" },
 };
+
+// Maps the many status vocabularies of the API (projects, operations,
+// certificates, monitors, backups, ...) onto the one visual status scale.
+const MAP: Record<string, [ResourceStatus, string?]> = {
+  active: ["ONLINE"], running: ["ONLINE"], online: ["ONLINE"], ok: ["ONLINE", "OK"], valid: ["ONLINE", "Válido"], succeeded: ["ONLINE", "Concluído"],
+  completed: ["ONLINE", "Concluído"], ready: ["ONLINE"], resolved: ["ONLINE", "Resolvido"], closed: ["ONLINE", "Fechado"], planned: ["ONLINE", "Planeado"],
+  ready_for_cutover: ["ONLINE", "Pronto para cutover"],
+  pending: ["PENDING"], provisioning: ["PENDING", "A provisionar"], queued: ["PENDING", "Em fila"], waiting: ["PENDING", "A aguardar"], discovering: ["PENDING", "Descoberta"], deleting: ["PENDING", "A eliminar"],
+  validating: ["MIGRATING", "A validar"], transferring: ["MIGRATING", "A transferir"], importing: ["MIGRATING", "A importar"], cutting_over: ["MIGRATING", "Cutover"],
+  degraded: ["WARNING", "Degradado"], warning: ["WARNING"], expiring: ["WARNING", "A expirar"], acknowledged: ["WARNING", "Reconhecido"], investigating: ["WARNING", "Em investigação"],
+  maintenance: ["MAINTENANCE"], unknown: ["UNKNOWN"],
+  failed: ["ERROR", "Falhou"], failing: ["ERROR", "A falhar"], error: ["ERROR"], revoked: ["ERROR", "Revogado"], corrupt: ["ERROR", "Corrompido"], expired: ["ERROR", "Expirado"],
+  preflight_failed: ["ERROR", "Preflight falhou"], rolled_back: ["WARNING", "Revertido"], cancelled: ["OFFLINE", "Cancelado"], offline: ["OFFLINE"], open: ["ERROR", "Aberto"],
+  stopped: ["OFFLINE", "Parado"], deleted: ["OFFLINE", "Eliminado"], removed: ["OFFLINE", "Removido"], misconfigured: ["WARNING", "Mal configurado"],
+};
+export function toStatus(value: string | undefined | null): { status: ResourceStatus; label?: string } {
+  const hit = value ? MAP[value] : undefined;
+  return hit ? { status: hit[0], label: hit[1] } : { status: "UNKNOWN", label: value || undefined };
+}

@@ -7,7 +7,7 @@ import { cn } from "./cn";
 
 export interface Command { id: string; label: string; group: string; icon?: ReactNode; keywords?: string; run: () => void }
 
-export function CommandPalette({ open, onClose, commands }: { open: boolean; onClose: () => void; commands: Command[] }) {
+export function CommandPalette({ open, onClose, commands, onQueryChange }: { open: boolean; onClose: () => void; commands: Command[]; onQueryChange?: (q: string) => void }) {
   const [q, setQ] = useState("");
   const [idx, setIdx] = useState(0);
   const input = useRef<HTMLInputElement>(null);
@@ -19,7 +19,7 @@ export function CommandPalette({ open, onClose, commands }: { open: boolean; onC
     return n ? commands.filter((c) => `${c.label} ${c.keywords ?? ""} ${c.group}`.toLowerCase().includes(n)) : commands;
   }, [q, commands]);
 
-  useEffect(() => { setIdx(0); }, [q]);
+  useEffect(() => { setIdx(0); onQueryChange?.(q); }, [q]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!open || typeof document === "undefined") return null;
 

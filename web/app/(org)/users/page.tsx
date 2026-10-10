@@ -1,28 +1,25 @@
 "use client";
 
+import Link from "next/link";
 import { Users } from "lucide-react";
 import { Avatar } from "@/components/ui/Avatar";
-import { Badge, StatusText } from "@/components/ui/Status";
+import { Badge } from "@/components/ui/Status";
 import { DataTable, type Column } from "@/components/ui/DataTable";
 import { ListPage } from "@/components/ui/ListPage";
 import { Button } from "@/components/ui/Button";
-import { useToast } from "@/components/ui/Toast";
+import { api } from "@/lib/api";
 import { useAsync } from "@/lib/useAsync";
-import { usersService } from "@/services";
-import type { User } from "@/lib/domain";
+import type { Member } from "@/lib/types";
 
 export default function UsersPage() {
-  const toast = useToast();
-  const { data, loading, error, reload } = useAsync(() => usersService.list());
-  const cols: Column<User>[] = [
-    { key: "n", header: "Utilizador", primary: true, cell: (u) => <div className="flex items-center gap-3"><Avatar initial={u.name[0]!} color="#334155" round /><div><p className="font-semibold">{u.name}</p><p className="text-xs text-nd-muted">{u.email}</p></div></div> },
-    { key: "r", header: "Role", cell: (u) => <Badge tone="blue">{u.role}</Badge> },
-    { key: "l", header: "Última atividade", cell: (u) => <span className="text-nd-muted">{u.lastSeen}</span> },
-    { key: "s", header: "Estado", cell: (u) => <StatusText status={u.status} /> },
+  const { data, loading, error, reload } = useAsync(() => api.get<Member[]>("/api/v1/organization/members"));
+  const cols: Column<Member & { id: string }>[] = [
+    { key: "n", header: "Utilizador", primary: true, cell: (u) => <div className="flex items-center gap-3"><Avatar initial={(u.display_name || u.email)[0]!.toUpperCase()} color="#334155" round /><div><p className="font-semibold">{u.display_name}</p><p className="text-xs text-nd-muted">{u.email}</p></div></div> },
+    { key: "r", header: "Roles", cell: (u) => <div className="flex flex-wrap gap-1">{u.roles.length ? u.roles.map((r) => <Badge key={r.role_id} tone="blue">{r.name}</Badge>) : <span className="text-nd-faint">—</span>}</div> },
   ];
   return (
-    <ListPage title="Utilizadores" description="Gestão de acessos. A gestão real de membros e roles está em Definições." actions={<Button variant="primary" onClick={() => toast.push("info", "Convidar utilizador: operação ainda não ligada ao backend.")}>Convidar</Button>}>
-      <DataTable caption="Utilizadores" columns={cols} rows={data} loading={loading} error={error} onRetry={reload} empty={{ icon: <Users />, title: "Nenhum utilizador." }} />
+    <ListPage title="Utilizadores" description="Membros desta organização e os seus roles. Convites e roles geridos em Acessos." actions={<Link href="/access"><Button variant="primary">Gerir acessos</Button></Link>}>
+      <DataTable caption="Utilizadores" columns={cols} rows={(data ?? []).map((m) => ({ ...m, id: m.user_id }))} loading={loading} error={error} onRetry={reload} empty={{ icon: <Users />, title: "Nenhum utilizador." }} />
     </ListPage>
   );
 }

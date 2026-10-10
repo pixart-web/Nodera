@@ -104,6 +104,10 @@ jobs:
         working-directory: web
         run: npm run typecheck
 
+      - name: unit tests
+        working-directory: web
+        run: npm test
+
       - name: build
         working-directory: web
         run: npm run build
@@ -111,3 +115,32 @@ jobs:
       - name: npm audit (fails only on critical — see docs/SECURITY.md for the known, accepted high-severity PostCSS finding)
         working-directory: web
         run: npm audit --audit-level=critical
+
+  images:
+    name: Docker images (api, agent, web) and compose files
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: build api image
+        run: docker build -f api/Dockerfile --target server -t nodera-api:ci api
+
+      - name: build agent image
+        run: docker build -f api/Dockerfile --target agent -t nodera-agent:ci api
+
+      - name: build web image
+        run: docker build -t nodera-web:ci web
+
+      - name: validate dev compose
+        run: docker compose config -q
+
+      - name: validate production compose (with dummy required values)
+        env:
+          NODERA_POSTGRES_PASSWORD: ci
+          NODERA_CORS_ORIGINS: https://app.example.com
+          NODERA_SECRETS_ENCRYPTION_KEY: ci
+          NODERA_AGENT_SIGNING_KEY: ci
+          NODERA_API_HOST: api.example.com
+          NODERA_WEB_HOST: app.example.com
+        run: docker compose -f docker-compose.prod.yml --profile agent config -q

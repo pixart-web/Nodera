@@ -1,13 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { Code2, ExternalLink, MoreVertical, Boxes, Trash2, Settings2, Rocket } from "lucide-react";
+import { Code2, ExternalLink, Boxes } from "lucide-react";
 import type { Project, ResourceStatus } from "@/lib/domain";
 import { Avatar } from "@/components/ui/Avatar";
 import { Badge, StatusText } from "@/components/ui/Status";
 import { Button } from "@/components/ui/Button";
-import { Dropdown } from "@/components/ui/Dropdown";
-import { useToast } from "@/components/ui/Toast";
 
 export function ProjectStatus({ status, label }: { status: ResourceStatus; label?: string }) {
   return <StatusText status={status} label={label} />;
@@ -31,19 +29,6 @@ export function ProjectIdentity({ project }: { project: Project }) {
   );
 }
 
-export function ProjectMenu({ project }: { project: Project }) {
-  const toast = useToast();
-  const soon = (what: string) => () => toast.push("info", `${what}: operação ainda não ligada ao backend.`);
-  return (
-    <Dropdown label={`Mais ações para ${project.name}`} trigger={<span className="flex h-8 w-8 items-center justify-center rounded-md text-nd-muted hover:bg-nd-hover hover:text-nd-text"><MoreVertical className="h-4 w-4" /></span>}
-      items={[
-        { label: "Deploy", icon: <Rocket />, onSelect: soon("Deploy") },
-        { label: "Definições", icon: <Settings2 />, onSelect: soon("Definições do projeto") },
-        { label: "Remover", icon: <Trash2 />, danger: true, separatorBefore: true, onSelect: soon("Remover projeto") },
-      ]} />
-  );
-}
-
 export function ProjectRow({ project }: { project: Project }) {
   return (
     <div className="grid grid-cols-[1fr_auto] items-center gap-x-4 gap-y-3 rounded-nd px-3 py-3 transition-colors duration-150 hover:bg-nd-hover/60 md:grid-cols-[minmax(0,1.6fr)_110px_150px_auto]">
@@ -52,9 +37,8 @@ export function ProjectRow({ project }: { project: Project }) {
       <div className="hidden md:block"><ProjectStatus status={project.status} label={project.statusLabel} /></div>
       <div className="col-span-2 flex items-center gap-2 md:col-span-1 md:justify-end">
         <span className="mr-auto flex items-center gap-2 md:hidden"><ProjectStatus status={project.status} label={project.statusLabel} /></span>
-        <a href={`https://${project.domain}`} target="_blank" rel="noreferrer"><Button size="sm" icon={<ExternalLink className="h-3.5 w-3.5" />}>Abrir</Button></a>
+        {project.domain !== "—" && <a href={`https://${project.domain}`} target="_blank" rel="noreferrer"><Button size="sm" icon={<ExternalLink className="h-3.5 w-3.5" />}>Abrir</Button></a>}
         <Link href={`/projects/${project.id}`}><Button size="sm">Gerir</Button></Link>
-        <ProjectMenu project={project} />
       </div>
     </div>
   );

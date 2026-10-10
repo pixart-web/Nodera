@@ -8,6 +8,12 @@ import { PageHeader } from "@/components/PageHeader";
 import { ErrorBanner } from "@/components/ErrorBanner";
 import { Section, StatCard } from "@/components/ui/Card";
 import { EmptyState, LoadingState } from "@/components/ui/Feedback";
+import { AIPlansPanel } from "@/components/ops/AIPlansPanel";
+import { useOperations } from "@/components/providers/Operations";
+import { operationsService } from "@/services";
+import { StatusText } from "@/components/ui/Status";
+import { toStatus } from "@/lib/status";
+import { ago } from "@/lib/format";
 import type { Application, AuditRecord, Job, Node as NoderaNode, Organization, Page } from "@/lib/types";
 
 // A page's own item count understates the true total once has_more is
@@ -25,6 +31,8 @@ export default function OperationsPage() {
   const jobs = useApi(() => api.get<Page<Job>>("/api/v1/jobs"), []);
   const audit = useApi(() => api.get<Page<AuditRecord>>("/api/v1/audit"), []);
 
+  const tracker = useOperations();
+  const engineOps = useApi(() => operationsService.list(undefined, 15), []);
   const failedJobs = (jobs.data?.items ?? []).filter((j) => j.status === "failed").length;
   const recentAudit = (audit.data?.items ?? []).slice(0, 8);
 
@@ -42,6 +50,16 @@ export default function OperationsPage() {
         <StatCard icon={<Wrench />} tone="purple" value={countLabel(jobs.data, jobs.loading)} label="Jobs" href="/jobs" />
         <StatCard icon={<Activity />} tone={failedJobs > 0 ? "orange" : "green"} value={jobs.loading ? "…" : failedJobs} label="Jobs falhados" href="/jobs" />
       </div>
+
+      <Section title="Operações" description="Cada operação tem passos e registos persistidos; clica para ver o detalhe." className="mb-6">
+        {engineOps.loading ? <LoadingState /> : (engineOps.data ?? []).length === 0 ? <EmptyState icon={<Activity />} title="Ainda sem operações" description="Provisionar, backups, deployments e migrações aparecem aqui." /> : (
+          <ul className="divide-y divide-nd-border/50">{engineOps.data!.map((o) => (
+            <li key={o.id} className="flex flex-wrap items-center justify-between gap-3 py-2.5 text-sm">
+              <button type="button" className="font-mono text-nd-primary-soft hover:underline" onClick={() => tracker.track(o.id, o.operation)}>{o.operation}</button>
+              <StatusText {...toStatus(o.status)} /><span className="text-xs text-nd-muted">{o.rolled_back ? "revertida · " : ""}{ago(o.created_at)}</span>
+            </li>))}</ul>)}
+      </Section>
+      <div className="mb-6"><AIPlansPanel /></div>
 
       <Section title="Atividade recente" href="/audit" linkLabel="Ver tudo">
         {audit.loading ? <LoadingState /> : recentAudit.length === 0 ? <EmptyState icon={<Activity />} title="Ainda sem atividade registada" /> : (

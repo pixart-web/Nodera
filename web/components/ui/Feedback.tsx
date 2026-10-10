@@ -60,15 +60,6 @@ export function Alert({ tone = "info", title, children, className }: { tone?: ke
   );
 }
 
-// Honest placeholder for any operation without a backend: never pretends to execute.
-export function NotConnected({ what }: { what?: string }) {
-  return (
-    <Alert tone="info" title="Dados de demonstração">
-      {what ?? "Esta área usa dados fictícios (mock/)."} Operação não ligada ao backend — nada é executado.
-    </Alert>
-  );
-}
-
 export function ComingSoon({ children = "Disponível em breve" }: { children?: ReactNode }) {
   return <span className="inline-flex items-center gap-1 text-xs text-nd-faint"><Clock className="h-3 w-3" aria-hidden />{children}</span>;
 }

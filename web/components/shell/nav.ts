@@ -1,4 +1,4 @@
-import { Activity, AppWindow, Bot, Boxes, BrainCircuit, Cloud, Database, FileText, FolderKanban, Globe, KeyRound, LayoutDashboard, LockKeyhole, Rocket, ScrollText, Server, Settings, ShieldCheck, Users, UserCog, Wrench, Briefcase, ListChecks } from "lucide-react";
+import { Activity, AppWindow, Bot, Boxes, BrainCircuit, Cloud, Database, FileText, FolderKanban, Bell, Globe, KeyRound, LayoutDashboard, LockKeyhole, Rocket, ScrollText, Server, Settings, ShieldCheck, Users, UserCog, Wrench, Briefcase, ListChecks } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
 export interface NavItem { href: string; label: string; icon: LucideIcon; badge?: string }
@@ -17,6 +17,7 @@ export const NAV: NavGroup[] = [
       { href: "/backups", label: "Backups", icon: Database },
       { href: "/monitoring", label: "Monitorização", icon: Activity },
       { href: "/logs", label: "Logs", icon: ScrollText },
+      { href: "/notifications", label: "Notificações", icon: Bell },
       { href: "/users", label: "Utilizadores", icon: Users },
       { href: "/settings", label: "Definições", icon: Settings },
     ],

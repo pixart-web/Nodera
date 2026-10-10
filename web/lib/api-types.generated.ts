@@ -4312,7 +4312,7 @@ export interface paths {
                     };
                     content: {
                         "application/json": {
-                            hits?: components["schemas"]["SearchHit"][];
+                            hits: components["schemas"]["SearchHit"][];
                         };
                     };
                 };
@@ -5993,7 +5993,7 @@ export interface paths {
                     };
                     content: {
                         "application/json": {
-                            synced?: number;
+                            synced: number;
                         };
                     };
                 };
@@ -6454,9 +6454,9 @@ export interface paths {
                     };
                     content: {
                         "application/json": {
-                            full_name?: string;
-                            default_branch?: string;
-                            private?: boolean;
+                            full_name: string;
+                            default_branch: string;
+                            private: boolean;
                         }[];
                     };
                 };
@@ -7007,10 +7007,10 @@ export interface paths {
                     };
                     content: {
                         "application/json": {
-                            items?: components["schemas"]["Monitor"][];
-                            limit?: number;
-                            offset?: number;
-                            has_more?: boolean;
+                            items: components["schemas"]["Monitor"][];
+                            limit: number;
+                            offset: number;
+                            has_more: boolean;
                         };
                     };
                 };
@@ -7572,7 +7572,7 @@ export interface paths {
                     };
                     content: {
                         "application/json": {
-                            unread?: number;
+                            unread: number;
                         };
                     };
                 };
@@ -7838,7 +7838,7 @@ export interface paths {
                     };
                     content: {
                         "application/json": {
-                            lines?: string[];
+                            lines: string[];
                         };
                     };
                 };
@@ -8419,8 +8419,8 @@ export interface paths {
             requestBody?: {
                 content: {
                     "application/json": {
-                        token?: string;
-                        public_key?: string;
+                        token: string;
+                        public_key: string;
                         version?: string;
                         capabilities?: string[];
                     };
@@ -8435,8 +8435,8 @@ export interface paths {
                     content: {
                         "application/json": {
                             /** Format: uuid */
-                            agent_id?: string;
-                            server_public_key?: string;
+                            agent_id: string;
+                            server_public_key: string;
                         };
                     };
                 };
@@ -8548,16 +8548,16 @@ export interface paths {
                     content: {
                         "application/json": {
                             /** Format: uuid */
-                            id?: string;
-                            request_id?: string;
-                            agent_id?: string;
-                            op?: string;
-                            params?: Record<string, never>;
+                            id: string;
+                            request_id: string;
+                            agent_id: string;
+                            op: string;
+                            params: Record<string, never>;
                             /** Format: date-time */
-                            issued_at?: string;
+                            issued_at: string;
                             /** Format: date-time */
-                            expires_at?: string;
-                            signature?: string;
+                            expires_at: string;
+                            signature: string;
                         }[];
                     };
                 };
@@ -8596,13 +8596,16 @@ export interface paths {
                     "X-Nodera-Nonce": string;
                     "X-Nodera-Signature": string;
                 };
-                path?: never;
+                path: {
+                    /** @description Command id from the poll response */
+                    id: string;
+                };
                 cookie?: never;
             };
             requestBody?: {
                 content: {
                     "application/json": {
-                        ok?: boolean;
+                        ok: boolean;
                         result?: Record<string, never>;
                         error?: string;
                     };
@@ -8754,6 +8757,48 @@ export interface paths {
                 401: components["responses"]["Unauthenticated"];
                 403: components["responses"]["Forbidden"];
                 404: components["responses"]["NotFound"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/permissions/mine": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The caller's permission keys in this organisation (UI convenience; the backend still authorises every request) */
+        get: {
+            parameters: {
+                query?: never;
+                header?: {
+                    /** @description Required for a session token (which org to act within). Optional for an API token, which already embeds one — if present it must match. */
+                    "X-Nodera-Org"?: components["parameters"]["OrgHeader"];
+                };
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            permissions: string[];
+                        };
+                    };
+                };
+                401: components["responses"]["Unauthenticated"];
             };
         };
         put?: never;
@@ -9188,17 +9233,17 @@ export interface components {
         };
         Client: {
             /** Format: uuid */
-            id?: string;
+            id: string;
             /** Format: uuid */
-            organization_id?: string;
-            name?: string;
-            contact_email?: string;
-            notes?: string;
-            project_count?: number;
+            organization_id: string;
+            name: string;
+            contact_email: string;
+            notes: string;
+            project_count: number;
             /** Format: date-time */
-            created_at?: string;
+            created_at: string;
             /** Format: date-time */
-            updated_at?: string;
+            updated_at: string;
         };
         ClientInput: {
             name: string;
@@ -9207,28 +9252,28 @@ export interface components {
         };
         Project: {
             /** Format: uuid */
-            id?: string;
+            id: string;
             /** Format: uuid */
-            organization_id?: string;
+            organization_id: string;
             /** Format: uuid */
-            client_id?: string | null;
+            client_id: string | null;
             client_name?: string;
             /** Format: uuid */
-            node_id?: string | null;
-            name?: string;
-            slug?: string;
+            node_id: string | null;
+            name: string;
+            slug: string;
             /** @enum {string} */
-            kind?: "wordpress" | "application";
+            kind: "wordpress" | "application";
             /** @enum {string} */
-            status?: "provisioning" | "active" | "degraded" | "failed" | "maintenance" | "deleting" | "deleted";
-            description?: string;
-            config?: {
+            status: "provisioning" | "active" | "degraded" | "failed" | "maintenance" | "deleting" | "deleted";
+            description: string;
+            config: {
                 [key: string]: unknown;
             };
             /** Format: date-time */
-            created_at?: string;
+            created_at: string;
             /** Format: date-time */
-            updated_at?: string;
+            updated_at: string;
         };
         ProjectInput: {
             name: string;
@@ -9254,78 +9299,78 @@ export interface components {
             };
         };
         ProjectOverview: {
-            project?: components["schemas"]["Project"];
-            counts?: {
+            project: components["schemas"]["Project"];
+            counts: {
                 [key: string]: number;
             };
             /** Format: date-time */
-            last_activity?: string | null;
+            last_activity: string | null;
         };
         /** @description Returned when an operation is queued (202). created=false means an idempotent duplicate returned the existing job. */
         JobRef: {
             /** Format: uuid */
-            job_id?: string;
-            created?: boolean;
+            job_id: string;
+            created: boolean;
         };
         /** @description Dangerous operations answer 202 with approval_required; nothing runs until a human approves. */
         GatewayResult: {
             /** @enum {string} */
-            status?: "executed" | "approval_required";
-            result?: unknown;
+            status: "executed" | "approval_required";
+            result: unknown;
             /** Format: uuid */
-            approval_id?: string | null;
+            approval_id: string | null;
         };
         Operation: {
             /** Format: uuid */
-            id?: string;
-            operation?: string;
+            id: string;
+            operation: string;
             /** @enum {string} */
-            status?: "queued" | "running" | "paused" | "waiting" | "succeeded" | "failed" | "cancelled" | "rolling_back";
-            progress?: number;
+            status: "queued" | "running" | "paused" | "waiting" | "succeeded" | "failed" | "cancelled" | "rolling_back";
+            progress: number;
             /** Format: uuid */
-            project_id?: string | null;
+            project_id: string | null;
             /** Format: uuid */
             created_by_user_id?: string | null;
-            correlation_id?: string;
+            correlation_id: string;
             error?: string;
             result?: unknown;
-            rolled_back?: boolean;
-            cancel_requested?: boolean;
+            rolled_back: boolean;
+            cancel_requested: boolean;
             /** Format: date-time */
-            created_at?: string;
+            created_at: string;
             /** Format: date-time */
-            started_at?: string | null;
+            started_at: string | null;
             /** Format: date-time */
-            finished_at?: string | null;
+            finished_at: string | null;
         };
         OperationStep: {
-            seq?: number;
-            name?: string;
-            status?: string;
-            error?: string;
+            seq: number;
+            name: string;
+            status: string;
+            error: string;
             /** Format: date-time */
-            started_at?: string | null;
+            started_at: string | null;
             /** Format: date-time */
-            finished_at?: string | null;
+            finished_at: string | null;
         };
         OperationLog: {
-            id?: number;
-            step_seq?: number | null;
+            id: number;
+            step_seq: number | null;
             /** @enum {string} */
-            level?: "debug" | "info" | "success" | "warning" | "error";
-            message?: string;
+            level: "debug" | "info" | "success" | "warning" | "error";
+            message: string;
             /** Format: date-time */
-            ts?: string;
+            ts: string;
         };
         Backup: {
             /** Format: uuid */
-            id?: string;
+            id: string;
             /** Format: uuid */
-            project_id?: string;
+            project_id: string;
             /** @enum {string} */
-            type?: "database" | "files" | "media" | "full" | "configuration";
-            status?: string;
-            size_bytes?: number;
+            type: "database" | "files" | "media" | "full" | "configuration";
+            status: string;
+            size_bytes: number;
             checksum_sha256?: string;
             /** Format: date-time */
             retention_until?: string | null;
@@ -9335,7 +9380,7 @@ export interface components {
             job_id?: string | null;
             error?: string;
             /** Format: date-time */
-            created_at?: string;
+            created_at: string;
             /** Format: date-time */
             finished_at?: string | null;
         };
@@ -9346,16 +9391,16 @@ export interface components {
         };
         BackupPolicy: {
             /** Format: uuid */
-            id?: string;
+            id: string;
             /** Format: uuid */
-            project_id?: string;
+            project_id: string;
             /** @enum {string} */
-            schedule?: "daily" | "weekly" | "monthly";
-            type?: string;
-            retention_days?: number;
-            enabled?: boolean;
+            schedule: "daily" | "weekly" | "monthly";
+            type: string;
+            retention_days: number;
+            enabled: boolean;
             /** Format: date-time */
-            last_run_at?: string | null;
+            last_run_at: string | null;
         };
         BackupPolicyInput: {
             /** @enum {string} */
@@ -9366,29 +9411,29 @@ export interface components {
         };
         Domain: {
             /** Format: uuid */
-            id?: string;
+            id: string;
             /** Format: uuid */
-            project_id?: string | null;
-            name?: string;
-            status?: string;
-            dns_status?: string;
-            ssl_status?: string;
-            dns_provider?: string;
+            project_id: string | null;
+            name: string;
+            status: string;
+            dns_status: string;
+            ssl_status: string;
+            dns_provider: string;
             /** Format: date-time */
-            verified_at?: string | null;
+            verified_at: string | null;
             /** Format: date-time */
-            created_at?: string;
+            created_at: string;
         };
         DNSRecord: {
             /** Format: uuid */
-            id?: string;
+            id: string;
             /** Format: uuid */
-            domain_id?: string;
+            domain_id: string;
             /** @enum {string} */
-            type?: "A" | "AAAA" | "CNAME" | "MX" | "TXT" | "CAA";
-            name?: string;
-            value?: string;
-            ttl?: number;
+            type: "A" | "AAAA" | "CNAME" | "MX" | "TXT" | "CAA";
+            name: string;
+            value: string;
+            ttl: number;
             priority?: number;
         };
         DNSRecordInput: {
@@ -9400,55 +9445,55 @@ export interface components {
             priority?: number;
         };
         PropagationResult: {
-            record?: components["schemas"]["DNSRecord"];
-            propagated?: boolean;
-            error?: string;
+            record: components["schemas"]["DNSRecord"];
+            propagated: boolean;
+            error: string;
         };
         /** @description The private key is never returned by any endpoint. */
         Certificate: {
             /** Format: uuid */
-            id?: string;
+            id: string;
             /** Format: uuid */
-            domain_id?: string;
-            domain?: string;
+            domain_id: string;
+            domain: string;
             /** @enum {string} */
-            status?: "pending" | "valid" | "expiring" | "expired" | "error" | "revoked";
-            provider?: string;
-            issuer?: string;
-            serial?: string;
+            status: "pending" | "valid" | "expiring" | "expired" | "error" | "revoked";
+            provider: string;
+            issuer: string;
+            serial: string;
             /** Format: date-time */
-            not_before?: string | null;
+            not_before: string | null;
             /** Format: date-time */
-            not_after?: string | null;
-            days_left?: number | null;
-            auto_renew?: boolean;
+            not_after: string | null;
+            days_left: number | null;
+            auto_renew: boolean;
             last_error?: string;
-            has_private_key?: boolean;
+            has_private_key: boolean;
             /** Format: date-time */
-            created_at?: string;
+            created_at: string;
         };
         Deployment: {
             /** Format: uuid */
-            id?: string;
+            id: string;
             /** Format: uuid */
-            project_id?: string;
+            project_id: string;
             /** @enum {string} */
-            source?: "github" | "git" | "upload";
+            source: "github" | "git" | "upload";
             repository?: string;
-            ref?: string;
+            ref: string;
             commit_sha?: string;
-            environment?: string;
-            status?: string;
+            environment: string;
+            status: string;
             /** @enum {string} */
-            stage?: "PRECHECK" | "FETCH" | "BUILD" | "TEST" | "DEPLOY" | "HEALTH_CHECK" | "COMPLETE";
-            file_count?: number;
+            stage: "PRECHECK" | "FETCH" | "BUILD" | "TEST" | "DEPLOY" | "HEALTH_CHECK" | "COMPLETE";
+            file_count: number;
             /** Format: uuid */
             previous_deployment_id?: string | null;
             /** Format: uuid */
             job_id?: string | null;
             error?: string;
             /** Format: date-time */
-            created_at?: string;
+            created_at: string;
             /** Format: date-time */
             finished_at?: string | null;
         };
@@ -9481,52 +9526,52 @@ export interface components {
         };
         Migration: {
             /** Format: uuid */
-            id?: string;
+            id: string;
             /** Format: uuid */
-            project_id?: string | null;
-            source_kind?: string;
-            source_config?: {
+            project_id: string | null;
+            source_kind: string;
+            source_config: {
                 [key: string]: unknown;
             };
-            target_domain?: string;
+            target_domain: string;
             source_url?: string;
             /** @enum {string} */
-            status?: "discovering" | "planned" | "preflight_failed" | "validating" | "transferring" | "importing" | "ready_for_cutover" | "cutting_over" | "completed" | "failed" | "rolled_back";
-            phase?: string;
-            has_source_archive?: boolean;
+            status: "discovering" | "planned" | "preflight_failed" | "validating" | "transferring" | "importing" | "ready_for_cutover" | "cutting_over" | "completed" | "failed" | "rolled_back";
+            phase: string;
+            has_source_archive: boolean;
             /** @description {report:{checks:[{id,title,status:PASS|WARNING|BLOCKER,detail}],pass,warnings,blockers,can_proceed},source:{...}} */
             preflight_report?: Record<string, never>;
             validation_report?: Record<string, never>;
-            health_score?: number | null;
+            health_score: number | null;
             /** Format: uuid */
             safety_backup_id?: string | null;
             error?: string;
             /** Format: date-time */
-            created_at?: string;
+            created_at: string;
             /** Format: date-time */
-            updated_at?: string;
+            updated_at: string;
             /** Format: date-time */
             finished_at?: string | null;
         };
         Monitor: {
             /** Format: uuid */
-            id?: string;
+            id: string;
             /** Format: uuid */
-            project_id?: string | null;
+            project_id: string | null;
             /** @enum {string} */
-            kind?: "http" | "tcp" | "dns" | "ssl" | "container" | "database";
-            name?: string;
-            target?: string;
-            interval_seconds?: number;
-            enabled?: boolean;
+            kind: "http" | "tcp" | "dns" | "ssl" | "container" | "database";
+            name: string;
+            target: string;
+            interval_seconds: number;
+            enabled: boolean;
             /** @enum {string} */
-            last_status?: "unknown" | "ok" | "warning" | "failing";
+            last_status: "unknown" | "ok" | "warning" | "failing";
             /** Format: date-time */
-            last_checked_at?: string | null;
-            last_latency_ms?: number | null;
+            last_checked_at: string | null;
+            last_latency_ms: number | null;
             last_error?: string;
             /** Format: date-time */
-            created_at?: string;
+            created_at: string;
         };
         MonitorInput: {
             /** Format: uuid */
@@ -9539,28 +9584,28 @@ export interface components {
             enabled?: boolean;
         };
         MetricSample: {
-            metric?: string;
-            value?: number;
+            metric: string;
+            value: number;
             /** Format: uuid */
-            node_id?: string | null;
+            node_id: string | null;
             /** Format: uuid */
-            project_id?: string | null;
+            project_id: string | null;
             /** Format: date-time */
-            at?: string;
+            at: string;
         };
         AlertRule: {
             /** Format: uuid */
-            id?: string;
-            name?: string;
+            id: string;
+            name: string;
             /** @enum {string} */
-            condition?: "cpu_above" | "ram_above" | "disk_above" | "http_failure" | "ssl_expiry_days" | "container_unhealthy" | "database_unavailable";
-            threshold?: number;
+            condition: "cpu_above" | "ram_above" | "disk_above" | "http_failure" | "ssl_expiry_days" | "container_unhealthy" | "database_unavailable";
+            threshold: number;
             /** @enum {string} */
-            severity?: "info" | "warning" | "critical";
-            channels?: string[];
-            enabled?: boolean;
+            severity: "info" | "warning" | "critical";
+            channels: string[];
+            enabled: boolean;
             /** Format: date-time */
-            created_at?: string;
+            created_at: string;
         };
         AlertRuleInput: {
             name: string;
@@ -9572,53 +9617,53 @@ export interface components {
         };
         Incident: {
             /** Format: uuid */
-            id?: string;
+            id: string;
             /** Format: uuid */
-            project_id?: string | null;
+            project_id: string | null;
             /** Format: uuid */
-            rule_id?: string | null;
-            title?: string;
-            severity?: string;
+            rule_id: string | null;
+            title: string;
+            severity: string;
             /** @enum {string} */
-            status?: "open" | "acknowledged" | "investigating" | "resolved" | "closed";
-            resource_type?: string;
-            resource_id?: string;
+            status: "open" | "acknowledged" | "investigating" | "resolved" | "closed";
+            resource_type: string;
+            resource_id: string;
             /** Format: date-time */
-            detected_at?: string;
+            detected_at: string;
             /** Format: date-time */
-            acknowledged_at?: string | null;
+            acknowledged_at: string | null;
             /** Format: date-time */
-            resolved_at?: string | null;
+            resolved_at: string | null;
             /** Format: date-time */
-            closed_at?: string | null;
+            closed_at: string | null;
             events?: {
-                kind?: string;
-                message?: string;
-                actor?: string;
+                kind: string;
+                message: string;
+                actor: string;
                 /** Format: date-time */
-                at?: string;
+                at: string;
             }[];
         };
         Notification: {
             /** Format: uuid */
-            id?: string;
-            kind?: string;
-            title?: string;
-            body?: string;
-            resource_type?: string;
-            resource_id?: string;
-            read?: boolean;
+            id: string;
+            kind: string;
+            title: string;
+            body: string;
+            resource_type: string;
+            resource_id: string;
+            read: boolean;
             /** Format: date-time */
-            created_at?: string;
+            created_at: string;
         };
         NotificationChannel: {
             /** Format: uuid */
-            id?: string;
+            id: string;
             /** @enum {string} */
-            kind?: "in_app" | "email" | "webhook";
-            name?: string;
-            target?: string;
-            enabled?: boolean;
+            kind: "in_app" | "email" | "webhook";
+            name: string;
+            target: string;
+            enabled: boolean;
         };
         /** @description Webhook targets are validated against the SSRF policy; email delivery reports 'SMTP is not configured' until SMTP exists. */
         NotificationChannelInput: {
@@ -9629,248 +9674,248 @@ export interface components {
         };
         /** @description Messages are redacted for credentials before storage. */
         LogEntry: {
-            id?: number;
+            id: number;
             /** Format: uuid */
-            project_id?: string | null;
-            source?: string;
-            service?: string;
-            level?: string;
-            message?: string;
+            project_id: string | null;
+            source: string;
+            service: string;
+            level: string;
+            message: string;
             /** Format: date-time */
-            at?: string;
+            at: string;
         };
         /** @description retention_days 0 = keep forever (no default and no policy). */
         RetentionPolicy: {
-            resource?: string;
-            retention_days?: number;
-            default?: boolean;
+            resource: string;
+            retention_days: number;
+            default: boolean;
         };
         FeatureFlag: {
-            key?: string;
-            description?: string;
-            default?: boolean;
-            override?: boolean | null;
-            enabled?: boolean;
+            key: string;
+            description: string;
+            default: boolean;
+            override: boolean | null;
+            enabled: boolean;
         };
         /** @description Sections the caller may not read are omitted. */
         DashboardSummary: {
-            projects?: {
+            projects: {
                 [key: string]: number;
             };
-            nodes?: {
+            nodes: {
                 [key: string]: number;
             };
-            monitors?: {
+            monitors: {
                 [key: string]: number;
             };
-            open_incidents?: number;
-            certificates?: {
+            open_incidents: number;
+            certificates: {
                 [key: string]: number;
             };
-            backups?: {
+            backups: {
                 [key: string]: number;
             };
-            operations_24h?: {
+            operations_24h: {
                 [key: string]: number;
             };
-            recent_operations?: components["schemas"]["Operation"][];
-            pending_approvals?: number;
-            sections?: string[];
+            recent_operations: components["schemas"]["Operation"][];
+            pending_approvals: number;
+            sections: string[];
         };
         SearchHit: {
-            type?: string;
-            id?: string;
-            title?: string;
-            hint?: string;
-            path?: string;
+            type: string;
+            id: string;
+            title: string;
+            hint: string;
+            path: string;
         };
         SystemInfo: {
             /** @enum {string} */
-            provider_mode?: "local" | "docker" | "mock";
-            capabilities?: {
+            provider_mode: "local" | "docker" | "mock";
+            capabilities: {
                 [key: string]: "real" | "local" | "mock" | "not_configured";
             };
-            demo?: boolean;
-            environment?: string;
+            demo: boolean;
+            environment: string;
         };
         WordPressHealth: {
-            healthy?: boolean;
-            score?: number;
-            checks?: {
-                id?: string;
-                title?: string;
+            healthy: boolean;
+            score: number;
+            checks: {
+                id: string;
+                title: string;
                 /** @enum {string} */
-                status?: "PASS" | "WARNING" | "FAIL";
-                detail?: string;
+                status: "PASS" | "WARNING" | "FAIL";
+                detail: string;
             }[];
         };
         /** @description The AI only proposes. Steps are vetted against the real operation registry; a human approves and runs each step with their own permissions. */
         AIPlan: {
             /** Format: uuid */
-            id?: string;
+            id: string;
             /** Format: uuid */
-            project_id?: string | null;
-            goal?: string;
-            summary?: string;
+            project_id: string | null;
+            goal: string;
+            summary: string;
             /** @enum {string} */
-            status?: "proposed" | "approved" | "rejected" | "completed";
-            steps?: {
-                index?: number;
-                operation?: string;
-                payload?: Record<string, never>;
-                rationale?: string;
-                dangerous?: boolean;
-                valid?: boolean;
-                issue?: string;
-                status?: string;
+            status: "proposed" | "approved" | "rejected" | "completed";
+            steps: {
+                index: number;
+                operation: string;
+                payload: Record<string, never>;
+                rationale: string;
+                dangerous: boolean;
+                valid: boolean;
+                issue: string;
+                status: string;
                 /** Format: uuid */
-                job_id?: string | null;
+                job_id: string | null;
                 /** Format: uuid */
-                approval_id?: string | null;
+                approval_id: string | null;
             }[];
-            model?: string;
+            model: string;
             /** Format: date-time */
-            created_at?: string;
+            created_at: string;
             /** Format: date-time */
             decided_at?: string | null;
         };
         NodeAgent: {
             /** Format: uuid */
-            id?: string;
+            id: string;
             /** Format: uuid */
-            node_id?: string;
+            node_id: string;
             hostname?: string;
             /** @enum {string} */
-            status?: "online" | "offline" | "degraded" | "unknown";
-            version?: string;
-            capabilities?: string[];
+            status: "online" | "offline" | "degraded" | "unknown";
+            version: string;
+            capabilities: string[];
             /** Format: date-time */
             last_seen_at?: string | null;
             /** Format: date-time */
-            registered_at?: string;
+            registered_at: string;
             /** Format: date-time */
             revoked_at?: string | null;
         };
         /** @description The one-time enrolment token is shown exactly once and stored only as a hash. */
         AgentRegistration: {
-            token?: string;
+            token: string;
             /** Format: date-time */
-            expires_at?: string;
+            expires_at: string;
             /** Format: uuid */
-            node_id?: string;
+            node_id: string;
         };
         QueuedCommand: {
             /** Format: uuid */
-            id?: string;
-            request_id?: string;
-            op?: string;
-            status?: string;
+            id: string;
+            request_id: string;
+            op: string;
+            status: string;
         };
         ClientPage: {
-            items?: components["schemas"]["Client"][];
-            limit?: number;
-            offset?: number;
-            has_more?: boolean;
+            items: components["schemas"]["Client"][];
+            limit: number;
+            offset: number;
+            has_more: boolean;
         };
         ProjectPage: {
-            items?: components["schemas"]["Project"][];
-            limit?: number;
-            offset?: number;
-            has_more?: boolean;
+            items: components["schemas"]["Project"][];
+            limit: number;
+            offset: number;
+            has_more: boolean;
         };
         OperationPage: {
-            items?: components["schemas"]["Operation"][];
-            limit?: number;
-            offset?: number;
-            has_more?: boolean;
+            items: components["schemas"]["Operation"][];
+            limit: number;
+            offset: number;
+            has_more: boolean;
         };
         BackupPage: {
-            items?: components["schemas"]["Backup"][];
-            limit?: number;
-            offset?: number;
-            has_more?: boolean;
+            items: components["schemas"]["Backup"][];
+            limit: number;
+            offset: number;
+            has_more: boolean;
         };
         DomainPage: {
-            items?: components["schemas"]["Domain"][];
-            limit?: number;
-            offset?: number;
-            has_more?: boolean;
+            items: components["schemas"]["Domain"][];
+            limit: number;
+            offset: number;
+            has_more: boolean;
         };
         CertificatePage: {
-            items?: components["schemas"]["Certificate"][];
-            limit?: number;
-            offset?: number;
-            has_more?: boolean;
+            items: components["schemas"]["Certificate"][];
+            limit: number;
+            offset: number;
+            has_more: boolean;
         };
         DeploymentPage: {
-            items?: components["schemas"]["Deployment"][];
-            limit?: number;
-            offset?: number;
-            has_more?: boolean;
+            items: components["schemas"]["Deployment"][];
+            limit: number;
+            offset: number;
+            has_more: boolean;
         };
         MigrationPage: {
-            items?: components["schemas"]["Migration"][];
-            limit?: number;
-            offset?: number;
-            has_more?: boolean;
+            items: components["schemas"]["Migration"][];
+            limit: number;
+            offset: number;
+            has_more: boolean;
         };
         MonitorPage: {
-            items?: components["schemas"]["Monitor"][];
-            limit?: number;
-            offset?: number;
-            has_more?: boolean;
+            items: components["schemas"]["Monitor"][];
+            limit: number;
+            offset: number;
+            has_more: boolean;
         };
         IncidentPage: {
-            items?: components["schemas"]["Incident"][];
-            limit?: number;
-            offset?: number;
-            has_more?: boolean;
+            items: components["schemas"]["Incident"][];
+            limit: number;
+            offset: number;
+            has_more: boolean;
         };
         NotificationPage: {
-            items?: components["schemas"]["Notification"][];
-            limit?: number;
-            offset?: number;
-            has_more?: boolean;
+            items: components["schemas"]["Notification"][];
+            limit: number;
+            offset: number;
+            has_more: boolean;
         };
         LogEntryPage: {
-            items?: components["schemas"]["LogEntry"][];
-            limit?: number;
-            offset?: number;
-            has_more?: boolean;
+            items: components["schemas"]["LogEntry"][];
+            limit: number;
+            offset: number;
+            has_more: boolean;
         };
         AIPlanPage: {
-            items?: components["schemas"]["AIPlan"][];
-            limit?: number;
-            offset?: number;
-            has_more?: boolean;
+            items: components["schemas"]["AIPlan"][];
+            limit: number;
+            offset: number;
+            has_more: boolean;
         };
         /** @description Credentials are never returned. */
         ProjectDatabase: {
             /** Format: uuid */
-            id?: string;
-            name?: string;
-            engine?: string;
-            username?: string;
-            status?: string;
+            id: string;
+            name: string;
+            engine: string;
+            username: string;
+            status: string;
             /** Format: date-time */
-            created_at?: string;
+            created_at: string;
         };
         ProjectApplication: {
             /** Format: uuid */
-            id?: string;
-            name?: string;
-            kind?: string;
-            environment?: string;
-            status?: string;
+            id: string;
+            name: string;
+            kind: string;
+            environment: string;
+            status: string;
         };
         ProjectContainers: {
             /** @description false when no container provider is configured */
-            available?: boolean;
-            containers?: {
-                id?: string;
-                name?: string;
-                image?: string;
-                state?: string;
+            available: boolean;
+            containers: {
+                id: string;
+                name: string;
+                image: string;
+                state: string;
                 /** Format: date-time */
                 started_at?: string | null;
             }[];

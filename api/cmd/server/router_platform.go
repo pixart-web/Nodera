@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sort"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -16,6 +17,7 @@ import (
 
 func (d apiDeps) mountPlatform(r chi.Router) {
 	r.Get("/dashboard", d.handleDashboard)
+	r.Get("/permissions/mine", d.handleMyPermissions)
 	r.Get("/search", d.handleSearch)
 	r.Get("/feature-flags", d.handleListFlags)
 	r.Put("/feature-flags/{key}", d.handleSetFlag)
@@ -259,3 +261,16 @@ func (d apiDeps) handleEvents(w http.ResponseWriter, r *http.Request) {
 
 var uuidNil = uuid.Nil
 var _ = ops.SubmitInput{}
+
+// handleMyPermissions returns the caller's permission keys in the current
+// organisation so the UI can hide actions the backend would refuse. It is a
+// convenience only: every action is still authorised server-side.
+func (d apiDeps) handleMyPermissions(w http.ResponseWriter, r *http.Request) {
+	ac := mustAuthContext(r)
+	keys := make([]string, 0, len(ac.Permissions))
+	for k := range ac.Permissions {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	httpserver.WriteJSON(w, http.StatusOK, map[string]any{"permissions": keys})
+}

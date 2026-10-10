@@ -11,14 +11,13 @@ export type ProjectType = "WORDPRESS" | "APPLICATION";
 export interface Project {
   id: string;
   name: string;
-  domain: string;
+  domain: string; // primary domain from the project config, or "—"
   type: ProjectType;
   status: ResourceStatus;
   statusLabel?: string;
   clientId?: string;
-  containers: number;
-  lastDeploy?: string;
-  lastBackup?: string;
+  clientName?: string;
+  createdAt: string;
   initial: string;
   color: string;
 }
