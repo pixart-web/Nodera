@@ -20,10 +20,13 @@ import (
 	"github.com/nodera/nodera/internal/infrastructure"
 	"github.com/nodera/nodera/internal/jobs"
 	"github.com/nodera/nodera/internal/nodeagent"
+	"github.com/nodera/nodera/internal/ops"
 	"github.com/nodera/nodera/internal/platform/apierr"
 	"github.com/nodera/nodera/internal/platform/httpserver"
 	"github.com/nodera/nodera/internal/platform/ratelimit"
 	"github.com/nodera/nodera/internal/platformauth"
+	"github.com/nodera/nodera/internal/projects"
+	infraproviders "github.com/nodera/nodera/internal/providers"
 	"github.com/nodera/nodera/internal/rbac"
 	"github.com/nodera/nodera/internal/secrets"
 	"github.com/nodera/nodera/internal/tenancy"
@@ -45,6 +48,11 @@ type apiDeps struct {
 	rbac               *rbac.Service
 	platform           *platformauth.Service
 	nodeagent          *nodeagent.Service
+	projects           *projects.Service
+	ops                *ops.Engine
+	prov               infraproviders.Set
+	providerMode       string
+	environment        string
 	agentRate          ratelimit.Allower
 	agentEnrollRate    ratelimit.Allower
 	pool               *pgxpool.Pool
@@ -120,6 +128,7 @@ func newRouter(d apiDeps) http.Handler {
 				r.Post("/organization/leave", d.handleLeaveOrganization)
 
 				d.mountAgentManagement(r)
+				d.mountCore(r)
 
 				r.Get("/infrastructure/nodes", d.handleListNodes)
 				r.Post("/infrastructure/nodes", d.handleRegisterNode)

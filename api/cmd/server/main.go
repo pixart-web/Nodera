@@ -30,12 +30,15 @@ import (
 	"github.com/nodera/nodera/internal/infrastructure"
 	"github.com/nodera/nodera/internal/jobs"
 	"github.com/nodera/nodera/internal/nodeagent"
+	"github.com/nodera/nodera/internal/ops"
 	"github.com/nodera/nodera/internal/platform/authctx"
 	"github.com/nodera/nodera/internal/platform/config"
 	"github.com/nodera/nodera/internal/platform/db"
 	"github.com/nodera/nodera/internal/platform/logger"
 	"github.com/nodera/nodera/internal/platform/ratelimit"
 	"github.com/nodera/nodera/internal/platformauth"
+	"github.com/nodera/nodera/internal/projects"
+	"github.com/nodera/nodera/internal/provisioning"
 	"github.com/nodera/nodera/internal/rbac"
 	"github.com/nodera/nodera/internal/secrets"
 	"github.com/nodera/nodera/internal/tenancy"
@@ -176,11 +179,23 @@ func run() error {
 	}
 	defer closeRateLimiting()
 
+	prov, err := buildProviders(cfg)
+	if err != nil {
+		return fmt.Errorf("providers: %w", err)
+	}
+	if cfg.Runtime.ProviderMode == "mock" {
+		log.Warn("NODERA_PROVIDER_MODE=mock: infrastructure is SIMULATED; nothing here touches real containers, databases or DNS")
+	}
+	projectsSvc := projects.New(pool, auditSvc)
+	opsEngine := ops.New(pool, auditSvc)
+	provisioning.Register(opsEngine, provisioning.Deps{
+		Pool: pool, Projects: projectsSvc, Secrets: secretsSvc, Providers: prov,
+		Network: cfg.Runtime.DockerNetwork, BaseDomain: cfg.Runtime.BaseDomain,
+	})
+	opsEngine.BridgeTools(toolsSvc)
+
 	worker := jobs.NewWorker(pool)
-	// No handlers are registered yet (docs/ROADMAP.md: "jobs worker" ships
-	// the dispatcher itself in this pass; concrete job types like
-	// backup.create arrive with the domains that need them). An enqueued
-	// job with no matching handler fails visibly rather than hanging.
+	opsEngine.RegisterWorker(worker)
 	go worker.Run(ctx)
 	log.Info("job worker started")
 
@@ -199,6 +214,11 @@ func run() error {
 		rbac:               rbacSvc,
 		platform:           platformSvc,
 		nodeagent:          nodeAgentSvc,
+		projects:           projectsSvc,
+		ops:                opsEngine,
+		prov:               prov,
+		providerMode:       cfg.Runtime.ProviderMode,
+		environment:        cfg.Env,
 		agentRate:          agentRate,
 		agentEnrollRate:    agentEnrollRate,
 		pool:               pool,

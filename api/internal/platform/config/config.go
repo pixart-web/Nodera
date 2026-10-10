@@ -23,6 +23,7 @@ type Config struct {
 	OpenAI    OpenAIConfig
 	Platform  PlatformConfig
 	Agent     AgentConfig
+	Runtime   RuntimeConfig
 }
 
 type HTTPConfig struct {
@@ -82,6 +83,22 @@ type OpenAIConfig struct {
 	// APIKey is a real secret, same handling as AnthropicConfig.APIKey.
 	// Empty means the OpenAI provider adapter is not registered.
 	APIKey string
+}
+
+// RuntimeConfig selects how infrastructure providers are backed.
+type RuntimeConfig struct {
+	// ProviderMode: "local" (default; real local filesystem/backups/certs/DNS
+	// simulation, no container/database/git runtime), "docker" (local + Docker
+	// CLI containers) or "mock" (everything in-memory, development/demo only —
+	// refused in production). See docs/DEVELOPMENT.md.
+	ProviderMode  string
+	DataDir       string
+	DockerBin     string
+	DockerNetwork string
+	// BaseDomain, when set, makes provisioning add Traefik routing labels.
+	BaseDomain string
+	// AllowInternalMonitoring lets monitors probe private addresses (dev only).
+	AllowInternalMonitoring bool
 }
 
 type AgentConfig struct {
@@ -151,9 +168,26 @@ func Load() (Config, error) {
 			APIKey: os.Getenv("NODERA_OPENAI_API_KEY"),
 		},
 		Agent: AgentConfig{SigningKeyBase64: os.Getenv("NODERA_AGENT_SIGNING_KEY")},
+		Runtime: RuntimeConfig{
+			ProviderMode:            getEnvDefault("NODERA_PROVIDER_MODE", "local"),
+			DataDir:                 getEnvDefault("NODERA_DATA_DIR", "./data"),
+			DockerBin:               getEnvDefault("NODERA_DOCKER_BIN", "docker"),
+			DockerNetwork:           os.Getenv("NODERA_DOCKER_NETWORK"),
+			BaseDomain:              os.Getenv("NODERA_BASE_DOMAIN"),
+			AllowInternalMonitoring: os.Getenv("NODERA_MONITOR_ALLOW_INTERNAL") == "true",
+		},
 		Platform: PlatformConfig{
 			BootstrapAdminEmail: os.Getenv("NODERA_PLATFORM_BOOTSTRAP_ADMIN_EMAIL"),
 		},
+	}
+
+	switch cfg.Runtime.ProviderMode {
+	case "local", "docker", "mock":
+	default:
+		return Config{}, fmt.Errorf("config: NODERA_PROVIDER_MODE must be local, docker or mock")
+	}
+	if cfg.Runtime.ProviderMode == "mock" && env == "production" {
+		return Config{}, fmt.Errorf("config: NODERA_PROVIDER_MODE=mock is not allowed in production")
 	}
 
 	return cfg, nil

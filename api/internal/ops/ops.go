@@ -150,6 +150,9 @@ func (e *Engine) Submit(ctx context.Context, ac authctx.AuthContext, in SubmitIn
 	if err := rbac.Require(ac, d.Permission); err != nil {
 		return JobRef{}, err
 	}
+	if d.ToolKey != "" {
+		return JobRef{}, apierr.Validation("operation " + d.Name + " is dangerous and must be requested through the tool gateway (" + d.ToolKey + ") so it goes through approval")
+	}
 	return e.submit(ctx, ac, d, in)
 }
 
