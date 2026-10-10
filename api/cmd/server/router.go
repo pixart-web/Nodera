@@ -19,6 +19,7 @@ import (
 	"github.com/nodera/nodera/internal/identity"
 	"github.com/nodera/nodera/internal/infrastructure"
 	"github.com/nodera/nodera/internal/jobs"
+	"github.com/nodera/nodera/internal/nodeagent"
 	"github.com/nodera/nodera/internal/platform/apierr"
 	"github.com/nodera/nodera/internal/platform/httpserver"
 	"github.com/nodera/nodera/internal/platform/ratelimit"
@@ -43,6 +44,9 @@ type apiDeps struct {
 	agents             *agents.Service
 	rbac               *rbac.Service
 	platform           *platformauth.Service
+	nodeagent          *nodeagent.Service
+	agentRate          ratelimit.Allower
+	agentEnrollRate    ratelimit.Allower
 	pool               *pgxpool.Pool
 	loginRate          ratelimit.Allower
 	signupRate         ratelimit.Allower
@@ -73,6 +77,8 @@ func newRouter(d apiDeps) http.Handler {
 	r.Get("/ready", d.handleReady)
 	r.Get("/openapi.json", d.handleOpenAPISpec)
 	r.Get("/docs", d.handleAPIDocs)
+
+	d.mountAgentProtocol(r)
 
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Post("/auth/signup", d.handleSignUp)
@@ -112,6 +118,8 @@ func newRouter(d apiDeps) http.Handler {
 				r.Get("/organization", d.handleGetOrganization)
 				r.Put("/organization", d.handleUpdateOrganization)
 				r.Post("/organization/leave", d.handleLeaveOrganization)
+
+				d.mountAgentManagement(r)
 
 				r.Get("/infrastructure/nodes", d.handleListNodes)
 				r.Post("/infrastructure/nodes", d.handleRegisterNode)

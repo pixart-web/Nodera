@@ -22,6 +22,7 @@ type Config struct {
 	Anthropic AnthropicConfig
 	OpenAI    OpenAIConfig
 	Platform  PlatformConfig
+	Agent     AgentConfig
 }
 
 type HTTPConfig struct {
@@ -83,6 +84,14 @@ type OpenAIConfig struct {
 	APIKey string
 }
 
+type AgentConfig struct {
+	// SigningKeyBase64 is a base64-encoded 32-byte Ed25519 seed used to sign
+	// every command sent to Node Agents. Required in production (an
+	// ephemeral key would invalidate queued commands on every restart);
+	// optional in development, where a throwaway key is generated.
+	SigningKeyBase64 string
+}
+
 type PlatformConfig struct {
 	// BootstrapAdminEmail, if set, grants every platform permission
 	// (internal/platformauth) to the user with this email at every
@@ -141,6 +150,7 @@ func Load() (Config, error) {
 		OpenAI: OpenAIConfig{
 			APIKey: os.Getenv("NODERA_OPENAI_API_KEY"),
 		},
+		Agent: AgentConfig{SigningKeyBase64: os.Getenv("NODERA_AGENT_SIGNING_KEY")},
 		Platform: PlatformConfig{
 			BootstrapAdminEmail: os.Getenv("NODERA_PLATFORM_BOOTSTRAP_ADMIN_EMAIL"),
 		},

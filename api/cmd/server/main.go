@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"crypto/ed25519"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -28,6 +29,7 @@ import (
 	"github.com/nodera/nodera/internal/identity"
 	"github.com/nodera/nodera/internal/infrastructure"
 	"github.com/nodera/nodera/internal/jobs"
+	"github.com/nodera/nodera/internal/nodeagent"
 	"github.com/nodera/nodera/internal/platform/authctx"
 	"github.com/nodera/nodera/internal/platform/config"
 	"github.com/nodera/nodera/internal/platform/db"
@@ -145,6 +147,22 @@ func run() error {
 		}
 	}
 
+	var agentKey ed25519.PrivateKey
+	if cfg.Agent.SigningKeyBase64 != "" {
+		agentKey, err = nodeagent.KeyFromSeed(cfg.Agent.SigningKeyBase64)
+		if err != nil {
+			return fmt.Errorf("NODERA_AGENT_SIGNING_KEY: %w", err)
+		}
+	} else if cfg.Env == "production" {
+		return fmt.Errorf("NODERA_AGENT_SIGNING_KEY is required in production")
+	} else {
+		log.Warn("NODERA_AGENT_SIGNING_KEY is not set: using an ephemeral command-signing key (development only)")
+	}
+	nodeAgentSvc := nodeagent.New(pool, auditSvc, agentKey)
+	go runNodeAgentSweep(ctx, log, nodeAgentSvc)
+	agentRate := ratelimit.New(600, time.Minute)
+	agentEnrollRate := ratelimit.New(10, time.Hour)
+
 	toolsSvc := tools.New(pool, auditSvc)
 	toolsSvc.RegisterHandler("get_server_metrics", newGetServerMetricsHandler(infraSvc))
 	toolsSvc.RegisterHandler("check_ssl", handlers.CheckSSL)
@@ -180,6 +198,9 @@ func run() error {
 		agents:             agentsSvc,
 		rbac:               rbacSvc,
 		platform:           platformSvc,
+		nodeagent:          nodeAgentSvc,
+		agentRate:          agentRate,
+		agentEnrollRate:    agentEnrollRate,
 		pool:               pool,
 		loginRate:          loginRate,
 		signupRate:         signupRate,
@@ -333,5 +354,22 @@ func newGetServerMetricsHandler(infraSvc *infrastructure.Service) tools.Handler 
 			"storage_gb":   node.StorageGB,
 			"last_seen_at": node.LastSeenAt,
 		}, nil
+	}
+}
+
+// runNodeAgentSweep marks silent agents offline, expires stale commands and
+// prunes replay-protection nonces.
+func runNodeAgentSweep(ctx context.Context, log *slog.Logger, svc *nodeagent.Service) {
+	t := time.NewTicker(30 * time.Second)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			if err := svc.Sweep(ctx); err != nil {
+				log.Error("node agent sweep failed", "error", err)
+			}
+		}
 	}
 }
