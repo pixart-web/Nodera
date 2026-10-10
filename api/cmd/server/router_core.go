@@ -11,6 +11,7 @@ import (
 	"github.com/nodera/nodera/internal/platform/apierr"
 	"github.com/nodera/nodera/internal/platform/httpserver"
 	"github.com/nodera/nodera/internal/projects"
+	infraproviders "github.com/nodera/nodera/internal/providers"
 	"github.com/nodera/nodera/internal/provisioning"
 	"github.com/nodera/nodera/internal/tools"
 )
@@ -83,6 +84,9 @@ func (d apiDeps) mountCore(r chi.Router) {
 	r.Get("/projects/{id}/overview", d.handleProjectOverview)
 	r.Post("/projects/{id}/provision", d.handleProvisionProject)
 	r.Get("/projects/{id}/operations", d.handleProjectOperations)
+	r.Get("/projects/{id}/databases", d.handleProjectDatabases)
+	r.Get("/projects/{id}/applications", d.handleProjectApplications)
+	r.Get("/projects/{id}/containers", d.handleProjectContainers)
 
 	r.Get("/operations", d.handleListOperations)
 	r.Get("/operations/{id}", d.handleGetOperation)
@@ -294,4 +298,50 @@ func (d apiDeps) handleCancelOperation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	noContent(w, r, d.ops.RequestCancel(r.Context(), mustAuthContext(r), id))
+}
+
+func (d apiDeps) handleProjectDatabases(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r, "id")
+	if !ok {
+		return
+	}
+	items, err := d.projects.Databases(r.Context(), mustAuthContext(r), id)
+	reply(w, r, http.StatusOK, items, err)
+}
+
+func (d apiDeps) handleProjectApplications(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r, "id")
+	if !ok {
+		return
+	}
+	items, err := d.projects.Applications(r.Context(), mustAuthContext(r), id)
+	reply(w, r, http.StatusOK, items, err)
+}
+
+// handleProjectContainers reports the project's containers as the provider
+// sees them right now. With no container provider it says so (empty list plus
+// available=false) instead of inventing containers.
+func (d apiDeps) handleProjectContainers(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r, "id")
+	if !ok {
+		return
+	}
+	ac := mustAuthContext(r)
+	if _, err := d.projects.Get(r.Context(), ac, id); err != nil {
+		httpserver.WriteError(w, r, err)
+		return
+	}
+	if d.prov.Containers == nil {
+		httpserver.WriteJSON(w, http.StatusOK, map[string]any{"available": false, "containers": []any{}})
+		return
+	}
+	list, err := d.prov.Containers.List(r.Context(), map[string]string{"nodera.project": id.String()})
+	if err != nil {
+		httpserver.WriteError(w, r, apierr.Wrap(apierr.CodeInternal, "failed to list containers", err))
+		return
+	}
+	if list == nil {
+		list = []infraproviders.ContainerInfo{}
+	}
+	httpserver.WriteJSON(w, http.StatusOK, map[string]any{"available": true, "containers": list})
 }

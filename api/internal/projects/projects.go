@@ -492,3 +492,65 @@ func (s *Service) MarkDeleted(ctx context.Context, orgID, id uuid.UUID) error {
 	_, err := s.pool.Exec(ctx, `UPDATE projects SET status='deleted', deleted_at=now(), updated_at=now() WHERE id=$1 AND organization_id=$2`, id, orgID)
 	return err
 }
+
+// ---- related resources shown on the project detail tabs ----
+
+type Database struct {
+	ID        uuid.UUID `json:"id"`
+	Name      string    `json:"name"`
+	Engine    string    `json:"engine"`
+	Username  string    `json:"username"`
+	Status    string    `json:"status"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// Databases lists a project's databases. Credentials are never included (the
+// password lives encrypted in internal/secrets and is referenced, not shown).
+func (s *Service) Databases(ctx context.Context, ac authctx.AuthContext, id uuid.UUID) ([]Database, error) {
+	if _, err := s.Get(ctx, ac, id); err != nil {
+		return nil, err
+	}
+	rows, err := s.pool.Query(ctx, `SELECT id, name, engine, username, status, created_at FROM project_databases
+		WHERE organization_id=$1 AND project_id=$2 AND status <> 'deleted' ORDER BY created_at`, ac.OrganizationID, id)
+	if err != nil {
+		return nil, apierr.Wrap(apierr.CodeInternal, "failed to list databases", err)
+	}
+	defer rows.Close()
+	out := []Database{}
+	for rows.Next() {
+		var d Database
+		if err := rows.Scan(&d.ID, &d.Name, &d.Engine, &d.Username, &d.Status, &d.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, d)
+	}
+	return out, rows.Err()
+}
+
+type ProjectApplication struct {
+	ID          uuid.UUID `json:"id"`
+	Name        string    `json:"name"`
+	Kind        string    `json:"kind"`
+	Environment string    `json:"environment"`
+	Status      string    `json:"status"`
+}
+
+func (s *Service) Applications(ctx context.Context, ac authctx.AuthContext, id uuid.UUID) ([]ProjectApplication, error) {
+	if _, err := s.Get(ctx, ac, id); err != nil {
+		return nil, err
+	}
+	rows, err := s.pool.Query(ctx, `SELECT id, name, kind, environment, status FROM applications WHERE organization_id=$1 AND project_id=$2 ORDER BY name`, ac.OrganizationID, id)
+	if err != nil {
+		return nil, apierr.Wrap(apierr.CodeInternal, "failed to list applications", err)
+	}
+	defer rows.Close()
+	out := []ProjectApplication{}
+	for rows.Next() {
+		var a ProjectApplication
+		if err := rows.Scan(&a.ID, &a.Name, &a.Kind, &a.Environment, &a.Status); err != nil {
+			return nil, err
+		}
+		out = append(out, a)
+	}
+	return out, rows.Err()
+}

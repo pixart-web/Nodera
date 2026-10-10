@@ -197,7 +197,7 @@ func TestSecurity_IDORAndCrossTenantAcrossEveryResource(t *testing.T) {
 		"/clients/" + cl["id"].(string), "/projects/" + pid, "/projects/" + pid + "/overview", "/projects/" + pid + "/operations",
 		"/domains/" + dom["id"].(string), "/domains/" + dom["id"].(string) + "/records", "/backups/" + bid,
 		"/migrations/" + mig["id"].(string), "/projects/" + pid + "/backup-policies", "/projects/" + pid + "/wordpress/health",
-		"/projects/" + pid + "/container-logs", "/operations/" + uuid.NewString(),
+		"/projects/" + pid + "/container-logs", "/projects/" + pid + "/databases", "/projects/" + pid + "/applications", "/projects/" + pid + "/containers", "/operations/" + uuid.NewString(),
 	}
 	if len(certs.Items) > 0 {
 		gets = append(gets, "/certificates/"+certs.Items[0]["id"].(string))
