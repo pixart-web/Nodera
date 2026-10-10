@@ -323,6 +323,9 @@ func (o *provision) containerSpec(ctx context.Context, r *ops.Run) (providers.Co
 			pws = v
 		}
 		spec.Image = "wordpress:6-php8.3-apache"
+		if img, _ := o.p.Config["wordpress_image"].(string); img != "" {
+			spec.Image = img // set by wordpress.update
+		}
 		spec.Env = map[string]string{
 			"WORDPRESS_DB_HOST": "db", "WORDPRESS_DB_NAME": db, "WORDPRESS_DB_USER": user, "WORDPRESS_DB_PASSWORD": pws,
 		}
@@ -437,3 +440,34 @@ func (o *deleteProject) Steps() []ops.Step {
 }
 
 var _ = pgx.ErrNoRows
+
+// ---- reuse by other engines (e.g. WordPress clone/update) ----
+
+// Provision exposes the provisioning steps so another operation can embed them.
+// The target project may be set after construction (SetProject) because a
+// clone creates its project in an earlier step.
+type Provision struct{ p *provision }
+
+func NewProvision(d Deps, org uuid.UUID) *Provision {
+	return &Provision{p: &provision{d: d, org: org}}
+}
+func (x *Provision) SetProject(id uuid.UUID) { x.p.project = id }
+func (x *Provision) Steps() []ops.Step       { return x.p.Steps() }
+
+// ContainerSpec rebuilds the project's container spec, optionally with a
+// different image (used by in-place upgrades).
+func (x *Provision) ContainerSpec(ctx context.Context, r *ops.Run, image string) (providers.ContainerSpec, error) {
+	p, err := x.p.load(ctx)
+	if err != nil {
+		return providers.ContainerSpec{}, err
+	}
+	x.p.p = p
+	spec, err := x.p.containerSpec(ctx, r)
+	if err == nil && image != "" {
+		spec.Image = image
+	}
+	return spec, err
+}
+
+// ContainerName is the deterministic container name for a project slug.
+func ContainerName(slug string) string { return "nodera-" + slug }

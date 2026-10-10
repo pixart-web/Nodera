@@ -27,6 +27,7 @@ import (
 	"github.com/nodera/nodera/internal/applications"
 	"github.com/nodera/nodera/internal/audit"
 	"github.com/nodera/nodera/internal/backups"
+	"github.com/nodera/nodera/internal/deployments"
 	"github.com/nodera/nodera/internal/identity"
 	"github.com/nodera/nodera/internal/infrastructure"
 	"github.com/nodera/nodera/internal/jobs"
@@ -43,9 +44,11 @@ import (
 	"github.com/nodera/nodera/internal/provisioning"
 	"github.com/nodera/nodera/internal/rbac"
 	"github.com/nodera/nodera/internal/secrets"
+	"github.com/nodera/nodera/internal/sitemig"
 	"github.com/nodera/nodera/internal/tenancy"
 	"github.com/nodera/nodera/internal/tools"
 	"github.com/nodera/nodera/internal/tools/handlers"
+	"github.com/nodera/nodera/internal/wordpress"
 	"github.com/nodera/nodera/migrations"
 )
 
@@ -198,6 +201,15 @@ func run() error {
 	backupsSvc.Register(opsEngine)
 	networkSvc := network.New(pool, auditSvc, secretsSvc, prov)
 	networkSvc.Register(opsEngine)
+	deploymentsSvc := deployments.New(pool, auditSvc, projectsSvc, prov)
+	deploymentsSvc.Register(opsEngine)
+	migrationsSvc := sitemig.New(pool, auditSvc, projectsSvc, backupsSvc, secretsSvc, prov)
+	migrationsSvc.Register(opsEngine)
+	wordpressSvc := wordpress.New(pool, projectsSvc, backupsSvc, provisioning.Deps{
+		Pool: pool, Projects: projectsSvc, Secrets: secretsSvc, Providers: prov,
+		Network: cfg.Runtime.DockerNetwork, BaseDomain: cfg.Runtime.BaseDomain,
+	})
+	wordpressSvc.Register(opsEngine)
 	opsEngine.BridgeTools(toolsSvc)
 	go runMaintenance(ctx, log, backupsSvc, networkSvc)
 
@@ -225,6 +237,9 @@ func run() error {
 		ops:                opsEngine,
 		backups:            backupsSvc,
 		network:            networkSvc,
+		deployments:        deploymentsSvc,
+		migrations:         migrationsSvc,
+		wordpress:          wordpressSvc,
 		prov:               prov,
 		providerMode:       cfg.Runtime.ProviderMode,
 		environment:        cfg.Env,

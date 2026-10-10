@@ -17,6 +17,7 @@ import (
 	"github.com/nodera/nodera/internal/applications"
 	"github.com/nodera/nodera/internal/audit"
 	"github.com/nodera/nodera/internal/backups"
+	"github.com/nodera/nodera/internal/deployments"
 	"github.com/nodera/nodera/internal/identity"
 	"github.com/nodera/nodera/internal/infrastructure"
 	"github.com/nodera/nodera/internal/jobs"
@@ -31,8 +32,10 @@ import (
 	infraproviders "github.com/nodera/nodera/internal/providers"
 	"github.com/nodera/nodera/internal/rbac"
 	"github.com/nodera/nodera/internal/secrets"
+	"github.com/nodera/nodera/internal/sitemig"
 	"github.com/nodera/nodera/internal/tenancy"
 	"github.com/nodera/nodera/internal/tools"
+	"github.com/nodera/nodera/internal/wordpress"
 )
 
 type apiDeps struct {
@@ -53,6 +56,9 @@ type apiDeps struct {
 	projects           *projects.Service
 	backups            *backups.Service
 	network            *network.Service
+	deployments        *deployments.Service
+	migrations         *sitemig.Service
+	wordpress          *wordpress.Service
 	ops                *ops.Engine
 	prov               infraproviders.Set
 	providerMode       string
@@ -134,6 +140,7 @@ func newRouter(d apiDeps) http.Handler {
 				d.mountAgentManagement(r)
 				d.mountCore(r)
 				d.mountInfra(r)
+				d.mountDelivery(r)
 
 				r.Get("/infrastructure/nodes", d.handleListNodes)
 				r.Post("/infrastructure/nodes", d.handleRegisterNode)

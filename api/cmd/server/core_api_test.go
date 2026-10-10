@@ -5,6 +5,7 @@ package main
 // and the in-memory mock provider set.
 
 import (
+	"archive/zip"
 	"bytes"
 	"context"
 	"crypto/rand"
@@ -20,6 +21,7 @@ import (
 
 	"github.com/nodera/nodera/internal/audit"
 	"github.com/nodera/nodera/internal/backups"
+	"github.com/nodera/nodera/internal/deployments"
 	"github.com/nodera/nodera/internal/identity"
 	"github.com/nodera/nodera/internal/jobs"
 	"github.com/nodera/nodera/internal/network"
@@ -31,9 +33,11 @@ import (
 	"github.com/nodera/nodera/internal/provisioning"
 	"github.com/nodera/nodera/internal/rbac"
 	"github.com/nodera/nodera/internal/secrets"
+	"github.com/nodera/nodera/internal/sitemig"
 	"github.com/nodera/nodera/internal/tenancy"
 	"github.com/nodera/nodera/internal/testhelpers"
 	"github.com/nodera/nodera/internal/tools"
+	"github.com/nodera/nodera/internal/wordpress"
 )
 
 type coreEnv struct {
@@ -68,6 +72,12 @@ func newCoreEnv(t *testing.T, email string) (*coreEnv, apiDeps) {
 	bk.Register(eng)
 	nw := network.New(pool, auditSvc, sec, set)
 	nw.Register(eng)
+	dep := deployments.New(pool, auditSvc, proj, set)
+	dep.Register(eng)
+	mig := sitemig.New(pool, auditSvc, proj, bk, sec, set)
+	mig.Register(eng)
+	wp := wordpress.New(pool, proj, bk, provisioning.Deps{Pool: pool, Projects: proj, Secrets: sec, Providers: set})
+	wp.Register(eng)
 	toolsSvc := tools.New(pool, auditSvc)
 	eng.BridgeTools(toolsSvc)
 	worker := jobs.NewWorker(pool)
@@ -76,7 +86,7 @@ func newCoreEnv(t *testing.T, email string) (*coreEnv, apiDeps) {
 	d := apiDeps{
 		log: logger.New("test"), identity: identitySvc, tenancy: tenancySvc, audit: auditSvc, rbac: rbacSvc,
 		platform: platformSvc, pool: pool, sessionTTL: 24 * time.Hour,
-		projects: proj, backups: bk, network: nw, ops: eng, prov: set, providerMode: "mock", environment: "test", tools: toolsSvc,
+		projects: proj, backups: bk, network: nw, deployments: dep, migrations: mig, wordpress: wp, ops: eng, prov: set, providerMode: "mock", environment: "test", tools: toolsSvc,
 	}
 	srv := httptest.NewServer(newRouter(d))
 	t.Cleanup(srv.Close)
@@ -272,5 +282,91 @@ func TestInfraAPI_DomainsSSLBackups(t *testing.T) {
 	}
 	if st, _, _ := e.do(t, "GET", "/backups/"+uuid.NewString(), nil); st != 404 {
 		t.Fatalf("unknown backup = %d", st)
+	}
+}
+
+func (e *coreEnv) raw(t *testing.T, method, path string, body []byte) (int, map[string]any) {
+	t.Helper()
+	req, _ := http.NewRequest(method, e.srv.URL+"/api/v1"+path, bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+e.token)
+	req.Header.Set("X-Nodera-Org", e.org.String())
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(resp.Body)
+	var m map[string]any
+	_ = json.Unmarshal(raw, &m)
+	return resp.StatusCode, m
+}
+
+func TestDeliveryAPI_DeployMigrateWordPress(t *testing.T) {
+	e, _ := newCoreEnv(t, "delivery-api-"+uuid.NewString()[:6]+"@example.com")
+	ctx := context.Background()
+	_, proj, _ := e.do(t, "POST", "/projects", map[string]any{"name": "Delivery", "kind": "wordpress"})
+	pid := proj["id"].(string)
+	e.do(t, "POST", "/projects/"+pid+"/provision", nil)
+	e.worker.RunOnce(ctx)
+
+	// staging deploy runs; production deploy asks for approval.
+	files := map[string]string{"index.php": base64.StdEncoding.EncodeToString([]byte("hi"))}
+	st, ref, _ := e.do(t, "POST", "/projects/"+pid+"/deployments", map[string]any{"source": "upload", "environment": "staging", "files": files})
+	if st != 202 {
+		t.Fatalf("staging deploy: %d %v", st, ref)
+	}
+	e.worker.RunOnce(ctx)
+	st, page, _ := e.do(t, "GET", "/deployments?project_id="+pid, nil)
+	items, _ := page["items"].([]any)
+	if st != 200 || len(items) != 1 || items[0].(map[string]any)["status"] != "succeeded" {
+		t.Fatalf("deployments: %d %v", st, page)
+	}
+	st, prod, _ := e.do(t, "POST", "/projects/"+pid+"/deployments", map[string]any{"source": "upload", "files": files})
+	if st != 202 || prod["approval_id"] == nil {
+		t.Fatalf("production deploy must need approval: %d %v", st, prod)
+	}
+	if st, _, _ := e.do(t, "POST", "/projects/"+pid+"/deployments", map[string]any{"source": "ftp", "environment": "staging"}); st != 400 {
+		t.Fatalf("invalid source = %d", st)
+	}
+
+	// migration: create -> upload zip -> plan.
+	st, mig, _ := e.do(t, "POST", "/migrations", map[string]any{"project_id": pid, "source_kind": "zip", "target_domain": "moved.example.org"})
+	if st != 201 {
+		t.Fatalf("create migration: %d %v", st, mig)
+	}
+	mid := mig["id"].(string)
+	var zb bytes.Buffer
+	zw := zip.NewWriter(&zb)
+	for n, c := range map[string]string{"wp-config.php": "<?php", "wp-includes/version.php": "<?php $wp_version='6.5';", "index.php": "x", "database.sql": "INSERT INTO t VALUES ('http://o.example.com');"} {
+		w, _ := zw.Create(n)
+		w.Write([]byte(c))
+	}
+	zw.Close()
+	if st, _ := e.raw(t, "PUT", "/migrations/"+mid+"/source", zb.Bytes()); st != 200 {
+		t.Fatalf("upload source = %d", st)
+	}
+	if st, _ := e.raw(t, "PUT", "/migrations/"+mid+"/source", []byte("not a zip")); st != 400 {
+		t.Fatalf("non-zip upload = %d, want 400", st)
+	}
+	if st, _, _ := e.do(t, "POST", "/migrations/"+mid+"/plan", nil); st != 202 {
+		t.Fatalf("plan = %d", st)
+	}
+	e.worker.RunOnce(ctx)
+	st, got, _ := e.do(t, "GET", "/migrations/"+mid, nil)
+	if st != 200 || got["status"] != "planned" {
+		t.Fatalf("migration after plan: %d %v", st, got)
+	}
+	st, cut, _ := e.do(t, "POST", "/migrations/"+mid+"/cutover", nil)
+	if st != 202 && st != 409 {
+		t.Fatalf("cutover request = %d %v", st, cut)
+	}
+
+	// wordpress health
+	st, health, _ := e.do(t, "GET", "/projects/"+pid+"/wordpress/health", nil)
+	if st != 200 || health["checks"] == nil {
+		t.Fatalf("health: %d %v", st, health)
+	}
+	if st, _, _ := e.do(t, "POST", "/projects/"+pid+"/wordpress/update", map[string]string{"image_tag": "latest; rm"}); st != 400 {
+		t.Fatalf("bad image tag = %d", st)
 	}
 }

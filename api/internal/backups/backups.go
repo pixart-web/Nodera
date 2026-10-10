@@ -719,3 +719,26 @@ func (o *deleteOp) Steps() []ops.Step {
 }
 
 var _ = strings.TrimSpace
+
+// SnapshotNow takes a verified backup synchronously, for use inside another
+// operation (e.g. the safety snapshot before a migration cutover). It is not
+// reachable over HTTP.
+func (s *Service) SnapshotNow(ctx context.Context, r *ops.Run, org, project uuid.UUID, typ string, retentionDays int, reason string) (uuid.UUID, error) {
+	if err := s.requireProviders(); err != nil {
+		return uuid.Nil, err
+	}
+	var job *uuid.UUID
+	if r != nil {
+		job = jobPtr(r)
+	}
+	return s.snapshot(ctx, r, org, project, CreatePayload{Type: typ, RetentionDays: retentionDays, Reason: reason}, job)
+}
+
+// RestoreNow restores a completed backup over the live project (used to roll a
+// failed operation back). The caller is responsible for authorisation.
+func (s *Service) RestoreNow(ctx context.Context, org, project, backupID uuid.UUID) error {
+	if err := s.requireProviders(); err != nil {
+		return err
+	}
+	return s.restoreArtifact(ctx, org, project, backupID)
+}
