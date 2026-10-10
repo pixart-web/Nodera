@@ -24,9 +24,13 @@ import (
 	"github.com/nodera/nodera/internal/deployments"
 	"github.com/nodera/nodera/internal/identity"
 	"github.com/nodera/nodera/internal/jobs"
+	"github.com/nodera/nodera/internal/logs"
+	"github.com/nodera/nodera/internal/monitoring"
 	"github.com/nodera/nodera/internal/network"
+	"github.com/nodera/nodera/internal/notifications"
 	"github.com/nodera/nodera/internal/ops"
 	"github.com/nodera/nodera/internal/platform/logger"
+	"github.com/nodera/nodera/internal/platform/netpolicy"
 	"github.com/nodera/nodera/internal/platformauth"
 	"github.com/nodera/nodera/internal/projects"
 	"github.com/nodera/nodera/internal/providers/mock"
@@ -78,6 +82,10 @@ func newCoreEnv(t *testing.T, email string) (*coreEnv, apiDeps) {
 	mig.Register(eng)
 	wp := wordpress.New(pool, proj, bk, provisioning.Deps{Pool: pool, Projects: proj, Secrets: sec, Providers: set})
 	wp.Register(eng)
+	notif := notifications.New(pool, auditSvc, netpolicy.Policy{Level: netpolicy.PublicOnly})
+	eng.SetNotifier(notif)
+	monSvc := monitoring.New(pool, auditSvc, set, notif)
+	logSvc := logs.New(pool, set)
 	toolsSvc := tools.New(pool, auditSvc)
 	eng.BridgeTools(toolsSvc)
 	worker := jobs.NewWorker(pool)
@@ -86,7 +94,7 @@ func newCoreEnv(t *testing.T, email string) (*coreEnv, apiDeps) {
 	d := apiDeps{
 		log: logger.New("test"), identity: identitySvc, tenancy: tenancySvc, audit: auditSvc, rbac: rbacSvc,
 		platform: platformSvc, pool: pool, sessionTTL: 24 * time.Hour,
-		projects: proj, backups: bk, network: nw, deployments: dep, migrations: mig, wordpress: wp, ops: eng, prov: set, providerMode: "mock", environment: "test", tools: toolsSvc,
+		projects: proj, backups: bk, network: nw, deployments: dep, monitoring: monSvc, notifications: notif, logs: logSvc, migrations: mig, wordpress: wp, ops: eng, prov: set, providerMode: "mock", environment: "test", tools: toolsSvc,
 	}
 	srv := httptest.NewServer(newRouter(d))
 	t.Cleanup(srv.Close)
@@ -368,5 +376,46 @@ func TestDeliveryAPI_DeployMigrateWordPress(t *testing.T) {
 	}
 	if st, _, _ := e.do(t, "POST", "/projects/"+pid+"/wordpress/update", map[string]string{"image_tag": "latest; rm"}); st != 400 {
 		t.Fatalf("bad image tag = %d", st)
+	}
+}
+
+func TestObserveAPI_MonitorsIncidentsNotificationsLogs(t *testing.T) {
+	e, _ := newCoreEnv(t, "observe-api-"+uuid.NewString()[:6]+"@example.com")
+	st, mon, _ := e.do(t, "POST", "/monitors", map[string]any{"kind": "http", "name": "Home", "target": "https://home.example.com"})
+	if st != 201 {
+		t.Fatalf("create monitor: %d %v", st, mon)
+	}
+	if st, _, _ := e.do(t, "POST", "/monitors", map[string]any{"kind": "http", "name": "Bad", "target": "javascript:alert(1)"}); st != 400 {
+		t.Fatalf("bad target = %d", st)
+	}
+	st, run, _ := e.do(t, "POST", "/monitors/"+mon["id"].(string)+"/run", nil)
+	if st != 200 || run["last_status"] != "ok" {
+		t.Fatalf("run monitor: %d %v", st, run)
+	}
+	st, rule, _ := e.do(t, "POST", "/alert-rules", map[string]any{"name": "Down", "condition": "http_failure", "severity": "critical"})
+	if st != 201 {
+		t.Fatalf("create rule: %d %v", st, rule)
+	}
+	if st, _, _ := e.do(t, "POST", "/incidents/"+uuid.NewString()+"/acknowledge", nil); st != 404 {
+		t.Fatalf("unknown incident = %d", st)
+	}
+	if st, _, _ := e.do(t, "POST", "/incidents/"+uuid.NewString()+"/explode", nil); st != 400 && st != 404 {
+		t.Fatalf("bad action = %d", st)
+	}
+	st, cnt, _ := e.do(t, "GET", "/notifications/unread-count", nil)
+	if st != 200 || cnt["unread"] == nil {
+		t.Fatalf("unread-count: %d %v", st, cnt)
+	}
+	if st, _, _ := e.do(t, "POST", "/notification-channels", map[string]any{"kind": "webhook", "name": "evil", "target": "http://169.254.169.254/"}); st != 400 {
+		t.Fatalf("SSRF webhook = %d, want 400", st)
+	}
+	if st, page, _ := e.do(t, "GET", "/logs?level=error&limit=5", nil); st != 200 || page["items"] == nil {
+		t.Fatalf("logs: %d %v", st, page)
+	}
+	if st, _, _ := e.do(t, "PUT", "/retention/audit_log", map[string]int{"retention_days": 3}); st != 400 {
+		t.Fatalf("audit retention too short = %d", st)
+	}
+	if st, _, _ := e.do(t, "PUT", "/retention/log_entries", map[string]int{"retention_days": 14}); st != 204 {
+		t.Fatalf("set retention = %d", st)
 	}
 }

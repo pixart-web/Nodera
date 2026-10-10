@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/nodera/nodera/internal/platform/logger"
+	"github.com/nodera/nodera/internal/platform/redact"
 )
 
 // Run is the handle an operation uses while executing: logging, progress,
@@ -72,6 +73,8 @@ func (r *Run) Log(level, msg string, meta map[string]any) {
 		meta = map[string]any{}
 	}
 	mj, _ := json.Marshal(meta)
+	mj = []byte(redact.String(string(mj)))
+	msg = redact.String(msg)
 	ctx := context.Background()
 	r.mu.Lock()
 	seq := r.seq

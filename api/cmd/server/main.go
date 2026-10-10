@@ -31,13 +31,17 @@ import (
 	"github.com/nodera/nodera/internal/identity"
 	"github.com/nodera/nodera/internal/infrastructure"
 	"github.com/nodera/nodera/internal/jobs"
+	"github.com/nodera/nodera/internal/logs"
+	"github.com/nodera/nodera/internal/monitoring"
 	"github.com/nodera/nodera/internal/network"
 	"github.com/nodera/nodera/internal/nodeagent"
+	"github.com/nodera/nodera/internal/notifications"
 	"github.com/nodera/nodera/internal/ops"
 	"github.com/nodera/nodera/internal/platform/authctx"
 	"github.com/nodera/nodera/internal/platform/config"
 	"github.com/nodera/nodera/internal/platform/db"
 	"github.com/nodera/nodera/internal/platform/logger"
+	"github.com/nodera/nodera/internal/platform/netpolicy"
 	"github.com/nodera/nodera/internal/platform/ratelimit"
 	"github.com/nodera/nodera/internal/platformauth"
 	"github.com/nodera/nodera/internal/projects"
@@ -210,7 +214,13 @@ func run() error {
 		Network: cfg.Runtime.DockerNetwork, BaseDomain: cfg.Runtime.BaseDomain,
 	})
 	wordpressSvc.Register(opsEngine)
+	notifPolicy := netpolicy.Policy{Level: netpolicy.PublicOnly}
+	notificationsSvc := notifications.New(pool, auditSvc, notifPolicy)
+	opsEngine.SetNotifier(notificationsSvc)
+	monitoringSvc := monitoring.New(pool, auditSvc, prov, notificationsSvc)
+	logsSvc := logs.New(pool, prov)
 	opsEngine.BridgeTools(toolsSvc)
+	go runObservability(ctx, log, monitoringSvc, logsSvc)
 	go runMaintenance(ctx, log, backupsSvc, networkSvc)
 
 	worker := jobs.NewWorker(pool)
@@ -240,6 +250,9 @@ func run() error {
 		deployments:        deploymentsSvc,
 		migrations:         migrationsSvc,
 		wordpress:          wordpressSvc,
+		monitoring:         monitoringSvc,
+		notifications:      notificationsSvc,
+		logs:               logsSvc,
 		prov:               prov,
 		providerMode:       cfg.Runtime.ProviderMode,
 		environment:        cfg.Env,
@@ -437,6 +450,34 @@ func runMaintenance(ctx context.Context, log *slog.Logger, b *backups.Service, n
 			}
 			if _, err := n.Sweep(ctx, now); err != nil {
 				log.Error("certificate sweep failed", "error", err)
+			}
+		}
+	}
+}
+
+// runObservability drives monitors, alert evaluation and data retention.
+func runObservability(ctx context.Context, log *slog.Logger, m *monitoring.Service, l *logs.Service) {
+	checks := time.NewTicker(15 * time.Second)
+	eval := time.NewTicker(30 * time.Second)
+	retention := time.NewTicker(time.Hour)
+	defer checks.Stop()
+	defer eval.Stop()
+	defer retention.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case now := <-checks.C:
+			if _, err := m.RunDue(ctx, now); err != nil {
+				log.Error("monitor run failed", "error", err)
+			}
+		case <-eval.C:
+			if _, _, err := m.Evaluate(ctx); err != nil {
+				log.Error("alert evaluation failed", "error", err)
+			}
+		case now := <-retention.C:
+			if _, err := l.Sweep(ctx, now); err != nil {
+				log.Error("retention sweep failed", "error", err)
 			}
 		}
 	}
