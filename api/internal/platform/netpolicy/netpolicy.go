@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"net"
 	"strconv"
+	"strings"
 )
 
 // Level is a policy's overall stance on which address classes a resolved
@@ -102,7 +103,7 @@ func (e *BlockedError) Error() string {
 func Resolve(ctx context.Context, policy Policy, hostport, defaultPort string) (ResolvedTarget, error) {
 	host, port, err := net.SplitHostPort(hostport)
 	if err != nil {
-		host, port = hostport, defaultPort
+		host, port = strings.Trim(hostport, "[]"), defaultPort // bare IPv6 literal such as "[::1]"
 	}
 	if host == "" {
 		return ResolvedTarget{}, fmt.Errorf("netpolicy: empty host")

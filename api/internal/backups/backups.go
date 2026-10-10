@@ -234,6 +234,9 @@ func (s *Service) ListPolicies(ctx context.Context, ac authctx.AuthContext, proj
 	if err := rbac.Require(ac, "backups.read"); err != nil {
 		return nil, err
 	}
+	if _, err := s.projects.Get(ctx, ac, projectID); err != nil {
+		return nil, err
+	}
 	rows, err := s.pool.Query(ctx, `SELECT id, project_id, schedule, type, retention_days, enabled, last_run_at FROM backup_policies
 		WHERE organization_id=$1 AND project_id=$2 ORDER BY schedule, type`, ac.OrganizationID, projectID)
 	if err != nil {

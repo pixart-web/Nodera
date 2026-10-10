@@ -48,12 +48,13 @@ import (
 )
 
 type coreEnv struct {
-	srv    *httptest.Server
-	worker *jobs.Worker
-	token  string
-	org    uuid.UUID
-	ident  *identity.Service
-	d      apiDeps
+	srv     *httptest.Server
+	worker  *jobs.Worker
+	token   string
+	org     uuid.UUID
+	ident   *identity.Service
+	d       apiDeps
+	secrets *secrets.Service
 }
 
 func newCoreEnv(t *testing.T, email string) (*coreEnv, apiDeps) {
@@ -118,7 +119,7 @@ func newCoreEnv(t *testing.T, email string) (*coreEnv, apiDeps) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &coreEnv{srv: srv, worker: worker, token: tok, org: org.ID, ident: identitySvc, d: d}, d
+	return &coreEnv{srv: srv, worker: worker, token: tok, org: org.ID, ident: identitySvc, d: d, secrets: sec}, d
 }
 
 func (e *coreEnv) do(t *testing.T, method, path string, body any) (int, map[string]any, []byte) {

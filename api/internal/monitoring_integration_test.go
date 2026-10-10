@@ -13,6 +13,7 @@ import (
 	"github.com/nodera/nodera/internal/monitoring"
 	"github.com/nodera/nodera/internal/notifications"
 	"github.com/nodera/nodera/internal/platform/netpolicy"
+	"github.com/nodera/nodera/internal/providers/local"
 	"github.com/nodera/nodera/internal/providers/mock"
 	"github.com/nodera/nodera/internal/testhelpers"
 )
@@ -234,5 +235,34 @@ func TestLogs_RedactionSearchAndRetention(t *testing.T) {
 	}
 	if err := lg.SetRetention(ctx, member, "log_entries", 10); err == nil {
 		t.Fatal("member must not change retention")
+	}
+}
+
+func TestMonitoring_SSRFGuardWithRealLocalProvider(t *testing.T) {
+	pool := testhelpers.RequirePool(t)
+	h := newHarness(pool)
+	ctx := context.Background()
+	set, err := local.NewSet(t.TempDir(), netpolicy.Policy{Level: netpolicy.PublicOnly})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mon := monitoring.New(pool, h.audit, set, nil)
+	ac, _ := h.newOwnerContext(t, ctx, "mon-ssrf@nodera.dev")
+	for i, target := range []string{"http://169.254.169.254/latest/meta-data/", "http://127.0.0.1:5432/", "http://10.0.0.1/", "http://[::1]/", "http://localhost/"} {
+		m, err := mon.CreateMonitor(ctx, ac, monitoring.MonitorInput{Kind: "http", Name: "ssrf-" + string(rune('a'+i)), Target: target})
+		if err != nil {
+			t.Fatalf("%s: %v", target, err)
+		}
+		got, err := mon.RunNow(ctx, ac, m.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.LastStatus != "failing" || !strings.Contains(got.LastError, "not permitted") {
+			t.Errorf("%s must be blocked by the SSRF policy, got status=%s err=%q", target, got.LastStatus, got.LastError)
+		}
+	}
+	m, _ := mon.CreateMonitor(ctx, ac, monitoring.MonitorInput{Kind: "tcp", Name: "ssrf-tcp", Target: "127.0.0.1:5432"})
+	if got, _ := mon.RunNow(ctx, ac, m.ID); got.LastStatus != "failing" || !strings.Contains(got.LastError, "not permitted") {
+		t.Errorf("tcp probe of loopback must be blocked: %+v", got)
 	}
 }

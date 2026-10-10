@@ -2,6 +2,7 @@ package netpolicy
 
 import (
 	"context"
+	"errors"
 	"net"
 	"testing"
 )
@@ -166,4 +167,12 @@ func isBlockedError(err error, target **BlockedError) bool {
 		*target = be
 	}
 	return ok
+}
+
+func TestResolve_BareIPv6LiteralIsClassifiedNotDNSLookedUp(t *testing.T) {
+	_, err := Resolve(context.Background(), Policy{Level: PublicOnly}, "[::1]", "80")
+	var be *BlockedError
+	if !errors.As(err, &be) {
+		t.Fatalf("expected BlockedError for [::1], got %v", err)
+	}
 }

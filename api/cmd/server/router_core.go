@@ -246,6 +246,10 @@ func (d apiDeps) handleProjectOperations(w http.ResponseWriter, r *http.Request)
 	if !ok {
 		return
 	}
+	if _, err := d.projects.Get(r.Context(), mustAuthContext(r), id); err != nil {
+		httpserver.WriteError(w, r, err) // 404 for another tenant's project, not an empty 200
+		return
+	}
 	p := httpserver.ParsePagination(r)
 	items, err := d.ops.List(r.Context(), mustAuthContext(r), id, p.Limit+1, p.Offset)
 	replyPage(w, r, p, items, err)

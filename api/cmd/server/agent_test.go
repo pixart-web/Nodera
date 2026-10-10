@@ -294,3 +294,12 @@ func TestAgentExpiredTokenAndTenantAndRBAC(t *testing.T) {
 		t.Fatal("member without infrastructure.manage must be denied")
 	}
 }
+
+func mustUUID(s string) uuid.UUID { id, _ := uuid.Parse(s); return id }
+
+func nowUTC() time.Time { return time.Now().UTC() }
+
+func ed25519FromState(st agent.State) ed25519.PrivateKey {
+	seed, _ := base64.StdEncoding.DecodeString(st.PrivateSeedB64)
+	return ed25519.NewKeyFromSeed(seed)
+}
