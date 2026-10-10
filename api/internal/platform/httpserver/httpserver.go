@@ -140,6 +140,16 @@ type statusWriter struct {
 	status int
 }
 
+// Flush lets streaming handlers (SSE) flush through the logging wrapper.
+func (w *statusWriter) Flush() {
+	if f, ok := w.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+// Unwrap exposes the underlying writer to http.ResponseController.
+func (w *statusWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
+
 func (w *statusWriter) WriteHeader(status int) {
 	w.status = status
 	w.ResponseWriter.WriteHeader(status)
@@ -154,9 +164,10 @@ func WriteJSON(w http.ResponseWriter, status int, v any) {
 
 type errorResponse struct {
 	Error struct {
-		Code      string `json:"code"`
-		Message   string `json:"message"`
-		RequestID string `json:"request_id,omitempty"`
+		Code      string         `json:"code"`
+		Message   string         `json:"message"`
+		RequestID string         `json:"request_id,omitempty"`
+		Details   map[string]any `json:"details,omitempty"`
 	} `json:"error"`
 }
 
@@ -201,5 +212,6 @@ func WriteError(w http.ResponseWriter, r *http.Request, err error) {
 	resp.Error.Code = string(ae.Code)
 	resp.Error.Message = ae.Message
 	resp.Error.RequestID = RequestID(r)
+	resp.Error.Details = ae.Details
 	WriteJSON(w, StatusFor(ae.Code), resp)
 }

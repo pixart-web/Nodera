@@ -21,7 +21,9 @@ import (
 
 	"github.com/nodera/nodera/internal/audit"
 	"github.com/nodera/nodera/internal/backups"
+	"github.com/nodera/nodera/internal/dashboard"
 	"github.com/nodera/nodera/internal/deployments"
+	"github.com/nodera/nodera/internal/flags"
 	"github.com/nodera/nodera/internal/identity"
 	"github.com/nodera/nodera/internal/jobs"
 	"github.com/nodera/nodera/internal/logs"
@@ -31,6 +33,7 @@ import (
 	"github.com/nodera/nodera/internal/ops"
 	"github.com/nodera/nodera/internal/platform/logger"
 	"github.com/nodera/nodera/internal/platform/netpolicy"
+	"github.com/nodera/nodera/internal/platform/ratelimit"
 	"github.com/nodera/nodera/internal/platformauth"
 	"github.com/nodera/nodera/internal/projects"
 	"github.com/nodera/nodera/internal/providers/mock"
@@ -86,6 +89,9 @@ func newCoreEnv(t *testing.T, email string) (*coreEnv, apiDeps) {
 	eng.SetNotifier(notif)
 	monSvc := monitoring.New(pool, auditSvc, set, notif)
 	logSvc := logs.New(pool, set)
+	flagSvc := flags.New(pool, auditSvc, platformSvc)
+	eng.SetFlags(flagSvc)
+	dash := dashboard.New(pool)
 	toolsSvc := tools.New(pool, auditSvc)
 	eng.BridgeTools(toolsSvc)
 	worker := jobs.NewWorker(pool)
@@ -94,7 +100,7 @@ func newCoreEnv(t *testing.T, email string) (*coreEnv, apiDeps) {
 	d := apiDeps{
 		log: logger.New("test"), identity: identitySvc, tenancy: tenancySvc, audit: auditSvc, rbac: rbacSvc,
 		platform: platformSvc, pool: pool, sessionTTL: 24 * time.Hour,
-		projects: proj, backups: bk, network: nw, deployments: dep, monitoring: monSvc, notifications: notif, logs: logSvc, migrations: mig, wordpress: wp, ops: eng, prov: set, providerMode: "mock", environment: "test", tools: toolsSvc,
+		projects: proj, backups: bk, network: nw, deployments: dep, monitoring: monSvc, notifications: notif, logs: logSvc, dashboard: dash, flags: flagSvc, migrations: mig, wordpress: wp, ops: eng, prov: set, providerMode: "mock", environment: "test", tools: toolsSvc,
 	}
 	srv := httptest.NewServer(newRouter(d))
 	t.Cleanup(srv.Close)
@@ -417,5 +423,125 @@ func TestObserveAPI_MonitorsIncidentsNotificationsLogs(t *testing.T) {
 	}
 	if st, _, _ := e.do(t, "PUT", "/retention/log_entries", map[string]int{"retention_days": 14}); st != 204 {
 		t.Fatalf("set retention = %d", st)
+	}
+}
+
+func TestPlatformAPI_StreamDashboardSearchFlags(t *testing.T) {
+	e, _ := newCoreEnv(t, "platform-api-"+uuid.NewString()[:6]+"@example.com")
+	ctx := context.Background()
+	_, proj, _ := e.do(t, "POST", "/projects", map[string]any{"name": "Streamy", "kind": "wordpress"})
+	pid := proj["id"].(string)
+	_, ref, _ := e.do(t, "POST", "/projects/"+pid+"/provision", nil)
+	e.worker.RunOnce(ctx)
+	jid := ref["job_id"].(string)
+
+	// SSE: replays logs + status, then ends.
+	req, _ := http.NewRequest("GET", e.srv.URL+"/api/v1/operations/"+jid+"/stream", nil)
+	req.Header.Set("Authorization", "Bearer "+e.token)
+	req.Header.Set("X-Nodera-Org", e.org.String())
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.Header.Get("Content-Type") != "text/event-stream" {
+		t.Fatalf("content type %q status %d body %s", resp.Header.Get("Content-Type"), resp.StatusCode, body)
+	}
+	for _, want := range []string{"event: log", "event: status", "event: end", `"succeeded"`} {
+		if !bytes.Contains(body, []byte(want)) {
+			t.Fatalf("stream missing %q:\n%s", want, body)
+		}
+	}
+	// Resuming past the last log id yields no old logs.
+	req2, _ := http.NewRequest("GET", e.srv.URL+"/api/v1/operations/"+jid+"/stream?after=999999999", nil)
+	req2.Header.Set("Authorization", "Bearer "+e.token)
+	req2.Header.Set("X-Nodera-Org", e.org.String())
+	resp2, _ := http.DefaultClient.Do(req2)
+	b2, _ := io.ReadAll(resp2.Body)
+	resp2.Body.Close()
+	if bytes.Contains(b2, []byte("event: log")) {
+		t.Fatal("resume must not replay old logs")
+	}
+	// Unauthenticated / unknown stream.
+	r3, _ := http.Get(e.srv.URL + "/api/v1/operations/" + jid + "/stream")
+	if r3.StatusCode != 401 {
+		t.Fatalf("unauthenticated stream = %d", r3.StatusCode)
+	}
+	r3.Body.Close()
+
+	st, dash, _ := e.do(t, "GET", "/dashboard", nil)
+	if st != 200 || dash["projects"].(map[string]any)["active"].(float64) != 1 {
+		t.Fatalf("dashboard: %d %v", st, dash)
+	}
+	st, sr, _ := e.do(t, "GET", "/search?q=stream", nil)
+	hits, _ := sr["hits"].([]any)
+	if st != 200 || len(hits) != 2 || hits[0].(map[string]any)["type"] != "project" {
+		t.Fatalf("search: %d %v", st, sr)
+	}
+	if st, sr, _ := e.do(t, "GET", "/search?q=%25", nil); st != 200 || len(sr["hits"].([]any)) != 0 {
+		t.Fatalf("wildcard search must be literal: %d %v", st, sr)
+	}
+
+	// Feature flags: disabling migrations blocks the operation for this org.
+	if st, _, _ := e.do(t, "PUT", "/feature-flags/migration_engine", map[string]any{"enabled": false}); st != 204 {
+		t.Fatalf("set flag = %d", st)
+	}
+	st, mig, _ := e.do(t, "POST", "/migrations", map[string]any{"project_id": pid, "source_kind": "zip", "target_domain": "flag.example.org"})
+	if st != 201 {
+		t.Fatalf("create migration: %d", st)
+	}
+	if st, out, _ := e.do(t, "POST", "/migrations/"+mig["id"].(string)+"/plan", nil); st != 403 {
+		t.Fatalf("flagged-off plan = %d %v", st, out)
+	}
+	if st, _, _ := e.do(t, "PUT", "/feature-flags/migration_engine", map[string]any{"enabled": nil}); st != 204 {
+		t.Fatal("clear override failed")
+	}
+	if st, _, _ := e.do(t, "POST", "/migrations/"+mig["id"].(string)+"/plan", nil); st != 202 {
+		t.Fatalf("plan after clearing override = %d", st)
+	}
+	if st, _, _ := e.do(t, "PUT", "/feature-flags/does_not_exist", map[string]any{"enabled": true}); st != 404 {
+		t.Fatalf("unknown flag = %d", st)
+	}
+	// readiness reports honest capability state.
+	r4, _ := http.Get(e.srv.URL + "/ready")
+	rb, _ := io.ReadAll(r4.Body)
+	r4.Body.Close()
+	if !bytes.Contains(rb, []byte(`"provider.containers":"mock"`)) {
+		t.Fatalf("ready must label mock providers: %s", rb)
+	}
+	_ = ctx
+}
+
+func TestRateLimits_DangerousAndAPIBudget(t *testing.T) {
+	e, _ := newCoreEnv(t, "rates-"+uuid.NewString()[:6]+"@example.com")
+	d2 := e.d
+	d2.dangerRate = ratelimit.New(2, time.Hour)
+	d2.apiRate = ratelimit.New(6, time.Minute)
+	srv := httptest.NewServer(newRouter(d2))
+	defer srv.Close()
+	e2 := *e
+	e2.srv = srv
+
+	_, proj, _ := e2.do(t, "POST", "/projects", map[string]any{"name": "Rate", "kind": "wordpress"}) // request 1
+	pid := proj["id"].(string)
+	codes := []int{}
+	for i := 0; i < 3; i++ { // requests 2..4: only two dangerous requests are allowed per hour
+		st, _, _ := e2.do(t, "DELETE", "/projects/"+pid, nil)
+		codes = append(codes, st)
+	}
+	if codes[0] != 202 || codes[1] != 202 || codes[2] != 429 {
+		t.Fatalf("dangerous budget: %v", codes)
+	}
+	// Overall budget (6/min): requests 5 and 6 pass, 7 is limited with Retry-After.
+	e2.do(t, "GET", "/projects", nil)
+	e2.do(t, "GET", "/projects", nil)
+	req, _ := http.NewRequest("GET", srv.URL+"/api/v1/projects", nil)
+	req.Header.Set("Authorization", "Bearer "+e2.token)
+	req.Header.Set("X-Nodera-Org", e2.org.String())
+	resp, _ := http.DefaultClient.Do(req)
+	resp.Body.Close()
+	if resp.StatusCode != 429 || resp.Header.Get("Retry-After") == "" {
+		t.Fatalf("api budget: status=%d retry-after=%q", resp.StatusCode, resp.Header.Get("Retry-After"))
 	}
 }

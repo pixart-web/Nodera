@@ -126,7 +126,7 @@ type ClientInput struct {
 func (in *ClientInput) validate() error {
 	in.Name = strings.TrimSpace(in.Name)
 	if in.Name == "" || len(in.Name) > 120 {
-		return apierr.Validation("name is required (max 120 characters)")
+		return apierr.FieldValidation("name", "name is required (max 120 characters)")
 	}
 	if len(in.Notes) > 4000 {
 		return apierr.Validation("notes too long")
@@ -273,16 +273,16 @@ type ProjectInput struct {
 func (in *ProjectInput) validate() error {
 	in.Name = strings.TrimSpace(in.Name)
 	if in.Name == "" || len(in.Name) > 120 {
-		return apierr.Validation("name is required (max 120 characters)")
+		return apierr.FieldValidation("name", "name is required (max 120 characters)")
 	}
 	if in.Slug == "" {
 		in.Slug = Slugify(in.Name)
 	}
 	if !slugRe.MatchString(in.Slug) {
-		return apierr.Validation("slug must be 1-50 lowercase letters, digits or hyphens")
+		return apierr.FieldValidation("slug", "slug must be 1-50 lowercase letters, digits or hyphens")
 	}
 	if in.Kind != "wordpress" && in.Kind != "application" {
-		return apierr.Validation("kind must be 'wordpress' or 'application'")
+		return apierr.FieldValidation("kind", "kind must be 'wordpress' or 'application'")
 	}
 	if len(in.Description) > 2000 {
 		return apierr.Validation("description too long")

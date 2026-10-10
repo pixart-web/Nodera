@@ -24,10 +24,13 @@ import (
 	"github.com/nodera/nodera/internal/ai/providers/localecho"
 	"github.com/nodera/nodera/internal/ai/providers/ollama"
 	"github.com/nodera/nodera/internal/ai/providers/openai"
+	"github.com/nodera/nodera/internal/aiplans"
 	"github.com/nodera/nodera/internal/applications"
 	"github.com/nodera/nodera/internal/audit"
 	"github.com/nodera/nodera/internal/backups"
+	"github.com/nodera/nodera/internal/dashboard"
 	"github.com/nodera/nodera/internal/deployments"
+	"github.com/nodera/nodera/internal/flags"
 	"github.com/nodera/nodera/internal/identity"
 	"github.com/nodera/nodera/internal/infrastructure"
 	"github.com/nodera/nodera/internal/jobs"
@@ -219,6 +222,10 @@ func run() error {
 	opsEngine.SetNotifier(notificationsSvc)
 	monitoringSvc := monitoring.New(pool, auditSvc, prov, notificationsSvc)
 	logsSvc := logs.New(pool, prov)
+	flagsSvc := flags.New(pool, auditSvc, platformSvc)
+	opsEngine.SetFlags(flagsSvc)
+	dashboardSvc := dashboard.New(pool)
+	aiplansSvc := aiplans.New(pool, auditSvc, aiSvc, opsEngine, toolsSvc)
 	opsEngine.BridgeTools(toolsSvc)
 	go runObservability(ctx, log, monitoringSvc, logsSvc)
 	go runMaintenance(ctx, log, backupsSvc, networkSvc)
@@ -253,11 +260,16 @@ func run() error {
 		monitoring:         monitoringSvc,
 		notifications:      notificationsSvc,
 		logs:               logsSvc,
+		dashboard:          dashboardSvc,
+		aiplans:            aiplansSvc,
+		flags:              flagsSvc,
 		prov:               prov,
 		providerMode:       cfg.Runtime.ProviderMode,
 		environment:        cfg.Env,
 		agentRate:          agentRate,
 		agentEnrollRate:    agentEnrollRate,
+		apiRate:            ratelimit.New(1200, time.Minute),
+		dangerRate:         ratelimit.New(30, time.Hour),
 		pool:               pool,
 		loginRate:          loginRate,
 		signupRate:         signupRate,

@@ -14,10 +14,13 @@ import (
 	"github.com/nodera/nodera/internal/agents"
 	"github.com/nodera/nodera/internal/ai"
 	"github.com/nodera/nodera/internal/ai/providers"
+	"github.com/nodera/nodera/internal/aiplans"
 	"github.com/nodera/nodera/internal/applications"
 	"github.com/nodera/nodera/internal/audit"
 	"github.com/nodera/nodera/internal/backups"
+	"github.com/nodera/nodera/internal/dashboard"
 	"github.com/nodera/nodera/internal/deployments"
+	"github.com/nodera/nodera/internal/flags"
 	"github.com/nodera/nodera/internal/identity"
 	"github.com/nodera/nodera/internal/infrastructure"
 	"github.com/nodera/nodera/internal/jobs"
@@ -65,12 +68,17 @@ type apiDeps struct {
 	monitoring         *monitoring.Service
 	notifications      *notifications.Service
 	logs               *logs.Service
+	dashboard          *dashboard.Service
+	aiplans            *aiplans.Service
+	flags              *flags.Service
 	ops                *ops.Engine
 	prov               infraproviders.Set
 	providerMode       string
 	environment        string
 	agentRate          ratelimit.Allower
 	agentEnrollRate    ratelimit.Allower
+	apiRate            ratelimit.Allower // per-actor request budget for the whole organisation API
+	dangerRate         ratelimit.Allower // per-actor budget for approval-gated (dangerous) requests
 	pool               *pgxpool.Pool
 	loginRate          ratelimit.Allower
 	signupRate         ratelimit.Allower
@@ -138,6 +146,7 @@ func newRouter(d apiDeps) http.Handler {
 
 			r.Group(func(r chi.Router) {
 				r.Use(d.requireOrganization)
+				r.Use(d.limitAPI)
 
 				r.Get("/organization", d.handleGetOrganization)
 				r.Put("/organization", d.handleUpdateOrganization)
@@ -148,6 +157,7 @@ func newRouter(d apiDeps) http.Handler {
 				d.mountInfra(r)
 				d.mountDelivery(r)
 				d.mountObserve(r)
+				d.mountPlatform(r)
 
 				r.Get("/infrastructure/nodes", d.handleListNodes)
 				r.Post("/infrastructure/nodes", d.handleRegisterNode)
@@ -248,10 +258,25 @@ func (d apiDeps) handleHealth(w http.ResponseWriter, r *http.Request) {
 // /health which only proves the process is alive (rule 27).
 func (d apiDeps) handleReady(w http.ResponseWriter, r *http.Request) {
 	if err := d.pool.Ping(r.Context()); err != nil {
-		httpserver.WriteJSON(w, http.StatusServiceUnavailable, map[string]string{"status": "unavailable", "reason": "database unreachable"})
+		httpserver.WriteJSON(w, http.StatusServiceUnavailable, map[string]any{"status": "unavailable", "reason": "database unreachable", "checks": map[string]string{"database": "down"}})
 		return
 	}
-	httpserver.WriteJSON(w, http.StatusOK, map[string]string{"status": "ready"})
+	checks := map[string]string{"database": "ok"}
+	var pending int
+	if err := d.pool.QueryRow(r.Context(), `SELECT count(*) FROM jobs WHERE status='queued' AND created_at < now() - interval '10 minutes'`).Scan(&pending); err == nil && pending > 0 {
+		checks["job_queue"] = "stalled" // work has been queued for >10m: the worker may be down
+	} else if err == nil {
+		checks["job_queue"] = "ok"
+	}
+	for name, state := range capabilityReport(d.providerMode, d.prov) {
+		checks["provider."+name] = state
+	}
+	status := http.StatusOK
+	body := map[string]any{"status": "ready", "checks": checks, "provider_mode": d.providerMode}
+	if checks["job_queue"] == "stalled" {
+		status, body["status"] = http.StatusServiceUnavailable, "degraded"
+	}
+	httpserver.WriteJSON(w, status, body)
 }
 
 // --- auth ---

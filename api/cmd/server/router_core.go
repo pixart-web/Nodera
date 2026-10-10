@@ -207,6 +207,9 @@ func (d apiDeps) handleDeleteProject(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if !d.allowDangerous(w, r) {
+		return
+	}
 	res, err := d.tools.Execute(r.Context(), mustAuthContext(r), "project.delete", tools.ExecuteInput{ResourceType: "project", ResourceID: id.String()})
 	if err != nil {
 		httpserver.WriteError(w, r, err)

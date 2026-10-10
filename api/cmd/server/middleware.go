@@ -197,3 +197,21 @@ func mustAuthContext(r *http.Request) authctx.AuthContext {
 	ac, _ := r.Context().Value(ctxKeyAuthContext{}).(authctx.AuthContext)
 	return ac
 }
+
+// limitAPI applies the per-actor request budget (users, API tokens and
+// service accounts alike) to the organisation API. It runs after
+// authentication so the key is the authenticated actor, not an IP an attacker
+// can rotate. Streaming endpoints count once, at connection time.
+func (d apiDeps) limitAPI(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if d.apiRate != nil {
+			ac := mustAuthContext(r)
+			if !d.apiRate.Allow(ac.OrganizationID.String() + ":" + ac.ActorID.String()) {
+				w.Header().Set("Retry-After", "60")
+				httpserver.WriteError(w, r, apierr.New(apierr.CodeRateLimited, "request rate exceeded; slow down"))
+				return
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
+}

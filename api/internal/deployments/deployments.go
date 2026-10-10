@@ -128,7 +128,7 @@ func safePath(p string) error {
 func (s *Service) Register(eng *ops.Engine) {
 	mk := func(name, perm, tool, notify string, rollback bool) {
 		eng.Register(ops.Definition{
-			Name: name, Permission: perm, ToolKey: tool, NotifyKind: notify, TimeoutSeconds: 1800,
+			Name: name, Permission: perm, ToolKey: tool, NotifyKind: notify, TimeoutSeconds: 1800, Flag: "deployment_engine",
 			Factory: func(_ *ops.Env, org, project uuid.UUID, payload json.RawMessage) (ops.Operation, error) {
 				var p Payload
 				if err := json.Unmarshal(payload, &p); err != nil {

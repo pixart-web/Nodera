@@ -24,6 +24,9 @@ func (d apiDeps) submit(w http.ResponseWriter, r *http.Request, op string, proje
 
 // gateway routes a dangerous action through the Tool Gateway (approval).
 func (d apiDeps) gateway(w http.ResponseWriter, r *http.Request, tool, resType string, id uuid.UUID, params map[string]any) {
+	if !d.allowDangerous(w, r) {
+		return
+	}
 	res, err := d.tools.Execute(r.Context(), mustAuthContext(r), tool, tools.ExecuteInput{ResourceType: resType, ResourceID: id.String(), Parameters: params})
 	reply(w, r, http.StatusAccepted, res, err)
 }
@@ -289,3 +292,18 @@ func (d apiDeps) handleRevokeCertificate(w http.ResponseWriter, r *http.Request)
 }
 
 var _ = apierr.Validation
+
+// allowDangerous applies the tighter budget for requests that create approvals
+// for destructive or production-affecting operations.
+func (d apiDeps) allowDangerous(w http.ResponseWriter, r *http.Request) bool {
+	if d.dangerRate == nil {
+		return true
+	}
+	ac := mustAuthContext(r)
+	if !d.dangerRate.Allow(ac.OrganizationID.String() + ":" + ac.ActorID.String()) {
+		w.Header().Set("Retry-After", "3600")
+		httpserver.WriteError(w, r, apierr.New(apierr.CodeRateLimited, "too many dangerous operation requests; try again later"))
+		return false
+	}
+	return true
+}

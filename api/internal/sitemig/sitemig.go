@@ -365,7 +365,7 @@ func (s *Service) credentials(ctx context.Context, org uuid.UUID, id uuid.UUID) 
 func (s *Service) Register(eng *ops.Engine) {
 	mk := func(name, perm, tool, notify string, timeout int, f func(o base) ops.Operation) {
 		eng.Register(ops.Definition{
-			Name: name, Permission: perm, ToolKey: tool, NotifyKind: notify, TimeoutSeconds: timeout,
+			Name: name, Permission: perm, ToolKey: tool, NotifyKind: notify, TimeoutSeconds: timeout, Flag: "migration_engine",
 			Factory: func(_ *ops.Env, org, project uuid.UUID, payload json.RawMessage) (ops.Operation, error) {
 				var p struct {
 					MigrationID uuid.UUID `json:"migration_id"`

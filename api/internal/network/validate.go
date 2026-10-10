@@ -14,7 +14,7 @@ var labelRe = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
 func NormalizeDomain(in string) (string, error) {
 	d := strings.ToLower(strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(in), ".")))
 	if d == "" || len(d) > 253 {
-		return "", apierr.Validation("domain name is required (max 253 characters)")
+		return "", apierr.FieldValidation("name", "domain name is required (max 253 characters)")
 	}
 	if net.ParseIP(d) != nil {
 		return "", apierr.Validation("an IP address is not a domain name")

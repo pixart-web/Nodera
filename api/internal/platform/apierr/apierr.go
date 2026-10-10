@@ -25,6 +25,9 @@ const (
 type Error struct {
 	Code    Code
 	Message string
+	// Details carries structured, client-safe context (e.g. the offending
+	// field). Never put secrets or internal error text in here.
+	Details map[string]any
 	// Err is the underlying cause, kept for logging/correlation but never
 	// serialized to the client — see docs/SECURITY.md on stack trace exposure.
 	Err error
@@ -45,6 +48,18 @@ func New(code Code, message string) *Error {
 
 func Wrap(code Code, message string, err error) *Error {
 	return &Error{Code: code, Message: message, Err: err}
+}
+
+// WithDetails returns a copy of the error with structured details attached.
+func (e *Error) WithDetails(d map[string]any) *Error {
+	c := *e
+	c.Details = d
+	return &c
+}
+
+// FieldValidation is a validation error that names the offending field.
+func FieldValidation(field, message string) *Error {
+	return Validation(message).WithDetails(map[string]any{"field": field})
 }
 
 func NotFound(resource string) *Error {

@@ -74,7 +74,9 @@ type Definition struct {
 	NotifyKind string
 	// TimeoutSeconds bounds a single execution (default 900).
 	TimeoutSeconds int
-	Factory        func(env *Env, orgID, projectID uuid.UUID, payload json.RawMessage) (Operation, error)
+	// Flag, when set, must be enabled for the organisation (feature_flags).
+	Flag    string
+	Factory func(env *Env, orgID, projectID uuid.UUID, payload json.RawMessage) (Operation, error)
 }
 
 type AuditRecorder interface {
@@ -82,6 +84,11 @@ type AuditRecorder interface {
 }
 
 // Notifier receives operation outcomes (implemented by internal/notifications).
+// FlagChecker reports whether a feature flag is enabled for an organisation.
+type FlagChecker interface {
+	Enabled(ctx context.Context, org uuid.UUID, key string) bool
+}
+
 type Notifier interface {
 	Notify(ctx context.Context, orgID uuid.UUID, kind, title, body, resourceType, resourceID string)
 }
@@ -92,6 +99,7 @@ type Engine struct {
 	env      *Env
 	defs     map[string]Definition
 	notifier Notifier
+	flags    FlagChecker
 }
 
 func New(pool *pgxpool.Pool, auditRecorder AuditRecorder) *Engine {
@@ -99,6 +107,9 @@ func New(pool *pgxpool.Pool, auditRecorder AuditRecorder) *Engine {
 }
 
 func (e *Engine) SetNotifier(n Notifier) { e.notifier = n }
+
+// SetFlags enables feature-flag gating of operations.
+func (e *Engine) SetFlags(f FlagChecker) { e.flags = f }
 
 // Register adds an operation type.
 func (e *Engine) Register(d Definition) {
@@ -168,6 +179,9 @@ func (e *Engine) SubmitTrusted(ctx context.Context, ac authctx.AuthContext, in S
 }
 
 func (e *Engine) submit(ctx context.Context, ac authctx.AuthContext, d Definition, in SubmitInput) (JobRef, error) {
+	if d.Flag != "" && e.flags != nil && !e.flags.Enabled(ctx, ac.OrganizationID, d.Flag) {
+		return JobRef{}, apierr.New(apierr.CodeForbidden, "the "+d.Flag+" feature is disabled for this organization")
+	}
 	payload, err := json.Marshal(in.Payload)
 	if err != nil {
 		return JobRef{}, apierr.Validation("payload is not valid JSON")
@@ -375,3 +389,37 @@ func safeRun(ctx context.Context, f func(context.Context, *Run) error, r *Run) (
 }
 
 func humanName(op string) string { return op }
+
+// Check validates a would-be submission (definition exists, permission held,
+// payload valid, preconditions met) without enqueueing anything. Used to vet
+// AI-proposed plans before a human ever sees them.
+func (e *Engine) Check(ctx context.Context, ac authctx.AuthContext, in SubmitInput) error {
+	d, ok := e.defs[in.Operation]
+	if !ok {
+		return apierr.Validation("unknown operation: " + in.Operation)
+	}
+	if err := rbac.Require(ac, d.Permission); err != nil {
+		return err
+	}
+	if d.Flag != "" && e.flags != nil && !e.flags.Enabled(ctx, ac.OrganizationID, d.Flag) {
+		return apierr.New(apierr.CodeForbidden, "the "+d.Flag+" feature is disabled for this organization")
+	}
+	payload, err := json.Marshal(in.Payload)
+	if err != nil {
+		return apierr.Validation("payload is not valid JSON")
+	}
+	if string(payload) == "null" {
+		payload = []byte(`{}`)
+	}
+	op, err := d.Factory(e.env, ac.OrganizationID, in.ProjectID, payload)
+	if err != nil {
+		return err
+	}
+	return op.Validate(ctx)
+}
+
+// Describe returns the definition for an operation name.
+func (e *Engine) Describe(name string) (Definition, bool) {
+	d, ok := e.defs[name]
+	return d, ok
+}
