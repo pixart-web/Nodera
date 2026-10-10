@@ -183,7 +183,7 @@ func TestLogs_RedactionSearchAndRetention(t *testing.T) {
 	h := newHarness(pool)
 	ctx := context.Background()
 	set, _ := mock.NewSet()
-	lg := logs.New(pool, set)
+	lg := logs.New(pool, set).WithAudit(h.audit)
 	ac, _ := h.newOwnerContext(t, ctx, "logs-ok@nodera.dev")
 	other, _ := h.newOwnerContext(t, ctx, "logs-other@nodera.dev")
 	member := h.newMemberContext(t, ctx, ac.OrganizationID, "logs-member@nodera.dev")
@@ -232,6 +232,14 @@ func TestLogs_RedactionSearchAndRetention(t *testing.T) {
 	_ = pool.QueryRow(ctx, `SELECT count(*) FROM audit_log WHERE organization_id=$1`, ac.OrganizationID).Scan(&auditAfter)
 	if auditBefore == 0 || auditAfter != auditBefore {
 		t.Fatalf("audit log must not be pruned without an explicit policy (%d -> %d)", auditBefore, auditAfter)
+	}
+	if err := lg.SetRetention(ctx, ac, "log_entries", 20); err != nil {
+		t.Fatal(err)
+	}
+	var audited int
+	_ = pool.QueryRow(ctx, `SELECT count(*) FROM audit_log WHERE action='logs.retention.set' AND organization_id=$1`, ac.OrganizationID).Scan(&audited)
+	if audited != 1 {
+		t.Fatalf("retention change must be audited, got %d rows", audited)
 	}
 	if err := lg.SetRetention(ctx, member, "log_entries", 10); err == nil {
 		t.Fatal("member must not change retention")

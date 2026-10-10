@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import { Cloud, Database, FolderKanban, Globe, Plus, ScrollText, Search, Settings, Boxes } from "lucide-react";
+import { Cloud, Database, Globe, Plus, ScrollText, Search, Settings, Boxes } from "lucide-react";
 import { Sidebar, SidebarContent } from "./Sidebar";
 import { Topbar } from "./Topbar";
 import { Drawer } from "@/components/ui/Overlay";

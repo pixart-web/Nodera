@@ -6,8 +6,13 @@ Nodera is the Infrastructure, AI, Agent, and Operations control plane for the
 It is built as platform infrastructure, not a single-purpose app — see
 `docs/ARCHITECTURE.md` and `docs/DECISIONS.md` for the reasoning.
 
-This is early-stage, foundational work. See the status table below for
-exactly what is real today.
+Nodera is an **infrastructure control plane**: it manages projects, WordPress
+sites, deployments, site migrations, domains/DNS, SSL, backups, monitoring,
+incidents, nodes, secrets and AI-assisted operations from one secure place,
+with every important action running as an audited, rollback-capable
+*operation*. See the status table below — and `docs/FINAL-IMPLEMENTATION-AUDIT.md` —
+for exactly what is real, what runs on mock/local providers, and what still
+needs the real Hetzner environment or external services.
 
 ## Stack
 
@@ -48,13 +53,43 @@ schema/interfaces, no production backend yet) · **PLANNED** (not started).
 | OpenAPI spec + Swagger UI | IMPLEMENTED | `GET /openapi.json` (validated against the OpenAPI 3.0 schema in CI) + `GET /docs`; hand-maintained (not yet generated from Go code — see docs/ROADMAP.md Phase 50), but every response schema now declares `required`, and `web/`'s frontend types are generated straight from it (`lib/types.ts` is a thin alias layer over `lib/api-types.generated.ts`, not a hand-copied shape) |
 | Pagination | IMPLEMENTED (4 endpoints) | `infrastructure/nodes`, `applications`, `jobs`, `audit` — `limit`/`offset` + a `has_more` envelope; other list endpoints stay unpaginated (small at phase-1 scale) |
 | Dashboard / frontend | IMPLEMENTED | Next.js + TypeScript control plane UI (`web/`) — login, org picker, infrastructure, applications, jobs, tools/approvals, agents, AI Gateway (chat/profiles/providers/models), secrets, access (API tokens + service accounts), settings (roles + member role assignment), audit; every page reads/writes real API data, no fabricated placeholders. Jobs and Approvals refresh automatically via background polling (5s/7s). Human session lives in an HttpOnly cookie (never localStorage/JS-readable), with double-submit CSRF protection on mutating requests — see docs/SECURITY.md "Browser authentication" |
-| Node Agent, AI Gateway, Agent Runtime as separate services | PLANNED | Currently packages inside the one Core API binary (ADR-002) |
+| Operation framework | IMPLEMENTED | Persisted steps/logs, reverse-order rollback, cancel, idempotency, panic containment; dangerous operations only through the approval gateway |
+| Projects / clients / provisioning | IMPLEMENTED | `project.provision` / `project.delete` (approval), tenant-scoped, soft delete |
+| WordPress engine | IMPLEMENTED (mock/local) · needs real Docker + MariaDB | install = provision, clone (URL rewrite), in-place update with rollback, health report |
+| Backups / restore | IMPLEMENTED (local FS) | checksummed + verified archives, safety snapshot + automatic rollback, policies, retention |
+| Domains / DNS / SSL | IMPLEMENTED (local DNS store, local CA) · Cloudflare/Let's Encrypt adapters are prepared skeletons | private keys only in the encrypted secrets store |
+| Deployments | IMPLEMENTED (upload; git via provider interface) | PRECHECK→…→COMPLETE, auto-revert, rollback, production approval; no GitHub adapter/build step yet |
+| Site migration | IMPLEMENTED for zip archives · remote connectors TODO | preflight PASS/WARNING/BLOCKER, staging, serialized-safe URL rewrite, health score, approved cutover with automatic restore |
+| Monitoring / alerting / incidents / notifications / logs | IMPLEMENTED | SSRF-guarded checks, deduplicated incidents with auto-resolve, redacted logs, retention; email needs SMTP |
+| Node Agent | IMPLEMENTED (tested in-process) · needs a real node | pull model, Ed25519 signed both ways, replay protection, allowlisted commands only |
+| AI operations layer | IMPLEMENTED | AI proposes plans; a human approves and runs each step; unknown/forged operations are dropped |
+| Dashboard, search, command palette, notification center, feature flags | IMPLEMENTED | real data only; permission-aware; SSE for live operation progress |
+| Docker / demo mode | IMPLEMENTED | dev + production compose, API/web/agent images, labelled DEVELOPMENT demo seed on mock providers |
+| AI Gateway, Agent Runtime as separate services | PLANNED | Currently packages inside the one Core API binary (ADR-002); the Node Agent *is* a separate binary/image |
 
 ## Repository layout
 
 See `docs/ARCHITECTURE.md` §2.
 
 ## Local development
+
+### One command (whole stack)
+
+```bash
+cp .env.example .env
+docker compose up --build          # postgres, redis, api :8080, web :3000
+```
+
+Want something to click on without any real infrastructure? Demo mode seeds a
+clearly-labelled **DEVELOPMENT (demo data)** organisation on in-memory mock providers:
+
+```bash
+NODERA_PROVIDER_MODE=mock NODERA_DEMO_SEED=true docker compose up --build   # sign in as demo@nodera.local
+```
+
+Provider modes, keys and what each mode makes real are explained in `docs/DEVELOPMENT.md`.
+
+### Piece by piece
 
 Requirements: Go 1.27+, Docker (for Postgres/Redis), Node.js 20+.
 
@@ -132,4 +167,7 @@ cookie/CSRF tests and `internal`'s integration tests both existing).
 - [docs/AGENTS.md](docs/AGENTS.md) — agent/tool/approval design
 - [docs/INFRASTRUCTURE.md](docs/INFRASTRUCTURE.md) — node/provider model
 - [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) — deployment notes, required config, Hetzner placeholders
-- [docs/ROADMAP.md](docs/ROADMAP.md) — prioritized next steps
+- [docs/ROADMAP.md](docs/ROADMAP.md) — real implementation state and next steps
+- [docs/FINAL-IMPLEMENTATION-AUDIT.md](docs/FINAL-IMPLEMENTATION-AUDIT.md) — honest self-audit: what is real, mock-only, environment- or provider-dependent
+- [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) — run locally, provider modes, demo mode, tests
+- [docs/NODE-AGENT.md](docs/NODE-AGENT.md), [docs/MIGRATION.md](docs/MIGRATION.md), [docs/DEPLOYMENTS.md](docs/DEPLOYMENTS.md), [docs/BACKUPS.md](docs/BACKUPS.md), [docs/MONITORING.md](docs/MONITORING.md) — engine documentation

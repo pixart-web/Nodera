@@ -2,7 +2,7 @@
 
 import { use, useState } from "react";
 import Link from "next/link";
-import { Activity, AppWindow, ArrowLeft, Boxes, Database, ExternalLink, Globe, Layers, LayoutGrid, LockKeyhole, KeyRound, Rocket, ScrollText, Settings, Cloud, Siren, Play } from "lucide-react";
+import { Activity, AppWindow, ArrowLeft, Database, ExternalLink, Globe, Layers, LayoutGrid, LockKeyhole, KeyRound, Rocket, ScrollText, Settings, Cloud, Siren, Play } from "lucide-react";
 import { Breadcrumb } from "@/components/ui/Breadcrumb";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Button } from "@/components/ui/Button";

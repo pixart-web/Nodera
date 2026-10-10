@@ -248,6 +248,7 @@ func (s *Service) DeleteChannel(ctx context.Context, ac authctx.AuthContext, id 
 	if tag.RowsAffected() == 0 {
 		return apierr.NotFound("channel")
 	}
+	_ = s.audit.Record(ctx, ac, audit.Entry{Action: "notifications.channel.deleted", ResourceType: "notification_channel", ResourceID: id.String(), Success: true})
 	return nil
 }
 

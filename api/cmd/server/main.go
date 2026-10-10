@@ -240,7 +240,7 @@ func run() error {
 	notificationsSvc := notifications.New(pool, auditSvc, notifPolicy)
 	opsEngine.SetNotifier(notificationsSvc)
 	monitoringSvc := monitoring.New(pool, auditSvc, prov, notificationsSvc)
-	logsSvc := logs.New(pool, prov)
+	logsSvc := logs.New(pool, prov).WithAudit(auditSvc)
 	flagsSvc := flags.New(pool, auditSvc, platformSvc)
 	opsEngine.SetFlags(flagsSvc)
 	dashboardSvc := dashboard.New(pool)

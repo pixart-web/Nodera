@@ -11,7 +11,7 @@ import { usePlatform } from "@/components/providers/Platform";
 import { toStatus } from "@/lib/status";
 import { ago } from "@/lib/format";
 import { useAsync } from "@/lib/useAsync";
-import { dashboardService, monitoringService, projectsService } from "@/services";
+import { monitoringService, projectsService } from "@/services";
 import type { ApiDashboardSummary, ApiOperation } from "@/lib/types";
 
 const sum = (o?: Record<string, number>) => Object.values(o ?? {}).reduce((a, b) => a + b, 0);

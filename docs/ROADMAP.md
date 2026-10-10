@@ -2057,40 +2057,48 @@ the API.
       for the exact security-invariant status and what's genuinely
       deferred versus done.
 
+## Control plane implementation (operations engine) — current state
+
+Status legend: **DONE** = real code + tests; **PARTIAL** = real code, a named piece missing; **NEEDS ENV** = works against mocks/local
+providers, requires the real environment (Hetzner/Docker/credentials) to be proven; **TODO** = not started. Nothing is marked DONE if only the UI exists.
+
+| Area | Status | Notes |
+|---|---|---|
+| Operation framework (steps, logs, rollback, cancel, idempotency, panic containment, correlation) | DONE | `internal/ops`, 7 integration tests |
+| Approval gateway for dangerous operations | DONE | `ops.Submit` refuses `ToolKey` operations; 6 dangerous operations wired |
+| Provider interfaces + mock/local/docker/mariadb | DONE (mock/local) · NEEDS ENV (docker, mariadb) | argv-only adapters tested through runner seams |
+| External adapters (Cloudflare, Let's Encrypt, Hetzner, GitHub) | PREPARED SKELETONS | always fail with `ErrUnavailable`; never registered |
+| Node Agent (protocol, enrolment, signing, allowlist, replay, revoke, CLI, UI) | DONE · NEEDS ENV for a real node | `docs/NODE-AGENT.md` |
+| Clients / projects / provisioning | DONE | `project.provision`, `project.delete` (approval) |
+| WordPress (install=provision, clone, update, health) | DONE on mock/local FS · NEEDS ENV for real containers + MariaDB | |
+| Backups / restore / policies / retention | DONE (local FS) · TODO s3/sftp targets | `docs/BACKUPS.md` |
+| Domains / DNS / SSL (issue, renew, revoke, expiry, auto-renew) | DONE (local DNS store + local CA) · NEEDS ENV for Cloudflare + Let's Encrypt | |
+| Deployments (upload + git, rollback, auto-revert, production approval) | DONE · PARTIAL: no GitHub adapter, no build step, no webhooks | `docs/DEPLOYMENTS.md` |
+| Site migration (zip sources, preflight, staging, rewrite, score, cutover, rollback) | DONE for archives · TODO ftp/sftp/ssh/cpanel/remote connectors | `docs/MIGRATION.md` |
+| Monitoring, alert rules, incidents, notifications, logs, retention | DONE · PARTIAL: email delivery needs SMTP | `docs/MONITORING.md` |
+| Feature flags, dashboard, global search, command palette, notification center | DONE | |
+| Realtime | DONE (SSE) | WebSocket not needed so far |
+| AI plans (propose → human approve → human runs steps) | DONE | autonomous execution deliberately absent |
+| Security regression suite | DONE | `api/cmd/server/security_test.go` |
+| Docker (dev + prod template + CI image builds) | DONE · NEEDS ENV for first real deploy | `docs/DEPLOYMENT.md` |
+| Demo mode + labelled seed | DONE | `docs/DEVELOPMENT.md` |
+| Client portal | TODO (flag exists, default off) | |
+| Persistent UI filters, server-side table pagination in the UI | TODO | tables paginate client-side over ≤200 rows fetched |
+| Password reset / email invitations | TODO | needs a mail transport |
+| OpenAPI generated from code | TODO | hand-maintained, protected by a drift test |
+
+Full self-assessment: `docs/FINAL-IMPLEMENTATION-AUDIT.md`.
+
 ## Next up
 
-1. **Concrete job types**: the worker dispatcher is real but nothing
-   enqueues a `backup.create` or `deploy.application` job yet — those
-   arrive with the backups/deployment domains.
-2. **More tool handlers**: `get_container_logs` needs a container domain
-   that doesn't exist yet; `create_backup`/`verify_backup` need the jobs
-   system wired to an actual backup mechanism.
-3. **Generate the OpenAPI spec from code** instead of hand-maintaining
-   it — the frontend-type-generation half of this item shipped in
-   Phase 50 (`web/lib/types.ts` is now a thin alias layer over
-   `lib/api-types.generated.ts`); retrofitting every handler with Go doc
-   annotations so the spec itself is generated, rather than
-   hand-maintained-and-kept-in-sync, remains deliberately deferred — a
-   much larger, higher-blast-radius mechanical rewrite than any other
-   item on this list, not something to take on in the same pass as the
-   type-alias swap.
-4. **A "platform secrets" mechanism** for cloud provider credentials
-   (`docs/AI_ARCHITECTURE.md` Credential handling) — the
-   org-scoped-secrets-vs-platform-wide-provider mismatch is unaffected by
-   having two cloud adapters now instead of one.
-5. **Actual invite-by-email** (as opposed to Phase 20's "add an existing
-   account") — needs outbound email delivery, which doesn't exist in this
-   phase at all.
-6. **Rate limiting on further endpoints** beyond the four covered now, if
-   a concrete abuse case surfaces (most mutations remain unlimited but are
-   `organization.manage`-gated, which is a meaningfully different risk
-   profile than the four already covered).
-7. **Real-time updates via websockets/SSE**, if polling's ~5-7s latency
-   ever proves insufficient — polling now covers the two pages where it
-   mattered most; every other page still loads once.
-8. **Polling for more pages** if a concrete need surfaces (e.g. the
-   Agents page while a `Run`/`ExecuteTool` call an agent makes is
-   in flight) — not added speculatively.
+1. **First real deployment on `nodera-prod-01`**: verify Traefik labels, Docker socket/GID, MariaDB adapter, Postgres/Redis wiring, then enrol the node agent.
+2. **Adapters that need credentials**: GitHub (token/App), Cloudflare DNS, Let's Encrypt (ACME), Hetzner Cloud; S3/SFTP backup targets.
+3. **Migration connectors**: SFTP/SSH first (the common hosting case), then cPanel and remote WordPress.
+4. **Email transport** (SMTP) → email notification channel, invitations, password reset.
+5. **A build runner** for deployments (containerised builds, never ad-hoc shell) and GitHub webhooks.
+6. **Persistent filters + server-side pagination** in the UI tables.
+7. **Generate the OpenAPI spec from code** (the drift test already stops it from silently diverging).
+8. **Platform secrets wiring** for cloud-provider credentials (`docs/AI_ARCHITECTURE.md`).
 
 ## Explicitly not started (rule 38 — deferred by design)
 

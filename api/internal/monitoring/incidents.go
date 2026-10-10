@@ -111,6 +111,7 @@ func (s *Service) DeleteRule(ctx context.Context, ac authctx.AuthContext, id uui
 	if tag.RowsAffected() == 0 {
 		return apierr.NotFound("rule")
 	}
+	s.rec(ctx, ac, "monitoring.rule.deleted", "alert_rule", id.String(), nil)
 	return nil
 }
 

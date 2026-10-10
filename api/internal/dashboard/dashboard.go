@@ -164,12 +164,14 @@ func (s *Service) Search(ctx context.Context, ac authctx.AuthContext, q string) 
 	}
 	for _, x := range []src{
 		{"projects.read", "project", `SELECT id::text, name, slug FROM projects WHERE organization_id=$1 AND deleted_at IS NULL AND (name ILIKE '%'||$2||'%' OR slug ILIKE '%'||$2||'%') ORDER BY name LIMIT 6`, "/projects/"},
-		{"clients.read", "client", `SELECT id::text, name, contact_email FROM clients WHERE organization_id=$1 AND deleted_at IS NULL AND name ILIKE '%'||$2||'%' ORDER BY name LIMIT 5`, "/clients/"},
-		{"domains.read", "domain", `SELECT id::text, name, status FROM domains WHERE organization_id=$1 AND deleted_at IS NULL AND name ILIKE '%'||$2||'%' ORDER BY name LIMIT 5`, "/domains/"},
-		{"applications.read", "application", `SELECT id::text, name, status FROM applications WHERE organization_id=$1 AND name ILIKE '%'||$2||'%' ORDER BY name LIMIT 5`, "/applications/"},
-		{"monitoring.read", "monitor", `SELECT id::text, name, kind FROM monitors WHERE organization_id=$1 AND name ILIKE '%'||$2||'%' ORDER BY name LIMIT 5`, "/monitoring/"},
-		{"incidents.read", "incident", `SELECT id::text, title, status FROM incidents WHERE organization_id=$1 AND title ILIKE '%'||$2||'%' ORDER BY detected_at DESC LIMIT 5`, "/incidents/"},
-		{"infrastructure.read", "node", `SELECT id::text, hostname, status FROM nodes WHERE organization_id=$1 AND hostname ILIKE '%'||$2||'%' ORDER BY hostname LIMIT 5`, "/infrastructure/"},
+		{"clients.read", "client", `SELECT id::text, name, contact_email FROM clients WHERE organization_id=$1 AND deleted_at IS NULL AND name ILIKE '%'||$2||'%' ORDER BY name LIMIT 5`, "/clients?focus="},
+		{"domains.read", "domain", `SELECT id::text, name, status FROM domains WHERE organization_id=$1 AND deleted_at IS NULL AND name ILIKE '%'||$2||'%' ORDER BY name LIMIT 5`, "/domains?focus="},
+		{"applications.read", "application", `SELECT id::text, name, status FROM applications WHERE organization_id=$1 AND name ILIKE '%'||$2||'%' ORDER BY name LIMIT 5`, "/applications?focus="},
+		{"monitoring.read", "monitor", `SELECT id::text, name, kind FROM monitors WHERE organization_id=$1 AND name ILIKE '%'||$2||'%' ORDER BY name LIMIT 5`, "/monitoring?focus="},
+		{"incidents.read", "incident", `SELECT id::text, title, status FROM incidents WHERE organization_id=$1 AND title ILIKE '%'||$2||'%' ORDER BY detected_at DESC LIMIT 5`, "/monitoring?tab=incidents&focus="},
+		{"deployments.read", "deployment", `SELECT d.id::text, COALESCE(d.repository, 'upload') || ' → ' || d.environment, d.status FROM deployments d WHERE d.organization_id=$1 AND (d.repository ILIKE '%'||$2||'%' OR d.ref ILIKE '%'||$2||'%' OR COALESCE(d.commit_sha,'') ILIKE $2||'%') ORDER BY d.created_at DESC LIMIT 5`, "/deployment?focus="},
+		{"operations.read", "operation", `SELECT id::text, operation, status FROM jobs WHERE organization_id=$1 AND operation IS NOT NULL AND operation ILIKE '%'||$2||'%' ORDER BY created_at DESC LIMIT 5`, "/operations?focus="},
+		{"infrastructure.read", "node", `SELECT id::text, hostname, status FROM nodes WHERE organization_id=$1 AND hostname ILIKE '%'||$2||'%' ORDER BY hostname LIMIT 5`, "/infrastructure?focus="},
 	} {
 		if !has(ac, x.perm) {
 			continue

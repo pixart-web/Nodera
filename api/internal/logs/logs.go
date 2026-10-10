@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/nodera/nodera/internal/audit"
 	"github.com/nodera/nodera/internal/platform/apierr"
 	"github.com/nodera/nodera/internal/platform/authctx"
 	"github.com/nodera/nodera/internal/platform/redact"
@@ -20,10 +21,19 @@ import (
 	"github.com/nodera/nodera/internal/rbac"
 )
 
+// AuditRecorder is optional: when set, retention changes are audited.
+type AuditRecorder interface {
+	Record(ctx context.Context, ac authctx.AuthContext, e audit.Entry) error
+}
+
 type Service struct {
 	pool      *pgxpool.Pool
 	providers providers.Set
+	audit     AuditRecorder
 }
+
+// WithAudit enables auditing of retention-policy changes.
+func (s *Service) WithAudit(a AuditRecorder) *Service { s.audit = a; return s }
 
 func New(pool *pgxpool.Pool, set providers.Set) *Service { return &Service{pool: pool, providers: set} }
 
@@ -204,6 +214,9 @@ func (s *Service) SetRetention(ctx context.Context, ac authctx.AuthContext, reso
 		ON CONFLICT (organization_id, resource) DO UPDATE SET retention_days=EXCLUDED.retention_days`, ac.OrganizationID, resource, days)
 	if err != nil {
 		return apierr.Wrap(apierr.CodeInternal, "failed to save retention", err)
+	}
+	if s.audit != nil {
+		_ = s.audit.Record(ctx, ac, audit.Entry{Action: "logs.retention.set", ResourceType: "retention_policy", ResourceID: resource, Success: true, ResultingState: map[string]any{"retention_days": days}})
 	}
 	return nil
 }

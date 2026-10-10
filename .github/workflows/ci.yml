@@ -104,6 +104,10 @@ jobs:
         working-directory: web
         run: npm run typecheck
 
+      - name: lint
+        working-directory: web
+        run: npm run lint -- --max-warnings 0
+
       - name: unit tests
         working-directory: web
         run: npm test

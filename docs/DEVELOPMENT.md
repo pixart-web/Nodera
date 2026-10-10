@@ -51,7 +51,7 @@ cd web && npm ci && npm run dev
 ```bash
 export NODERA_TEST_DATABASE_URL=postgres://nodera:nodera_dev_password@localhost:5432/nodera_test?sslmode=disable
 cd api && go vet ./... && go test ./... -race -p 1     # -p 1 is required: tests share one DB
-cd web && npm run typecheck && npm test && npm run build
+cd web && npm run lint && npm run typecheck && npm test && npm run build
 ```
 
 What the suites cover:
@@ -66,7 +66,7 @@ What the suites cover:
   suite** (`security_test.go`) and an OpenAPI drift test that fails when a route
   is registered without being documented.
 * `web/tests` — pure-function unit tests (formatting, status mapping, SSE parser).
-  ESLint is not configured in this repository (`next lint` prompts for setup).
+  ESLint (`eslint.config.mjs`, Next core-web-vitals + TypeScript) runs with `--max-warnings 0` in CI.
 
 ## Layout
 
