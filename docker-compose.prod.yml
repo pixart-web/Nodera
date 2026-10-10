@@ -1,0 +1,133 @@
+# PRODUCTION template (Hetzner node "nodera-prod-01", Docker + Traefik).
+# Nothing here is hardcoded to a machine: every environment-specific value comes
+# from the environment (.env.production, never committed) and compose refuses to
+# start if a required secret is missing (`${VAR:?}`).
+#
+#   docker compose -f docker-compose.prod.yml --env-file .env.production up -d
+#
+# Assumes an existing Traefik instance and an external network (default
+# `proxy-public`) that Traefik is attached to, plus Let's Encrypt configured on
+# Traefik's side. See docs/DEPLOYMENT.md for the checklist and what is NOT
+# verified until it runs on the real node.
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: nodera
+      POSTGRES_PASSWORD: ${NODERA_POSTGRES_PASSWORD:?set NODERA_POSTGRES_PASSWORD}
+      POSTGRES_DB: nodera
+    volumes:
+      - nodera_postgres_data:/var/lib/postgresql/data
+    networks: [internal]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nodera"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    networks: [internal]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  api:
+    image: ${NODERA_API_IMAGE:-nodera-api:latest}
+    build:
+      context: ./api
+      target: server
+    restart: unless-stopped
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    environment:
+      NODERA_ENV: production
+      NODERA_DATABASE_URL: postgres://nodera:${NODERA_POSTGRES_PASSWORD}@postgres:5432/nodera?sslmode=disable
+      NODERA_REDIS_URL: redis://redis:6379
+      NODERA_CORS_ORIGINS: ${NODERA_CORS_ORIGINS:?set NODERA_CORS_ORIGINS to the web origin}
+      NODERA_SECRETS_ENCRYPTION_KEY: ${NODERA_SECRETS_ENCRYPTION_KEY:?set NODERA_SECRETS_ENCRYPTION_KEY}
+      NODERA_AGENT_SIGNING_KEY: ${NODERA_AGENT_SIGNING_KEY:?set NODERA_AGENT_SIGNING_KEY}
+      NODERA_PLATFORM_BOOTSTRAP_ADMIN_EMAIL: ${NODERA_PLATFORM_BOOTSTRAP_ADMIN_EMAIL:-}
+      # `docker` needs the host Docker socket (see the volume) — only enable on the managed node.
+      NODERA_PROVIDER_MODE: ${NODERA_PROVIDER_MODE:-local}
+      NODERA_DOCKER_NETWORK: ${NODERA_DOCKER_NETWORK:-proxy-public}
+      NODERA_BASE_DOMAIN: ${NODERA_BASE_DOMAIN:-}
+      NODERA_ANTHROPIC_API_KEY: ${NODERA_ANTHROPIC_API_KEY:-}
+      NODERA_OPENAI_API_KEY: ${NODERA_OPENAI_API_KEY:-}
+    volumes:
+      - nodera_api_data:/data
+      # - /var/run/docker.sock:/var/run/docker.sock   # NODERA_PROVIDER_MODE=docker only
+    read_only: true
+    tmpfs: [/tmp]
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    networks: [internal, proxy]
+    labels:
+      traefik.enable: "true"
+      traefik.docker.network: ${NODERA_PROXY_NETWORK:-proxy-public}
+      traefik.http.routers.nodera-api.rule: Host(`${NODERA_API_HOST:?set NODERA_API_HOST}`)
+      traefik.http.routers.nodera-api.entrypoints: websecure
+      traefik.http.routers.nodera-api.tls.certresolver: ${NODERA_CERT_RESOLVER:-letsencrypt}
+      traefik.http.services.nodera-api.loadbalancer.server.port: "8080"
+
+  web:
+    image: ${NODERA_WEB_IMAGE:-nodera-web:latest}
+    build:
+      context: ./web
+      args:
+        NEXT_PUBLIC_NODERA_API_URL: https://${NODERA_API_HOST}
+    restart: unless-stopped
+    depends_on:
+      api: { condition: service_healthy }
+    read_only: true
+    tmpfs: [/tmp, /app/.next/cache]
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    networks: [proxy]
+    labels:
+      traefik.enable: "true"
+      traefik.docker.network: ${NODERA_PROXY_NETWORK:-proxy-public}
+      traefik.http.routers.nodera-web.rule: Host(`${NODERA_WEB_HOST:?set NODERA_WEB_HOST}`)
+      traefik.http.routers.nodera-web.entrypoints: websecure
+      traefik.http.routers.nodera-web.tls.certresolver: ${NODERA_CERT_RESOLVER:-letsencrypt}
+      traefik.http.services.nodera-web.loadbalancer.server.port: "3000"
+
+  # The Node Agent runs ON each managed node, separately from the control plane
+  # (`--profile agent`). It dials out to the API; it opens no port.
+  agent:
+    profiles: ["agent"]
+    image: ${NODERA_AGENT_IMAGE:-nodera-agent:latest}
+    build:
+      context: ./api
+      target: agent
+    restart: unless-stopped
+    environment:
+      NODERA_API_URL: ${NODERA_AGENT_API_URL:-https://${NODERA_API_HOST:-localhost}}
+      NODERA_AGENT_DRIVER: docker
+    volumes:
+      - nodera_agent_state:/var/lib/nodera-agent
+      - /var/run/docker.sock:/var/run/docker.sock
+    group_add: ["${NODERA_DOCKER_GID:-999}"]
+    read_only: true
+    tmpfs: [/tmp]
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    networks: [proxy]
+
+networks:
+  internal:
+    internal: true
+  proxy:
+    name: ${NODERA_PROXY_NETWORK:-proxy-public}
+    external: true
+
+volumes:
+  nodera_postgres_data:
+  nodera_api_data:
+  nodera_agent_state:

@@ -4,13 +4,16 @@ package main
 
 import (
 	"context"
-	"crypto/ed25519"
+	"crypto/rand"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -153,26 +156,41 @@ func run() error {
 	// The secrets module is optional at the config level (rule 36: report
 	// "not configured" rather than fabricate or crash) — a fresh local
 	// clone can run the whole rest of the API with no encryption key set.
-	var secretsSvc *secrets.Service
+	// Secrets and agent signing keys. Production must supply both (startup
+	// fails otherwise). In development they are generated once and persisted
+	// under NODERA_DATA_DIR, so a restart does not make stored secrets
+	// undecryptable or invalidate enrolled agents. That file is a dev
+	// convenience, never a production mechanism.
 	if cfg.Secrets.EncryptionKeyBase64 == "" {
-		log.Warn("secrets module disabled: NODERA_SECRETS_ENCRYPTION_KEY is not set")
-	} else {
-		secretsSvc, err = secrets.New(pool, auditSvc, platformSvc, cfg.Secrets.EncryptionKeyBase64)
-		if err != nil {
-			return err
+		if cfg.Env == "production" {
+			return fmt.Errorf("NODERA_SECRETS_ENCRYPTION_KEY is required in production")
 		}
+		k, err := devKey(filepath.Join(cfg.Runtime.DataDir, "dev-secrets.key"), 32)
+		if err != nil {
+			return fmt.Errorf("development secrets key: %w", err)
+		}
+		cfg.Secrets.EncryptionKeyBase64 = k
+		log.Warn("NODERA_SECRETS_ENCRYPTION_KEY is not set: using a generated DEVELOPMENT key stored in the data dir")
+	}
+	secretsSvc, err := secrets.New(pool, auditSvc, platformSvc, cfg.Secrets.EncryptionKeyBase64)
+	if err != nil {
+		return err
 	}
 
-	var agentKey ed25519.PrivateKey
-	if cfg.Agent.SigningKeyBase64 != "" {
-		agentKey, err = nodeagent.KeyFromSeed(cfg.Agent.SigningKeyBase64)
-		if err != nil {
-			return fmt.Errorf("NODERA_AGENT_SIGNING_KEY: %w", err)
+	if cfg.Agent.SigningKeyBase64 == "" {
+		if cfg.Env == "production" {
+			return fmt.Errorf("NODERA_AGENT_SIGNING_KEY is required in production")
 		}
-	} else if cfg.Env == "production" {
-		return fmt.Errorf("NODERA_AGENT_SIGNING_KEY is required in production")
-	} else {
-		log.Warn("NODERA_AGENT_SIGNING_KEY is not set: using an ephemeral command-signing key (development only)")
+		k, err := devKey(filepath.Join(cfg.Runtime.DataDir, "dev-agent-signing.key"), 32)
+		if err != nil {
+			return fmt.Errorf("development agent signing key: %w", err)
+		}
+		cfg.Agent.SigningKeyBase64 = k
+		log.Warn("NODERA_AGENT_SIGNING_KEY is not set: using a generated DEVELOPMENT key stored in the data dir")
+	}
+	agentKey, err := nodeagent.KeyFromSeed(cfg.Agent.SigningKeyBase64)
+	if err != nil {
+		return fmt.Errorf("NODERA_AGENT_SIGNING_KEY: %w", err)
 	}
 	nodeAgentSvc := nodeagent.New(pool, auditSvc, agentKey)
 	go runNodeAgentSweep(ctx, log, nodeAgentSvc)
@@ -512,4 +530,24 @@ func runObservability(ctx context.Context, log *slog.Logger, m *monitoring.Servi
 			}
 		}
 	}
+}
+
+// devKey returns a base64 key of n random bytes, creating and persisting it
+// (0600) on first use. Development only.
+func devKey(path string, n int) (string, error) {
+	if b, err := os.ReadFile(path); err == nil {
+		return strings.TrimSpace(string(b)), nil
+	}
+	raw := make([]byte, n)
+	if _, err := rand.Read(raw); err != nil {
+		return "", err
+	}
+	k := base64.StdEncoding.EncodeToString(raw)
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return "", err
+	}
+	if err := os.WriteFile(path, []byte(k+"\n"), 0o600); err != nil {
+		return "", err
+	}
+	return k, nil
 }

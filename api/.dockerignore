@@ -1,0 +1,6 @@
+.git
+*.test
+coverage.out
+nodera-server
+server
+data

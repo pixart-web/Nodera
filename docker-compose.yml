@@ -1,6 +1,16 @@
-# Local development infrastructure only. Production deployment configuration
-# is intentionally separate — see docs/DEPLOYMENT.md (rule 29: dev compose
-# != production compose).
+# Local DEVELOPMENT stack:  git clone ... && cp .env.example .env && docker compose up --build
+#
+#   web  http://localhost:3000      api  http://localhost:8080 (docs: /docs)
+#
+# Not for production: published database ports, a fixed dev password and an
+# ephemeral agent signing key. Production uses docker-compose.prod.yml
+# (rule 29: dev compose != production compose, see docs/DEPLOYMENT.md).
+#
+# Provider modes (NODERA_PROVIDER_MODE in .env):
+#   local   real local filesystem/backups/certificates, no container runtime (default)
+#   mock    everything simulated in memory; set NODERA_DEMO_SEED=true for demo data
+#   docker  local + real containers through the host Docker socket (see the
+#           commented volume below; this gives the API control of the host Docker)
 services:
   postgres:
     image: postgres:16-alpine
@@ -28,5 +38,62 @@ services:
       timeout: 5s
       retries: 10
 
+  api:
+    build:
+      context: ./api
+      target: server
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    environment:
+      NODERA_ENV: development
+      NODERA_DATABASE_URL: postgres://nodera:nodera_dev_password@postgres:5432/nodera?sslmode=disable
+      NODERA_REDIS_URL: redis://redis:6379
+      NODERA_HTTP_ADDR: ":8080"
+      NODERA_CORS_ORIGINS: ${NODERA_CORS_ORIGINS:-http://localhost:3000}
+      NODERA_PROVIDER_MODE: ${NODERA_PROVIDER_MODE:-local}
+      NODERA_DEMO_SEED: ${NODERA_DEMO_SEED:-false}
+      NODERA_SEED_PASSWORD: ${NODERA_SEED_PASSWORD:-}
+      NODERA_SECRETS_ENCRYPTION_KEY: ${NODERA_SECRETS_ENCRYPTION_KEY:-}
+      NODERA_AGENT_SIGNING_KEY: ${NODERA_AGENT_SIGNING_KEY:-}
+      NODERA_PLATFORM_BOOTSTRAP_ADMIN_EMAIL: ${NODERA_PLATFORM_BOOTSTRAP_ADMIN_EMAIL:-}
+      NODERA_ANTHROPIC_API_KEY: ${NODERA_ANTHROPIC_API_KEY:-}
+      NODERA_OPENAI_API_KEY: ${NODERA_OPENAI_API_KEY:-}
+      NODERA_OLLAMA_BASE_URL: ${NODERA_OLLAMA_BASE_URL:-}
+    ports:
+      - "8080:8080"
+    volumes:
+      - nodera_api_data:/data
+      # Only for NODERA_PROVIDER_MODE=docker (grants control of the host Docker):
+      # - /var/run/docker.sock:/var/run/docker.sock
+
+  web:
+    build:
+      context: ./web
+      args:
+        NEXT_PUBLIC_NODERA_API_URL: ${NEXT_PUBLIC_NODERA_API_URL:-http://localhost:8080}
+    depends_on:
+      api: { condition: service_healthy }
+    ports:
+      - "3000:3000"
+
+  # Optional: a Node Agent container for trying the agent protocol locally
+  # (docker compose --profile agent up). Enrol it first:
+  #   docker compose run --rm agent enroll --api http://api:8080 --token <token>
+  agent:
+    profiles: ["agent"]
+    build:
+      context: ./api
+      target: agent
+    depends_on:
+      api: { condition: service_healthy }
+    environment:
+      NODERA_API_URL: http://api:8080
+      NODERA_AGENT_DRIVER: ${NODERA_AGENT_DRIVER:-mock}
+    volumes:
+      - nodera_agent_state:/var/lib/nodera-agent
+
 volumes:
   nodera_postgres_data:
+  nodera_api_data:
+  nodera_agent_state:
