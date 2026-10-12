@@ -9,21 +9,43 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"time"
 
+	"github.com/nodera/nodera/internal/nodeagent/guard"
 	"github.com/nodera/nodera/internal/nodeagent/protocol"
 	"github.com/nodera/nodera/internal/providers"
 )
 
 type Executor struct {
 	P providers.Set
+	// Guard decides which containers/mounts are off-limits (control plane).
+	Guard guard.Policy
 }
 
 const maxRead = 4 << 20
+
+// Execution time limits. A signed command has a delivery expiry, but once it is
+// running nothing else would stop a hung `docker`/`mariadb-dump` process, so each
+// class of operation gets a hard ceiling.
+const (
+	defaultTimeout = 5 * time.Minute
+	dataTimeout    = 2 * time.Hour // database dump/load of a large site
+)
+
+func timeoutFor(op string) time.Duration {
+	if op == "database.dump" || op == "database.load" {
+		return dataTimeout
+	}
+	return defaultTimeout
+}
 
 func (e *Executor) Execute(ctx context.Context, cmd protocol.Command) (json.RawMessage, error) {
 	if err := protocol.ValidateParams(cmd.Op, cmd.Params); err != nil {
 		return nil, err
 	}
+	ctx, cancel := context.WithTimeout(ctx, timeoutFor(cmd.Op))
+	defer cancel()
 	var p struct {
 		Name       string                  `json:"name"`
 		Image      string                  `json:"image"`
@@ -39,6 +61,8 @@ func (e *Executor) Execute(ctx context.Context, cmd protocol.Command) (json.RawM
 		Kind       string                  `json:"kind"`
 		Target     string                  `json:"target"`
 		Expect     int                     `json:"expect_status"`
+		User       string                  `json:"user"`
+		Password   string                  `json:"password"`
 	}
 	if err := json.Unmarshal(cmd.Params, &p); err != nil {
 		return nil, errors.New("malformed params")
@@ -54,10 +78,20 @@ func (e *Executor) Execute(ctx context.Context, cmd protocol.Command) (json.RawM
 		if err := need(e.P.Containers != nil, "container"); err != nil {
 			return nil, err
 		}
-		info, created, err := e.P.Containers.Create(ctx, providers.ContainerSpec{Name: p.Name, Image: p.Image, Env: p.Env, Labels: p.Labels, Ports: p.Ports, Networks: p.Networks, Volumes: p.Volumes, Cmd: p.Cmd})
+		var vols [][2]string
+		for _, v := range p.Volumes {
+			vols = append(vols, [2]string{v.Source, v.Target})
+		}
+		if err := e.Guard.CheckCreate(p.Name, p.Labels, p.Networks, vols); err != nil {
+			return nil, err
+		}
+		info, created, err := e.P.Containers.Create(ctx, providers.ContainerSpec{Name: p.Name, Image: p.Image, Env: p.Env, Labels: p.Labels, Ports: p.Ports, Networks: p.Networks, Volumes: p.Volumes, Cmd: p.Cmd, User: p.User})
 		return marshal(map[string]any{"container": info, "created": created}, err)
 	case "docker.start", "docker.stop", "docker.restart", "docker.remove":
 		if err := need(e.P.Containers != nil, "container"); err != nil {
+			return nil, err
+		}
+		if err := e.checkMutable(ctx, p.Name); err != nil {
 			return nil, err
 		}
 		var err error
@@ -84,6 +118,11 @@ func (e *Executor) Execute(ctx context.Context, cmd protocol.Command) (json.RawM
 		}
 		lines, err := e.P.Containers.Logs(ctx, p.Name, p.Tail)
 		return marshal(map[string]any{"lines": lines}, err)
+	case "database.ensure", "database.drop", "database.exists", "database.dump", "database.load":
+		if err := need(e.P.DB != nil, "database"); err != nil {
+			return nil, err
+		}
+		return e.database(ctx, cmd.Op, p.Name, p.User, p.Password, p.Path)
 	case "filesystem.read":
 		if err := need(e.P.FS != nil, "filesystem"); err != nil {
 			return nil, err
@@ -132,6 +171,65 @@ func (e *Executor) Execute(ctx context.Context, cmd protocol.Command) (json.RawM
 		return marshal(m, err)
 	}
 	return nil, fmt.Errorf("operation %q is not implemented by this agent", cmd.Op)
+}
+
+// checkMutable refuses lifecycle changes to protected containers, consulting the
+// live container's labels as well as the configured names.
+func (e *Executor) checkMutable(ctx context.Context, name string) error {
+	var labels map[string]string
+	if info, found, err := e.P.Containers.Inspect(ctx, name); err == nil && found {
+		labels = info.Labels
+	}
+	return e.Guard.CheckMutation(name, labels)
+}
+
+// database runs allowlisted database operations. Dumps and loads move data
+// through a file under the shared data root rather than the command channel,
+// so memory stays bounded however large the database is.
+func (e *Executor) database(ctx context.Context, op, name, user, password, rel string) (json.RawMessage, error) {
+	db := e.P.DB
+	switch op {
+	case "database.ensure":
+		created, err := db.EnsureDatabase(ctx, name, user, password)
+		return marshal(map[string]any{"created": created}, err)
+	case "database.drop":
+		return marshal(map[string]any{"ok": true}, db.DropDatabase(ctx, name, user))
+	case "database.exists":
+		ok, err := db.Exists(ctx, name)
+		return marshal(map[string]any{"exists": ok}, err)
+	}
+	if e.P.FS == nil {
+		return nil, errors.New("filesystem provider is not available on this node")
+	}
+	abs, err := e.P.FS.AbsPath(rel) // enforces containment in the data root
+	if err != nil {
+		return nil, err
+	}
+	if op == "database.dump" {
+		f, err := os.OpenFile(abs, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+		if err != nil {
+			return nil, err
+		}
+		derr := db.Dump(ctx, name, f)
+		if cerr := f.Close(); derr == nil {
+			derr = cerr
+		}
+		if derr != nil {
+			_ = os.Remove(abs)
+			return nil, derr
+		}
+		st, err := os.Stat(abs)
+		if err != nil {
+			return nil, err
+		}
+		return marshal(map[string]any{"bytes": st.Size()}, nil)
+	}
+	f, err := os.Open(abs)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	return marshal(map[string]any{"ok": true}, db.Load(ctx, name, f))
 }
 
 func marshal(v any, err error) (json.RawMessage, error) {

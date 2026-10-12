@@ -38,6 +38,9 @@ type Deps struct {
 	DBHost string
 	// BaseDomain, when set, adds Traefik routing labels for <slug>.<BaseDomain>.
 	BaseDomain string
+	// WorkloadUser is the numeric "uid:gid" managed containers run as (see
+	// providers.ContainerSpec.User). Empty keeps the image default.
+	WorkloadUser string
 }
 
 const (
@@ -332,7 +335,19 @@ func (o *provision) containerSpec(ctx context.Context, r *ops.Run) (providers.Co
 		spec.Env = map[string]string{
 			"WORDPRESS_DB_HOST": dbHost(o.d), "WORDPRESS_DB_NAME": db, "WORDPRESS_DB_USER": user, "WORDPRESS_DB_PASSWORD": pws,
 		}
-		spec.Volumes = []providers.VolumeMount{{Source: ws + "/data", Target: "/var/www/html"}}
+		// Docker needs an absolute HOST path here: a relative source would be read
+		// as a named volume. The path is the API filesystem root plus the project
+		// workspace, which is why the API and the agent must share that directory
+		// at the same absolute path (docs/DEPLOYMENT.md).
+		src, err := o.d.Providers.FS.AbsPath(ws + "/data")
+		if err != nil {
+			return spec, fmt.Errorf("resolve workspace path: %w", err)
+		}
+		spec.Volumes = []providers.VolumeMount{{Source: src, Target: "/var/www/html"}}
+		// The site files must stay readable AND writable by the control plane (backup,
+		// restore, delete), so the container runs as the same uid as the API instead
+		// of the image's www-data (which would own everything and lock the API out).
+		spec.User = o.d.WorkloadUser
 	default:
 		img, _ := o.p.Config["image"].(string)
 		if img == "" {

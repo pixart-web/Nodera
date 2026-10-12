@@ -281,6 +281,11 @@ func (in *ProjectInput) validate() error {
 	if !slugRe.MatchString(in.Slug) {
 		return apierr.FieldValidation("slug", "slug must be 1-50 lowercase letters, digits or hyphens")
 	}
+	// Managed containers are named "nodera-<slug>"; the "nodera-cp-" namespace is the
+	// control plane's (agent guard), so a project can never be named into it.
+	if strings.HasPrefix(in.Slug, "cp-") {
+		return apierr.FieldValidation("slug", `the "cp-" prefix is reserved for the Nodera control plane`)
+	}
 	if in.Kind != "wordpress" && in.Kind != "application" {
 		return apierr.FieldValidation("kind", "kind must be 'wordpress' or 'application'")
 	}

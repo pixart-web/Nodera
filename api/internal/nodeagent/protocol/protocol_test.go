@@ -54,3 +54,41 @@ func TestAllowlistValidators(t *testing.T) {
 		}
 	}
 }
+
+func TestWorkloadUserNeverRoot(t *testing.T) {
+	ok := func(u string) error {
+		return ValidateParams("docker.create", json.RawMessage(`{"name":"w","image":"nginx","user":"`+u+`"}`))
+	}
+	for _, good := range []string{"10001", "10001:10001", "33:33"} {
+		if err := ok(good); err != nil {
+			t.Errorf("%q should be accepted: %v", good, err)
+		}
+	}
+	for _, bad := range []string{"0", "0:0", "00", "root", "1000:root", "0:1000", "-1"} {
+		if err := ok(bad); err == nil {
+			t.Errorf("%q must be rejected", bad)
+		}
+	}
+	if err := ValidateParams("docker.create", json.RawMessage(`{"name":"w","image":"nginx"}`)); err != nil {
+		t.Errorf("no user keeps the image default: %v", err)
+	}
+}
+
+func TestDatabaseOpsValidateIdentifiers(t *testing.T) {
+	if err := ValidateParams("database.ensure", json.RawMessage(`{"name":"wp_a","user":"u_a","password":"abcdefghijklmnop12"}`)); err != nil {
+		t.Fatal(err)
+	}
+	for _, bad := range []string{
+		`{"name":"a b","user":"u","password":"abcdefghijklmnop12"}`,
+		`{"name":"a","user":"u'; DROP USER x;--","password":"abcdefghijklmnop12"}`,
+		`{"name":"a","user":"u","password":"short"}`,
+		`{"name":"a","user":"u","password":"has space in it 123456"}`,
+	} {
+		if err := ValidateParams("database.ensure", json.RawMessage(bad)); err == nil {
+			t.Errorf("%s must be rejected", bad)
+		}
+	}
+	if err := ValidateParams("database.dump", json.RawMessage(`{"name":"a","path":"../x"}`)); err == nil {
+		t.Error("dump path traversal must be rejected")
+	}
+}

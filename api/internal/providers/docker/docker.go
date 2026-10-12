@@ -56,6 +56,25 @@ var (
 	keyRe   = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_.-]{0,127}$`)
 )
 
+var userRe = regexp.MustCompile(`^([0-9]{1,10})(:([0-9]{1,10}))?$`)
+
+// ValidateUser accepts an empty user (image default) or a numeric uid[:gid]
+// that is not root. Names are rejected: they resolve inside the image and
+// "root" would silently defeat the rule.
+func ValidateUser(u string) error {
+	if u == "" {
+		return nil
+	}
+	m := userRe.FindStringSubmatch(u)
+	if m == nil {
+		return fmt.Errorf("invalid user %q: use a numeric uid[:gid]", u)
+	}
+	if strings.TrimLeft(m[1], "0") == "" {
+		return fmt.Errorf("managed workloads must not run as root")
+	}
+	return nil
+}
+
 func validate(spec providers.ContainerSpec) error {
 	if !nameRe.MatchString(spec.Name) {
 		return fmt.Errorf("invalid container name %q", spec.Name)
@@ -73,13 +92,19 @@ func validate(spec providers.ContainerSpec) error {
 			return fmt.Errorf("invalid label key %q", k)
 		}
 	}
+	if err := ValidateUser(spec.User); err != nil {
+		return err
+	}
 	for _, n := range spec.Networks {
 		if !nameRe.MatchString(n) {
 			return fmt.Errorf("invalid network %q", n)
 		}
 	}
 	for _, v := range spec.Volumes {
-		if strings.ContainsAny(v.Source+v.Target, ":\n\x00") || !strings.HasPrefix(v.Target, "/") {
+		// Source must be an absolute host path: anything else is a named volume,
+		// which managed workloads must not create or reuse (it could be a
+		// control-plane volume such as the Postgres data volume).
+		if strings.ContainsAny(v.Source+v.Target, ":\n\x00") || !strings.HasPrefix(v.Target, "/") || !strings.HasPrefix(v.Source, "/") {
 			return fmt.Errorf("invalid volume mount %q -> %q", v.Source, v.Target)
 		}
 	}
@@ -148,6 +173,9 @@ func (p *Provider) Create(ctx context.Context, spec providers.ContainerSpec) (pr
 		return existing, false, nil
 	}
 	args := []string{"create", "--name", spec.Name}
+	if spec.User != "" {
+		args = append(args, "--user", spec.User)
+	}
 	for k, v := range spec.Env {
 		args = append(args, "--env", k+"="+v)
 	}

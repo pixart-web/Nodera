@@ -159,12 +159,17 @@ func VerifyCommand(pub ed25519.PublicKey, expectAgentID string, c Command, now t
 // operation requires adding a validator here — there is no generic exec.
 var Allowed = map[string]func(p map[string]any) error{
 	"docker.create":     validDockerCreate,
-	"docker.start":      needName,
-	"docker.stop":       needName,
-	"docker.restart":    needName,
-	"docker.remove":     needName,
+	"docker.start":      needMutableName,
+	"docker.stop":       needMutableName,
+	"docker.restart":    needMutableName,
+	"docker.remove":     needMutableName,
 	"docker.inspect":    needName,
 	"docker.logs":       needName,
+	"database.ensure":   validDBEnsure,
+	"database.drop":     validDBDrop,
+	"database.exists":   needDBName,
+	"database.dump":     validDBFile,
+	"database.load":     validDBFile,
 	"filesystem.read":   needPath,
 	"filesystem.write":  validFSWrite,
 	"filesystem.mkdir":  needPath,
@@ -208,6 +213,64 @@ func needName(p map[string]any) error {
 	}
 	return nil
 }
+
+// reservedPrefix mirrors guard.ReservedPrefix: names reserved for the control
+// plane can never be the target of a lifecycle command, whatever the agent's
+// local configuration says (the executor adds the configurable layer).
+const reservedPrefix = "nodera-cp-"
+
+func needMutableName(p map[string]any) error {
+	if err := needName(p); err != nil {
+		return err
+	}
+	if strings.HasPrefix(str(p, "name"), reservedPrefix) {
+		return errors.New("refused: protected control-plane resource")
+	}
+	return nil
+}
+
+// workloadUserRe: numeric uid[:gid] whose uid is not 0 (leading zeros included).
+var workloadUserRe = regexp.MustCompile(`^0*[1-9][0-9]{0,9}(:[0-9]{1,10})?$`)
+
+var (
+	dbIdentRe = regexp.MustCompile(`^[A-Za-z0-9_]{1,48}$`)
+	dbPassRe  = regexp.MustCompile(`^[A-Za-z0-9_-]{16,128}$`)
+)
+
+func needDBName(p map[string]any) error {
+	if !dbIdentRe.MatchString(str(p, "name")) {
+		return errors.New("invalid database name")
+	}
+	return nil
+}
+func validDBDrop(p map[string]any) error {
+	if err := needDBName(p); err != nil {
+		return err
+	}
+	if !dbIdentRe.MatchString(str(p, "user")) {
+		return errors.New("invalid database user")
+	}
+	return nil
+}
+func validDBEnsure(p map[string]any) error {
+	if err := validDBDrop(p); err != nil {
+		return err
+	}
+	if !dbPassRe.MatchString(str(p, "password")) {
+		return errors.New("invalid database password")
+	}
+	return nil
+}
+
+// validDBFile covers dump/load, which exchange data through a file inside the
+// shared data root instead of streaming it through the command channel.
+func validDBFile(p map[string]any) error {
+	if err := needDBName(p); err != nil {
+		return err
+	}
+	return SafeRelPath(str(p, "path"))
+}
+
 func SafeRelPath(s string) error {
 	if s == "" || path.IsAbs(s) || strings.ContainsRune(s, 0) {
 		return errors.New("path must be a non-empty relative path")
@@ -233,9 +296,15 @@ func validDockerCreate(p map[string]any) error {
 	if err := needName(p); err != nil {
 		return err
 	}
+	if strings.HasPrefix(str(p, "name"), reservedPrefix) {
+		return errors.New("refused: protected control-plane resource")
+	}
 	img := str(p, "image")
 	if len(img) > 255 || !imageRe.MatchString(img) || strings.HasPrefix(img, "-") {
 		return errors.New("invalid image")
+	}
+	if u := str(p, "user"); u != "" && !workloadUserRe.MatchString(u) {
+		return errors.New("user must be a non-root numeric uid[:gid]")
 	}
 	return nil
 }

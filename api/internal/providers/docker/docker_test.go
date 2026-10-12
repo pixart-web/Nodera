@@ -99,3 +99,44 @@ func contains(s []string, want string) bool {
 }
 
 var _ = strings.TrimSpace
+
+func TestCreate_UserMustBeNumericAndNeverRoot(t *testing.T) {
+	for _, bad := range []string{"root", "0", "00:5", "0:0", "www-data", "1000:root", "1000;id", "-1", "1:2:3"} {
+		p := NewWithRunner(&fakeRunner{})
+		if _, _, err := p.Create(context.Background(), providers.ContainerSpec{Name: "w", Image: "nginx", User: bad}); err == nil {
+			t.Errorf("user %q must be rejected", bad)
+		}
+	}
+	f := &fakeRunner{}
+	if _, _, err := NewWithRunner(f).Create(context.Background(), providers.ContainerSpec{Name: "w", Image: "nginx", User: "10001:10001"}); err != nil {
+		t.Fatal(err)
+	}
+	var create []string
+	for _, c := range f.calls {
+		if c[0] == "create" {
+			create = c
+		}
+	}
+	if i := indexOf(create, "--user"); i < 0 || create[i+1] != "10001:10001" {
+		t.Fatalf("expected --user 10001:10001, got %v", create)
+	}
+}
+
+func TestCreate_VolumeSourceMustBeAbsoluteHostPath(t *testing.T) {
+	for _, src := range []string{"nodera_postgres_data", "projects/blog/data", "./x"} {
+		p := NewWithRunner(&fakeRunner{})
+		_, _, err := p.Create(context.Background(), providers.ContainerSpec{Name: "w", Image: "nginx", Volumes: []providers.VolumeMount{{Source: src, Target: "/data"}}})
+		if err == nil {
+			t.Errorf("volume source %q (a named volume) must be rejected", src)
+		}
+	}
+}
+
+func indexOf(s []string, v string) int {
+	for i, x := range s {
+		if x == v {
+			return i
+		}
+	}
+	return -1
+}

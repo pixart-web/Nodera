@@ -46,6 +46,15 @@ type Provider struct {
 	r         Runner
 	container string
 	rootPass  string
+	client    string // SQL client binary inside the container
+	dump      string // dump binary inside the container
+}
+
+// UseLegacyClient switches to the mysql/mysqldump binaries for MariaDB images
+// older than 10.5, which do not ship mariadb/mariadb-dump.
+func (p *Provider) UseLegacyClient() *Provider {
+	p.client, p.dump = "mysql", "mysqldump"
+	return p
 }
 
 // New talks to the MariaDB container through the docker CLI at dockerBin.
@@ -63,7 +72,7 @@ func NewWithRunner(r Runner, container, rootPassword string) (*Provider, error) 
 	if rootPassword == "" {
 		return nil, fmt.Errorf("MariaDB root password is required")
 	}
-	return &Provider{r: r, container: container, rootPass: rootPassword}, nil
+	return &Provider{r: r, container: container, rootPass: rootPassword, client: "mariadb", dump: "mariadb-dump"}, nil
 }
 
 var (
@@ -85,7 +94,7 @@ func (p *Provider) base(interactive bool, tool string, extra ...string) []string
 
 func (p *Provider) sql(ctx context.Context, query string) (string, error) {
 	var out bytes.Buffer
-	err := p.r.Run(ctx, p.env(), strings.NewReader(query), &out, p.base(true, "mariadb", "--batch", "--skip-column-names")...)
+	err := p.r.Run(ctx, p.env(), strings.NewReader(query), &out, p.base(true, p.client, "--batch", "--skip-column-names")...)
 	return strings.TrimSpace(out.String()), err
 }
 
@@ -134,14 +143,14 @@ func (p *Provider) Dump(ctx context.Context, name string, w io.Writer) error {
 	if !identRe.MatchString(name) {
 		return fmt.Errorf("invalid database name %q", name)
 	}
-	return p.r.Run(ctx, p.env(), nil, w, p.base(false, "mariadb-dump", "--single-transaction", "--routines", "--triggers", "--default-character-set=utf8mb4", name)...)
+	return p.r.Run(ctx, p.env(), nil, w, p.base(false, p.dump, "--single-transaction", "--routines", "--triggers", "--default-character-set=utf8mb4", name)...)
 }
 
 func (p *Provider) Load(ctx context.Context, name string, r io.Reader) error {
 	if !identRe.MatchString(name) {
 		return fmt.Errorf("invalid database name %q", name)
 	}
-	return p.r.Run(ctx, p.env(), r, io.Discard, p.base(true, "mariadb", "--default-character-set=utf8mb4", name)...)
+	return p.r.Run(ctx, p.env(), r, io.Discard, p.base(true, p.client, "--default-character-set=utf8mb4", name)...)
 }
 
 var _ providers.DatabaseProvider = (*Provider)(nil)

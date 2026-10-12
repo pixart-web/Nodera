@@ -9,11 +9,13 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -22,6 +24,7 @@ import (
 	"github.com/nodera/nodera/internal/providers"
 	"github.com/nodera/nodera/internal/providers/docker"
 	"github.com/nodera/nodera/internal/providers/local"
+	"github.com/nodera/nodera/internal/providers/mariadb"
 	"github.com/nodera/nodera/internal/providers/mock"
 )
 
@@ -34,13 +37,15 @@ func main() {
 		enroll(os.Args[2:])
 	case "run":
 		run(os.Args[2:])
+	case "selftest":
+		selftest(os.Args[2:])
 	default:
 		usage()
 	}
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: nodera-agent enroll --api URL --token TOKEN [--state PATH] | run [--state PATH] [--driver docker|mock] [--data DIR]")
+	fmt.Fprintln(os.Stderr, "usage: nodera-agent enroll --api URL --token TOKEN [--state PATH] | run [--state PATH] [--driver docker|mock] [--data DIR] | selftest [--state PATH]")
 	os.Exit(2)
 }
 
@@ -59,6 +64,9 @@ func enroll(args []string) {
 	_ = fs.Parse(args)
 	if *api == "" || *token == "" {
 		usage()
+	}
+	if err := agent.ValidateAPIURL(*api); err != nil {
+		log.Fatalf("api url: %v", err)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -80,9 +88,19 @@ func run(args []string) {
 	interval := fs.Duration("interval", 5*time.Second, "poll interval")
 	_ = fs.Parse(args)
 
-	st, err := agent.LoadState(*state)
-	if err != nil {
-		log.Fatalf("load state (run enroll first): %v", err)
+	// A container started before `nodera-agent enroll` has run waits for the
+	// state file instead of crash-looping.
+	var st agent.State
+	for {
+		var err error
+		if st, err = agent.LoadState(*state); err == nil {
+			break
+		}
+		if !errors.Is(err, os.ErrNotExist) {
+			log.Fatalf("load state: %v", err)
+		}
+		log.Printf("not enrolled yet (no state at %s): run `nodera-agent enroll`; retrying in 10s", *state)
+		time.Sleep(10 * time.Second)
 	}
 	set, err := local.NewSet(*data, netpolicy.Policy{})
 	if err != nil {
@@ -91,6 +109,20 @@ func run(args []string) {
 	switch *driver {
 	case "docker":
 		set.Containers = docker.New("docker")
+		if c := os.Getenv("NODERA_MARIADB_CONTAINER"); c != "" {
+			pw, err := secretFromEnvOrFile("NODERA_MARIADB_ROOT_PASSWORD")
+			if err != nil {
+				log.Fatalf("mariadb root password: %v", err)
+			}
+			db, err := mariadb.New("docker", c, pw)
+			if err != nil {
+				log.Fatalf("mariadb provider: %v", err)
+			}
+			if os.Getenv("NODERA_MARIADB_LEGACY_CLIENT") == "true" {
+				db.UseLegacyClient()
+			}
+			set.DB = db
+		}
 	case "mock":
 		m, _ := mock.NewSet()
 		set.Containers = m.Containers
@@ -99,13 +131,36 @@ func run(args []string) {
 		log.Fatalf("unknown driver %q", *driver)
 	}
 	var _ providers.Set = set
+	if err := agent.ValidateAPIURL(st.APIURL); err != nil {
+		log.Fatalf("api url in state: %v", err)
+	}
 	a, err := agent.New(st, set, nil)
 	if err != nil {
 		log.Fatalf("agent: %v", err)
 	}
+	var protected []string
+	for _, n := range strings.Split(os.Getenv("NODERA_PROTECTED_CONTAINERS"), ",") {
+		if n = strings.TrimSpace(n); n != "" {
+			protected = append(protected, n)
+		}
+	}
+	a.SetGuard(protected)
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	a.Run(ctx, *interval, log.Printf)
+}
+
+// secretFromEnvOrFile reads NAME_FILE (preferred: a Docker/Compose secret file)
+// or NAME. The value is never logged.
+func secretFromEnvOrFile(name string) (string, error) {
+	if f := os.Getenv(name + "_FILE"); f != "" {
+		b, err := os.ReadFile(f)
+		if err != nil {
+			return "", err
+		}
+		return strings.TrimSpace(string(b)), nil
+	}
+	return os.Getenv(name), nil
 }
 
 func getenv(k, d string) string {

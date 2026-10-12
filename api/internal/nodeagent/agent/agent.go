@@ -17,11 +17,16 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/nodera/nodera/internal/nodeagent/executor"
+	"github.com/nodera/nodera/internal/nodeagent/guard"
 	"github.com/nodera/nodera/internal/nodeagent/protocol"
 	"github.com/nodera/nodera/internal/providers"
+
+	"net/url"
+	"strings"
 )
 
 const Version = "0.1.0"
@@ -58,7 +63,11 @@ type Agent struct {
 	http     *http.Client
 	exec     *executor.Executor
 	caps     []string
-	Now      func() time.Time
+	// done remembers the ids of commands already executed (until they expire), so a
+	// replayed copy of a signed command is refused even though its signature is valid.
+	done   map[string]int64
+	doneMu sync.Mutex
+	Now    func() time.Time
 	// OnCommand is an optional observer (tests/logging).
 	OnCommand func(cmd protocol.Command, err error)
 }
@@ -85,7 +94,24 @@ func New(state State, set providers.Set, client *http.Client) (*Agent, error) {
 	if set.Monitoring != nil {
 		caps = append(caps, "metrics")
 	}
-	return &Agent{state: state, priv: ed25519.NewKeyFromSeed(seed), serverPK: spk, http: client, exec: &executor.Executor{P: set}, caps: caps, Now: time.Now}, nil
+	if set.DB != nil {
+		caps = append(caps, "database")
+	}
+	// Default guard: managed workloads may only bind-mount from the agent's own
+	// filesystem root. Operators add protected container names with SetGuard.
+	pol := guard.Policy{}
+	if set.FS != nil {
+		if root, err := set.FS.AbsPath("."); err == nil {
+			pol.DataRoot = root
+		}
+	}
+	return &Agent{state: state, priv: ed25519.NewKeyFromSeed(seed), serverPK: spk, http: client, exec: &executor.Executor{P: set, Guard: pol}, caps: caps, Now: time.Now, done: map[string]int64{}}, nil
+}
+
+// SetGuard adds operator-configured protected container names while keeping
+// the data root derived from the filesystem provider.
+func (a *Agent) SetGuard(protectedNames []string) {
+	a.exec.Guard.ProtectedNames = protectedNames
 }
 
 // Enroll registers a fresh key pair using a one-time token and returns the
@@ -183,6 +209,13 @@ func (a *Agent) handle(ctx context.Context, c protocol.Command) protocol.Command
 		}
 		return protocol.CommandResult{OK: false, Error: "rejected: " + err.Error()}
 	}
+	if !a.markExecuted(c) {
+		err := errors.New("command already executed (replay)")
+		if a.OnCommand != nil {
+			a.OnCommand(c, err)
+		}
+		return protocol.CommandResult{OK: false, Error: "rejected: " + err.Error()}
+	}
 	out, err := a.exec.Execute(ctx, c)
 	if a.OnCommand != nil {
 		a.OnCommand(c, err)
@@ -207,4 +240,46 @@ func (a *Agent) Run(ctx context.Context, interval time.Duration, logf func(forma
 		case <-t.C:
 		}
 	}
+}
+
+// ValidateAPIURL enforces the transport expectation: signed requests protect
+// integrity and replay, but not confidentiality, so the agent talks to the
+// control plane over https. Plain http is accepted only where the traffic never
+// leaves the host or a private Docker network: loopback, or a single-label
+// service name such as http://api:8080 on the internal Compose network.
+func ValidateAPIURL(raw string) error {
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" || u.Path != "" && u.Path != "/" {
+		return errors.New("API URL must look like https://host[:port] with no path")
+	}
+	switch u.Scheme {
+	case "https":
+		return nil
+	case "http":
+		h := u.Hostname()
+		if h == "localhost" || strings.HasPrefix(h, "127.") || h == "::1" || !strings.Contains(h, ".") && !strings.Contains(h, ":") {
+			return nil
+		}
+		return errors.New("plain http is only allowed for loopback or an internal single-label service name; use https")
+	}
+	return errors.New("API URL must use https")
+}
+
+// markExecuted records c as executed and reports false if it already was. Entries
+// are dropped once the command's own expiry has passed (after which VerifyCommand
+// refuses it anyway), so the set stays small.
+func (a *Agent) markExecuted(c protocol.Command) bool {
+	a.doneMu.Lock()
+	defer a.doneMu.Unlock()
+	now := a.Now().Unix()
+	for id, exp := range a.done {
+		if exp < now {
+			delete(a.done, id)
+		}
+	}
+	if _, seen := a.done[c.ID]; seen {
+		return false
+	}
+	a.done[c.ID] = c.ExpiresAt
+	return true
 }

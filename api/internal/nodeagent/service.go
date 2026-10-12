@@ -209,7 +209,17 @@ func (s *Service) Authenticate(ctx context.Context, hdr func(string) string, met
 		return Agent{}, errBadCreds
 	}
 	a, err := s.load(ctx, uuid.Nil, id)
-	if err != nil || a.Status == "revoked" {
+	if err != nil {
+		// Only "no such agent" is a credentials problem. A database error must not
+		// look like a revoked agent (401): it is a server fault the agent should
+		// simply retry after.
+		var ae *apierr.Error
+		if errors.As(err, &ae) && ae.Code == apierr.CodeNotFound {
+			return Agent{}, errBadCreds
+		}
+		return Agent{}, err
+	}
+	if a.Status == "revoked" {
 		return Agent{}, errBadCreds
 	}
 	if err := protocol.VerifyRequest(a.publicKey, hdr, method, path, body, s.now()); err != nil {
@@ -452,6 +462,7 @@ func (s *Service) ReportResult(ctx context.Context, a Agent, cmdID uuid.UUID, re
 	if err != nil {
 		return apierr.Wrap(apierr.CodeInternal, "failed to record result", err)
 	}
+	s.scrubSecrets(ctx, cmdID)
 	s.rec(ctx, s.sysCtx(a.OrganizationID, "node-agent"), "nodeagent.command.completed", "node_agent", a.ID.String(), res.OK,
 		map[string]any{"op": op, "command_id": cmdID.String(), "status": status})
 	return nil
@@ -495,6 +506,34 @@ func (s *Service) Revoke(ctx context.Context, ac authctx.AuthContext, id uuid.UU
 	return nil
 }
 
+// secretParamOps are operations whose parameters carry credentials (container
+// environment, database passwords). Their parameters are blanked as soon as the
+// command is finished so those values do not sit in node_agent_commands.
+var secretParamOps = []string{"docker.create", "database.ensure"}
+
+func (s *Service) scrubSecrets(ctx context.Context, id uuid.UUID) {
+	_, _ = s.pool.Exec(ctx, `UPDATE node_agent_commands SET params = '{"redacted":true}'::jsonb WHERE id = $1 AND op = ANY($2)`, id, secretParamOps)
+}
+
+// OrgOf returns the organisation that owns an agent (any state but revoked).
+// It backs ProviderMode "agent", where the platform operator names the local
+// agent by id in configuration.
+func (s *Service) OrgOf(ctx context.Context, agentID uuid.UUID) (uuid.UUID, error) {
+	a, err := s.load(ctx, uuid.Nil, agentID)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	if a.Status == "revoked" {
+		return uuid.Nil, apierr.Conflict("the configured local agent is revoked")
+	}
+	return a.OrganizationID, nil
+}
+
+// AgentState reports enrolment/reachability for readiness checks.
+func (s *Service) AgentState(ctx context.Context, agentID uuid.UUID) (Agent, error) {
+	return s.load(ctx, uuid.Nil, agentID)
+}
+
 // Sweep marks silent agents offline, expires stale commands and prunes nonces.
 // Safe to run concurrently and repeatedly.
 func (s *Service) Sweep(ctx context.Context) error {
@@ -518,6 +557,9 @@ func (s *Service) Sweep(ctx context.Context) error {
 		_, _ = s.pool.Exec(ctx, `UPDATE nodes SET status = 'offline', updated_at = now() WHERE id = $1 AND status NOT IN ('decommissioned')`, n)
 	}
 	if _, err := s.pool.Exec(ctx, `UPDATE node_agent_commands SET status = 'expired' WHERE status IN ('pending', 'delivered') AND expires_at < now()`); err != nil {
+		return err
+	}
+	if _, err := s.pool.Exec(ctx, `UPDATE node_agent_commands SET params = '{"redacted":true}'::jsonb WHERE op = ANY($1) AND status IN ('succeeded','failed','expired') AND params <> '{"redacted":true}'::jsonb`, secretParamOps); err != nil {
 		return err
 	}
 	_, err = s.pool.Exec(ctx, `DELETE FROM node_agent_nonces WHERE seen_at < now() - interval '10 minutes'`)
