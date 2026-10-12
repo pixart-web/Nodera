@@ -7,6 +7,7 @@ package local
 import (
 	"context"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -88,6 +89,47 @@ func (f *FS) WriteFile(_ context.Context, p string, data []byte) error {
 	}
 	return os.WriteFile(full, data, 0o640)
 }
+
+// WriteStream writes r to p through a temporary file in the same directory and
+// renames it into place, so a failed or cancelled write never leaves a
+// half-written file and memory use is bounded by the copy buffer.
+func (f *FS) WriteStream(ctx context.Context, p string, r io.Reader) error {
+	full, err := SafeJoin(f.root, p)
+	if err != nil {
+		return err
+	}
+	dir := filepath.Dir(full)
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(dir, ".nodera-write-*")
+	if err != nil {
+		return err
+	}
+	name := tmp.Name()
+	ok := false
+	defer func() {
+		if !ok {
+			_ = tmp.Close()
+			_ = os.Remove(name)
+		}
+	}()
+	if _, err := io.Copy(tmp, &ctxReader{ctx: ctx, r: r}); err != nil {
+		return err
+	}
+	if err := tmp.Chmod(0o640); err != nil {
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(name, full); err != nil {
+		return err
+	}
+	ok = true
+	return nil
+}
+
 func (f *FS) ReadFile(_ context.Context, p string) ([]byte, error) {
 	full, err := SafeJoin(f.root, p)
 	if err != nil {

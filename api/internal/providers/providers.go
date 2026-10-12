@@ -45,6 +45,11 @@ type ContainerSpec struct {
 	Networks []string          `json:"networks,omitempty"`
 	Volumes  []VolumeMount     `json:"volumes,omitempty"`
 	Cmd      []string          `json:"cmd,omitempty"`
+	// User is a numeric "uid[:gid]" the container runs as; empty keeps the image
+	// default. Never root (0): managed workloads that share a host directory with
+	// the control plane run as the directory's owner, so the API can back up,
+	// restore and delete their files.
+	User string `json:"user,omitempty"`
 }
 type ContainerInfo struct {
 	ID        string            `json:"id"`
@@ -88,6 +93,13 @@ type FilesystemProvider interface {
 	List(ctx context.Context, path string) ([]FileInfo, error)
 	DiskUsage(ctx context.Context, path string) (int64, error)
 	AbsPath(path string) (string, error) // resolves inside the root (for providers that need real paths)
+}
+
+// StreamWriter is an optional capability of a FilesystemProvider: write a file
+// from a reader without holding it in memory. Large restores use it; providers
+// without it fall back to a bounded in-memory write.
+type StreamWriter interface {
+	WriteStream(ctx context.Context, path string, r io.Reader) error
 }
 
 // ---- Databases ----
