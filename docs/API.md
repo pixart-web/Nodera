@@ -83,7 +83,7 @@ tracked in `docs/ROADMAP.md` if that stops being true.
 | Method | Path | Auth | Description |
 |---|---|---|---|
 | GET | `/health` | none | Process liveness |
-| GET | `/ready` | none | Liveness + database reachability |
+| GET | `/ready` | none | Readiness: `503` if PostgreSQL is unreachable or queued work is stuck; otherwise `200` with per-dependency checks (`database`, `redis`, `agent`, `job_queue`, `provider.*`) and a `degraded` list for soft dependencies (Redis, the local agent) |
 | GET | `/openapi.json` | none | OpenAPI 3.0 spec |
 | GET | `/docs` | none | Swagger UI |
 | POST | `/api/v1/auth/signup` | none | Create a user (no org membership yet) |

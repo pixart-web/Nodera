@@ -171,7 +171,9 @@ HTTP request ─ authn/authz (RBAC, tenancy) ─▶ ops.Engine.Submit ─▶ job
 * **Engines depend only on provider interfaces** (`internal/providers`): Container, Filesystem, Database, DNS, Certificate, Backup, Monitoring, Node, Git.
   Implementations: `mock/` (in-memory, fault injection), `local/` (real FS, tar.gz backups, local X.509 CA, DNS zone store, SSRF-guarded monitoring),
   `docker/` (argv-only CLI adapter). A nil provider means "not configured": engines refuse to run instead of simulating.
-  `/system/info` and `/ready` report each capability as `real | local | mock | not_configured`.
+  `/system/info` and `/ready` report each capability as `real | agent | local | local_dev | offsite | mock | not_configured` (`docs/DEPLOYMENT.md`).
+* **Provider modes:** `local` (default), `docker` (API holds the socket — development only), **`agent`** (production: containers and MariaDB go through the Node Agent as signed allowlisted commands; the API has no socket), `mock`.
+  The off-site backup provider (`providers/offsite`, SFTP) wraps the streaming local provider; the MariaDB adapter (`providers/mariadb`, `docker exec`, no shell) runs on the agent in `agent` mode.
 * **Engines:** `projects` + `provisioning` (clients, projects, `project.provision/delete`), `backups`, `network` (domains/DNS/SSL), `deployments`, `sitemig`
   (migrations), `wordpress` (clone/update/health), `monitoring` (monitors/rules/incidents), `notifications`, `logs` (+retention), `flags`, `dashboard` (+search),
   `aiplans`, `nodeagent`, `devseed`.
@@ -182,7 +184,7 @@ HTTP request ─ authn/authz (RBAC, tenancy) ─▶ ops.Engine.Submit ─▶ job
 * **Multi-tenancy:** every table carries `organization_id`; every query filters on it; project-scoped sub-resources return 404 (not an empty 200) for another tenant's project.
   Cross-tenant tests exist per engine plus a table-driven IDOR suite.
 * **Realtime:** SSE (`/operations/{id}/stream`, `/events`) — fetch-based on the client because `EventSource` cannot send the `X-Nodera-Org` header.
-* **Background loops** (one process, safe with several instances): job worker, node-agent sweeper, scheduled backups + retention + certificate renewal (period-keyed idempotency),
+* **Background loops** (designed to be safe with several instances, but **one API instance is the supported deployment** — the job worker is single-threaded per process, start-up marks jobs interrupted by a restart as failed, and several rate limits are in-process): job worker, node-agent sweeper, scheduled backups + retention + certificate renewal (period-keyed idempotency),
   monitor runner (`SKIP LOCKED`), alert evaluator, data-retention sweeper.
 * **Node Agent:** pull model, signed both ways, allowlisted commands only — see `docs/NODE-AGENT.md`.
 * **AI:** proposes plans only; a human approves and runs each step under their own permissions — see `docs/SECURITY.md` "AI operations layer".

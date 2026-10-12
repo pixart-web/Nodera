@@ -63,11 +63,13 @@ enum — adding "digitalocean" or "ovh" tomorrow needs no migration. See
 static binary, easy to ship the Node Agent to arbitrary hosts regardless of
 provider).
 
+## What exists beyond the node inventory
+
+The Node Agent (`docs/NODE-AGENT.md`) reports heartbeats that drive node status, and executes signed container/database commands; backups (`docs/BACKUPS.md`), domains/DNS/SSL, deployments and
+migrations are separate engines (`docs/ARCHITECTURE.md` §9). The node inventory itself is still provider-agnostic data.
+
 ## Not yet implemented
 
-- Node Agent (the actual on-node process) — the API surface it would call
-  (`UpdateNodeStatus`) exists, but nothing calls it automatically; a
-  status report today only happens via a direct, manual API call
-- Containers, networks, storage, domains, DNS, TLS models
-- Backups/restores
-- Deployment/rollback tracking
+- A Hetzner Cloud provider for machine-level actions (reboot, rescale, snapshot) — `NodeProvider` is mock-only; NOT IMPLEMENTED
+- Multi-node orchestration: `NODERA_LOCAL_AGENT_ID` names a single local agent; routing operations to a specific node's agent is future work
+- Container networks/volumes as managed objects (Nodera creates containers on the configured workload network only)

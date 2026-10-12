@@ -369,9 +369,10 @@ secret into the org-scoped table with a null/fake organization.
 ## Audit — IMPLEMENTED
 
 - `internal/audit` is append-only by API design (no `Update`/`Delete`
-  method exists). True DB-level immutability (revoking `UPDATE`/`DELETE`
-  from the application's Postgres role) is deferred to `docs/DEPLOYMENT.md`
-  since it depends on the still-unfinalized production role layout.
+  method exists). DB-level immutability is provided by the production role
+  model: the runtime role cannot `UPDATE`/`DELETE`/`TRUNCATE` `audit_log`
+  (`scripts/db/02-post-migrate.sql`; see "Production database roles and audit
+  immutability" below). Dev/test run as the owner role and are not protected.
 - Sensitive operations (e.g. node registration) call `audit.Record` with
   actor, action, resource, and resulting state.
 - `internal/identity`'s service-account and API-token lifecycle
@@ -485,14 +486,24 @@ interface, chosen at startup (`cmd/server/main.go: newRateLimiters`):
 - **`Limiter`** (in-process, no dependencies) — the default when
   `NODERA_REDIS_URL` is unset. Correct for a single API instance; counters
   don't survive a restart and aren't shared with any other instance.
-- **`RedisLimiter`** — used automatically when `NODERA_REDIS_URL` is set,
-  verified reachable with a startup `PING` (a misconfigured URL fails
-  startup rather than silently falling back to the in-process limiter).
-  Counters are shared across every API process instance pointed at the
-  same Redis, so the limit is enforced deployment-wide, not per-process.
-  On a Redis error mid-request it **fails open** (allows the call, logs
-  the error) rather than turning a Redis blip into a full login/signup/AI
-  outage for every legitimate user — see `internal/platform/ratelimit/redis.go`.
+- **`RedisLimiter`** — used when `NODERA_REDIS_URL` is set, verified reachable
+  with a startup `PING` (a misconfigured URL fails startup rather than silently
+  falling back). Counters are shared across API instances. **On a Redis error it
+  degrades to a per-instance limiter with the same budget** (`WithFallback`), not to
+  "allow everything": an outage weakens brute-force protection from deployment-wide to
+  per-instance, it does not remove it. `/ready` reports `redis: down` / `status: degraded`.
+
+**Which limiters are shared and which are not** (login, signup, AI, create-org and change-password
+are Redis-backed; the API budget, dangerous-request budget and agent limits are in-process only) is
+tabulated in `docs/DEPLOYMENT.md` "Rate limiters". **Before running more than one API instance, every
+limit whose invariant must hold deployment-wide must move to shared state.** One instance is the supported topology.
+
+**Client identity behind a reverse proxy.** IP-keyed limits (login, signup, agent enrolment) need the real
+client address. `X-Forwarded-For` is honoured **only** when the TCP peer is inside `NODERA_TRUSTED_PROXIES`
+(the dedicated `nodera-edge` network, where only Traefik can connect), and the **right-most untrusted** entry
+is used, so a forged header cannot choose the identity being limited (`cmd/server/clientip.go`, tested). Production
+refuses to start without `NODERA_TRUSTED_PROXIES`: without it every user behind the proxy would share one bucket
+(one attacker could lock everyone out of login).
 
 ## Secure headers — IMPLEMENTED
 
@@ -504,18 +515,26 @@ to restrict yet; one will be added if/when the API ever serves any HTML.
 
 ## CI — IMPLEMENTED
 
-`.github/workflows/ci.yml` runs on every push/PR:
-- **API**: `gofmt -l` (must be empty), `go vet`, `go build`,
-  `go test ./... -race` against a real Postgres service container,
-  `govulncheck` (fails the build on a known-exploitable vulnerability
-  reachable from Nodera's own code — not merely present in a dependency
-  tree, which is a much noisier signal), and `@redocly/cli lint` against
-  `api/openapi/openapi.json` (fails only on structural OpenAPI errors, not
-  style warnings).
-- **Web**: `tsc --noEmit`, `next build`, and `npm audit --audit-level=critical`
-  (fails only on `critical` — the known high-severity PostCSS finding below
-  stays visible in the log without blocking every PR on an issue that
-  needs a Next.js major upgrade to fully resolve).
+`.github/workflows/ci.yml` runs on every push/PR (read-only token, superseded runs cancelled):
+- **API**: `gofmt -l` (must be empty), `go vet`, `go build`, `go test ./... -p 1` **and** `go test ./... -race -p 1`
+  against real Postgres and Redis service containers (this includes the OpenAPI drift/coverage tests and the security suite),
+  `govulncheck` **pinned** (fails on a vulnerability reachable from Nodera's code), and `@redocly/cli` lint of `api/openapi/openapi.json`.
+- **Production database roles**: creates the roles, runs `nodera-migrate` as the owner, applies the audit protections and proves them as the runtime role; re-runs everything to prove idempotence.
+- **Web**: `npm ci`, ESLint with zero warnings, `tsc --noEmit`, Vitest, `next build`, and the **dependency policy** below.
+- **Images**: builds the API, Agent and Web images; checks they run as non-root; starts the Web image read-only with all capabilities dropped and checks it serves and contains no package manager and no baked-in localhost API URL;
+  validates both compose files; runs `scripts/check-compose-prod.py` (no published ports, socket only on the agent, secrets as files, internal-only networks, pinned images, bounded logs, memory limits, migration gate, SSE flush, control-plane labels) and proves the production compose refuses to start without its mandatory values.
+
+## Dependency policy (web)
+
+CI runs `scripts/audit-policy.mjs`, which reads `npm audit --json` and **fails on any high or critical advisory** unless it is listed by exact GHSA id and package in
+`web/audit-exceptions.json` with a reason, exposure, mitigation and an **expiry date**. Expired exceptions fail; exceptions that no longer match anything fail (so the list cannot rot);
+new advisories fail. There is no blanket threshold exception.
+
+State at the time of the staging-readiness pass:
+- **Fixed:** `tinypool` critical (prototype pollution → RCE, via Vitest) — Vitest upgraded 3 → 5 (test-time only); PostCSS (XSS / path-traversal advisories, in Next's pipeline) — `overrides` forces `postcss ^8.5.30` (Next 15.5 builds and runs with it); `sharp`, `source-map-js` — patched by `npm audit fix`.
+- **Accepted, expiring 2027-01-31:** `GHSA-vfj7-8cjw-p6xm` in `braces` — a stack-exhaustion DoS on deeply nested glob braces. **Every published version of `braces` is affected; no fix exists.** It is reachable only through
+  Tailwind 3 (`micromatch`/`fast-glob`) and `eslint-config-next` at **build/lint time**, on glob patterns from this repository's own config, never from user input; the production image contains no `braces` (checked). Removing it means the Tailwind 4 migration, a styling change outside the scope of the deployment-readiness pass. Review at expiry or when Tailwind 4 is adopted.
+- Below the gate (moderate): `postcss-selector-parser`, `postcss-nested`, same Tailwind 3 chain. Go: `govulncheck` reports 0 reachable; it notes the unmaintained `golang.org/x/crypto/openpgp` package in a required module — Nodera does not import it.
 
 ## CORS — IMPLEMENTED
 
@@ -527,16 +546,33 @@ never `*`, both because `Authorization` headers are in play and because
 the Fetch spec (the browser would refuse it). Production deployments must
 set this explicitly to their real frontend origin(s) (`docs/DEPLOYMENT.md`).
 
-## Known dependency finding: `web/` transitive PostCSS advisories
+In production the API **refuses to start** unless every origin is an exact `https://` origin (no `*`, no path, no localhost) — `internal/platform/config` tests each rejection.
+The supported topology is same-origin (UI and API on one host behind the proxy), where CORS never applies; the exact-origin allow-list is defence in depth.
 
-`npm audit` flags PostCSS (bundled inside Next.js's own build pipeline,
-not a direct dependency) for XSS/path-traversal issues in its CSS
-stringifier and sourcemap loader. These apply to processing *untrusted*
-CSS at build time — `web/`'s build only ever processes its own
-repository's CSS, so the practical exposure here is effectively nil. The
-fix requires a Next.js 16 major upgrade (breaking change), deliberately
-not taken during this foundation-building pass; tracked in
-`docs/ROADMAP.md`.
+## Production browser security posture — verified
+
+Checked in production mode by `cmd/server/production_security_test.go` and, through Traefik with real TLS termination, by `scripts/staging-smoke.py security`:
+- session cookie `nodera_session`: `HttpOnly`, `Secure`, `SameSite=Lax`, `Path=/`, host-only (no `Domain`); CSRF cookie `nodera_csrf`: `Secure`, `SameSite=Lax`, readable by the UI (double-submit)
+- every cookie-authenticated mutating request needs `X-CSRF-Token` (wrong/missing → 403); bearer **API tokens** work without cookies/CSRF but only within their scopes
+- no session token in `localStorage`/`sessionStorage` (the UI keeps only preferences); the login response body does not carry the session token
+- CORS reflects only the configured exact origin with credentials; `null`, `*`, look-alike and localhost origins get no CORS headers
+- JSON bodies are limited to 2 MiB (`413`/validation error beyond); the HTTP server has header and idle timeouts
+
+## Production database roles and audit immutability
+
+`scripts/db/01-roles.sql` splits `nodera_owner` (schema owner, used only by `nodera-migrate`) from `nodera_app` (the API: DML only, no DDL, no superuser).
+`02-post-migrate.sql` revokes `UPDATE`, `DELETE`, `TRUNCATE` on `audit_log` and all writes to `schema_migrations` from the app role; audit retention deletes go through the
+`SECURITY DEFINER` function `audit_log_apply_retention` (migration 0032) which refuses a cutoff younger than 90 days and only touches one organisation. `03-verify-roles.sql` proves
+10 behaviours as the runtime role (CI and `scripts/post-migrate.sh`). **IMPLEMENTED + LOCALLY TESTED; real-database verification pending.** A superuser or the owner can still alter the table: this is
+protection against application bugs and application-level compromise, not against a host administrator.
+
+## Control-plane self-protection and trust model
+
+The Node Agent holds the Docker socket and is therefore root-equivalent on the host; the API holds **no** socket (`NODERA_PROVIDER_MODE=agent`; the direct mode is refused in production without an explicit override).
+The agent executes only a fixed allowlist (no shell exists), validated on both sides, and `internal/nodeagent/guard` refuses any managed operation that would stop/remove/replace `nodera-cp-*` containers, anything labelled
+`nodera.role=control-plane`, or the configured extras (Traefik, MariaDB), and refuses workload mounts outside the data root (so the socket, `/etc`, the Postgres volume are unreachable), host networking and root users. Project slugs starting `cp-` are rejected.
+Commands carry secrets only transiently: parameters of `docker.create` and `database.ensure` are blanked in `node_agent_commands` once finished; an executed command id is remembered so a replayed signed command is refused; every command has an execution time limit.
+The break-glass path is SSH + Docker Compose on the host, independent of Nodera (`docs/DEPLOYMENT.md`). Customer containers sit on a different network from the control plane and cannot reach it.
 
 ## Control plane security (operations engine) — IMPLEMENTED
 
@@ -566,23 +602,19 @@ in order under **their own** permissions; dangerous steps still need gateway app
 
 ### Known limits (honest list)
 
-* The Node Agent and Docker adapter are tested with mocks/in-process; they have not run against a real remote node.
+* The Node Agent, Docker adapter and MariaDB adapter have run against a real Docker daemon and MariaDB container **on a local Linux VM only**; none has run on the Hetzner host (LOCALLY TESTED, not STAGING VALIDATED).
 * Email delivery is not implemented (reported as such). Password-reset flow does not exist (no mail transport), so there is nothing to rate limit yet.
 * Dev keys persisted in `NODERA_DATA_DIR` are a convenience; production requires explicit keys and refuses to start without them.
-* Rate limiters for the new budgets are in-process (per instance); login/signup/AI limiters can use Redis.
+* The API/dangerous/agent rate limiters are in-process (per instance); login/signup/AI/create-org/change-password use Redis with a per-instance fallback. Shared state for the rest is required before scaling out (`docs/DEPLOYMENT.md`).
+* TLS verification is disabled in exactly two places — the certificate *inspection* probes (`check_ssl` tool and the SSL monitor) — which dial, read the peer certificate, validate it explicitly, report, and send no application data. Nothing else (SFTP uses a pinned host key; the agent talks https with verification) skips verification.
+* Local DNS is in-memory and the local certificate provider is a development CA; both are reported as `local_dev` and are not production DNS/TLS.
+* An operator with root on the host (or the owner database role) can do anything; the guard and the database protections defend against application faults, not against host administrators.
 
 ## Not yet implemented / deliberately deferred
 
-- CSRF protection (not yet relevant — no cookie-based auth flow exists; the
-  session token is a bearer token, not a cookie, so CSRF is out of scope
-  until a cookie-based web session flow is added)
-- Rate limiting on endpoints beyond `/auth/login`, `/auth/signup`,
-  `/ai/chat` (shared with `/agents/{id}/run`), `/organizations`, and
-  `/account/password` — every other endpoint remains unlimited (most
-  mutations beyond these are already `organization.manage`-gated,
-  which meaningfully narrows who can even attempt abuse)
-- Upload validation (no upload endpoints exist yet)
-- External KMS/vault integration for secrets (current implementation is a
-  self-contained AES-256-GCM scheme — see Secrets above)
+- Email delivery, password recovery, invitations (no mail transport) — NOT IMPLEMENTED
+- External KMS/vault integration and automated rotation of `NODERA_SECRETS_ENCRYPTION_KEY` (current scheme is self-contained AES-256-GCM; see Key rotation and `docs/KEY-CUSTODY.md`) — NOT IMPLEMENTED
+- Shared-state rate limiting for the in-process limiters (needed only before running several API instances)
+- Content-Security-Policy for the web UI (the API returns only JSON)
 
 These are tracked in `docs/ROADMAP.md`, not silently skipped.

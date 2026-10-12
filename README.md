@@ -14,6 +14,11 @@ with every important action running as an audited, rollback-capable
 for exactly what is real, what runs on mock/local providers, and what still
 needs the real Hetzner environment or external services.
 
+> **Current stage: READY FOR HETZNER STAGING DEPLOYMENT (code side) — not "production ready".**
+> Nothing has run on the real Hetzner host. Next: [docs/HETZNER-STAGING-RUNBOOK.md](docs/HETZNER-STAGING-RUNBOOK.md) →
+> [docs/SMOKE-TESTS.md](docs/SMOKE-TESTS.md) → [docs/DISASTER-TESTS.md](docs/DISASTER-TESTS.md) → [docs/PRODUCTION-GATE.md](docs/PRODUCTION-GATE.md).
+> Status words are precise: IMPLEMENTED ≠ LOCALLY TESTED ≠ STAGING VALIDATED ≠ PRODUCTION VALIDATED (see [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)). Nothing is at the last two levels yet.
+
 ## Stack
 
 - **Core API, Node Agent, Workers, AI Gateway, Agent Runtime:** Go
@@ -47,24 +52,26 @@ schema/interfaces, no production backend yet) · **PLANNED** (not started).
 | Secrets | IMPLEMENTED | AES-256-GCM encrypted at rest; values never exposed over HTTP, only `Reveal`-able in-process; set/list/delete plus update-description-without-resupplying-the-value; optional at config level. A parallel platform-scoped set (`platform_secrets`, `platform.secrets.manage`/`platform.secrets.read`, `GET`/`PUT`/`PATCH`/`DELETE /api/v1/platform/secrets...`) now exists for platform-wide credentials, not yet wired to the Anthropic/OpenAI adapters (documented deliberate deferral) — see docs/SECURITY.md "Platform secrets" |
 | Tool Gateway + approvals | IMPLEMENTED | Permission → risk-tier → approval → execution → audit pipeline is real, with expiration (24h default, per-organization per-tool overrides via `tools.manage`, bounded 5m–30d); a concurrency-safe state machine (`pending → executing → executed/execution_failed`, or `→ rejected/cancelled/expired`) guarantees a single approval can execute a tool at most once even under concurrent decisions (see docs/AGENTS.md "Approval state machine"); requester and approver identity are recorded separately (`requested_by_user_id`/`requested_by_agent_id` vs `decided_by_user_id`); a pending approval can be self-cancelled by its own requester (no `approvals.decide` needed); `get_server_metrics` and `check_ssl` (a genuine live TLS check, SSRF-hardened via `internal/platform/netpolicy` — see docs/SECURITY.md "Outbound network / SSRF policy") have real handlers, every other seeded tool honestly reports `NOT_IMPLEMENTED` |
 | Agent identity + scoped execution | IMPLEMENTED | Create/list/update/enable/disable/delete agent definitions (`agents.manage`); scoped chat (`Run`, drives `system_instructions` through the AI gateway under the agent's own `permission_scope`) and scoped tool execution (`ExecuteTool`, enforces `allowed_tool_keys` then reuses the real Tool Gateway pipeline) — `permission_scope` can never exceed the caller's own permissions, re-checked on every update, not just at creation. Delete is a hard delete and requires the agent to be disabled first. No autonomous/LLM-directed tool selection: a caller always names the tool (rule 38) |
-| Rate limiting | IMPLEMENTED | `/auth/login` (5/5min/IP), `/auth/signup` (3/hour/IP), `/ai/chat` and `/agents/{id}/run` (60/min/org, sharing the same per-org budget — an agent's scoped chat drives the identical AI-gateway cost path, so it can't be used to bypass `/ai/chat`'s limit), `/organizations` create (10/hour/user), `/account/password` (5/5min/user — the only credential-verification endpoint that had no throttle); in-process by default, or Redis-backed and shared across instances when `NODERA_REDIS_URL` is set; other endpoints remain unlimited |
+| Rate limiting | IMPLEMENTED | login/signup/AI/create-org/change-password limits are Redis-backed with a per-instance fallback; API, dangerous-request and agent limits are in-process (one API instance is the supported topology — `docs/DEPLOYMENT.md`). Details: `/auth/login` (5/5min/IP), `/auth/signup` (3/hour/IP), `/ai/chat` and `/agents/{id}/run` (60/min/org, sharing the same per-org budget — an agent's scoped chat drives the identical AI-gateway cost path, so it can't be used to bypass `/ai/chat`'s limit), `/organizations` create (10/hour/user), `/account/password` (5/5min/user — the only credential-verification endpoint that had no throttle); in-process unless `NODERA_REDIS_URL` is set; behind a proxy the client IP comes from `NODERA_TRUSTED_PROXIES` |
 | Secure headers | IMPLEMENTED | `nosniff`, `DENY`, `no-referrer`, `no-store` on every response |
-| CI | IMPLEMENTED | `gofmt`/`vet`/`build`/`test -race`/`govulncheck` (API) + `typecheck`/`build`/`npm audit` (web) on every push |
+| CI | IMPLEMENTED | API: gofmt/vet/build/test/test -race/govulncheck/OpenAPI lint · production database roles job · web: lint/typecheck/test/build/dependency policy · images: API, Web, Agent builds, non-root + runtime checks, dev and production compose validation with security invariants (`docs/SECURITY.md` "CI") |
+| Release pipeline | IMPLEMENTED — NOT YET EXECUTED | `v*.*.*` tag → immutable GHCR images with digests (`docs/RELEASES.md`) |
 | OpenAPI spec + Swagger UI | IMPLEMENTED | `GET /openapi.json` (validated against the OpenAPI 3.0 schema in CI) + `GET /docs`; hand-maintained (not yet generated from Go code — see docs/ROADMAP.md Phase 50), but every response schema now declares `required`, and `web/`'s frontend types are generated straight from it (`lib/types.ts` is a thin alias layer over `lib/api-types.generated.ts`, not a hand-copied shape) |
 | Pagination | IMPLEMENTED (4 endpoints) | `infrastructure/nodes`, `applications`, `jobs`, `audit` — `limit`/`offset` + a `has_more` envelope; other list endpoints stay unpaginated (small at phase-1 scale) |
 | Dashboard / frontend | IMPLEMENTED | Next.js + TypeScript control plane UI (`web/`) — login, org picker, infrastructure, applications, jobs, tools/approvals, agents, AI Gateway (chat/profiles/providers/models), secrets, access (API tokens + service accounts), settings (roles + member role assignment), audit; every page reads/writes real API data, no fabricated placeholders. Jobs and Approvals refresh automatically via background polling (5s/7s). Human session lives in an HttpOnly cookie (never localStorage/JS-readable), with double-submit CSRF protection on mutating requests — see docs/SECURITY.md "Browser authentication" |
 | Operation framework | IMPLEMENTED | Persisted steps/logs, reverse-order rollback, cancel, idempotency, panic containment; dangerous operations only through the approval gateway |
 | Projects / clients / provisioning | IMPLEMENTED | `project.provision` / `project.delete` (approval), tenant-scoped, soft delete |
-| WordPress engine | IMPLEMENTED (mock/local) · needs real Docker + MariaDB | install = provision, clone (URL rewrite), in-place update with rollback, health report |
-| Backups / restore | IMPLEMENTED (local FS) | checksummed + verified archives, safety snapshot + automatic rollback, policies, retention |
-| Domains / DNS / SSL | IMPLEMENTED (local DNS store, local CA) · Cloudflare/Let's Encrypt adapters are prepared skeletons | private keys only in the encrypted secrets store |
+| WordPress engine | IMPLEMENTED + LOCALLY TESTED (real Docker + MariaDB on a local VM) · REAL HETZNER VALIDATION PENDING | install = provision, clone (URL rewrite), in-place update with rollback, health report |
+| Backups / restore | IMPLEMENTED + LOCALLY TESTED | streamed (bounded memory) checksummed archives, safety snapshot + automatic rollback, policies, retention; **off-site SFTP (Storage Box)** with a pinned host key — REAL STORAGE BOX VALIDATION PENDING (`docs/BACKUPS.md`) |
+| Nodera's own backup / disaster recovery | IMPLEMENTED + LOCALLY TESTED | `scripts/backup-nodera.sh` / `restore-nodera.sh`: age-encrypted, off-site, read-back verified; key custody in `docs/KEY-CUSTODY.md`; full-server rebuild untested |
+| Domains / DNS / SSL | IMPLEMENTED as **development** features (in-memory DNS store, local CA — reported `local_dev`, not production DNS/TLS) · Cloudflare/Let's Encrypt NOT IMPLEMENTED (skeletons) | private keys only in the encrypted secrets store |
 | Deployments | IMPLEMENTED (upload; git via provider interface) | PRECHECK→…→COMPLETE, auto-revert, rollback, production approval; no GitHub adapter/build step yet |
 | Site migration | IMPLEMENTED for zip archives · remote connectors TODO | preflight PASS/WARNING/BLOCKER, staging, serialized-safe URL rewrite, health score, approved cutover with automatic restore |
 | Monitoring / alerting / incidents / notifications / logs | IMPLEMENTED | SSRF-guarded checks, deduplicated incidents with auto-resolve, redacted logs, retention; email needs SMTP |
-| Node Agent | IMPLEMENTED (tested in-process) · needs a real node | pull model, Ed25519 signed both ways, replay protection, allowlisted commands only |
+| Node Agent | IMPLEMENTED + LOCALLY TESTED (real Docker daemon on a local VM) · REAL HETZNER VALIDATION PENDING; the only component with the Docker socket (the API has none in production) | pull model, Ed25519 signed both ways, replay protection, allowlisted commands only |
 | AI operations layer | IMPLEMENTED | AI proposes plans; a human approves and runs each step; unknown/forged operations are dropped |
 | Dashboard, search, command palette, notification center, feature flags | IMPLEMENTED | real data only; permission-aware; SSE for live operation progress |
-| Docker / demo mode | IMPLEMENTED | dev + production compose, API/web/agent images, labelled DEVELOPMENT demo seed on mock providers |
+| Docker / compose / demo mode | IMPLEMENTED + LOCALLY TESTED | dev compose; hardened production compose (internal networks, secrets as files, no published DB ports, bounded logs, memory limits, control-plane protection) run unmodified on a local VM; API/web/agent images; labelled DEVELOPMENT demo seed on mock providers |
 | AI Gateway, Agent Runtime as separate services | PLANNED | Currently packages inside the one Core API binary (ADR-002); the Node Agent *is* a separate binary/image |
 
 ## Repository layout
@@ -166,7 +173,9 @@ cookie/CSRF tests and `internal`'s integration tests both existing).
 - [docs/AI_ARCHITECTURE.md](docs/AI_ARCHITECTURE.md) — AI gateway/provider/routing design
 - [docs/AGENTS.md](docs/AGENTS.md) — agent/tool/approval design
 - [docs/INFRASTRUCTURE.md](docs/INFRASTRUCTURE.md) — node/provider model
-- [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) — deployment notes, required config, Hetzner placeholders
+- [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) — architecture, trust model, Traefik contract, config, migrations/roles, health, logging, sizing, rate limiters
+- [docs/HETZNER-STAGING-RUNBOOK.md](docs/HETZNER-STAGING-RUNBOOK.md), [docs/SMOKE-TESTS.md](docs/SMOKE-TESTS.md), [docs/DISASTER-TESTS.md](docs/DISASTER-TESTS.md), [docs/PRODUCTION-GATE.md](docs/PRODUCTION-GATE.md) — the next phase
+- [docs/KEY-CUSTODY.md](docs/KEY-CUSTODY.md), [docs/RELEASES.md](docs/RELEASES.md) — keys and secrets, release/branch/rollback policy
 - [docs/ROADMAP.md](docs/ROADMAP.md) — real implementation state and next steps
 - [docs/FINAL-IMPLEMENTATION-AUDIT.md](docs/FINAL-IMPLEMENTATION-AUDIT.md) — honest self-audit: what is real, mock-only, environment- or provider-dependent
 - [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) — run locally, provider modes, demo mode, tests

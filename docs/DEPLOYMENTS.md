@@ -15,4 +15,6 @@
 * **One active deployment per project/environment** (partial unique index).
 * Inputs are validated: repository `owner/name`, git ref charset, environment name, upload paths (no `..`, absolute, backslash, empty segments).
 
+**Status:** IMPLEMENTED + LOCALLY TESTED with the mock Git provider and uploads. The GitHub provider, build runner, webhooks and blue/green switching are NOT IMPLEMENTED.
+
 Not implemented: webhooks (`CreateWebhook` exists on the provider interface), build containers, blue/green traffic switching.

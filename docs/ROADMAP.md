@@ -2066,12 +2066,12 @@ providers, requires the real environment (Hetzner/Docker/credentials) to be prov
 |---|---|---|
 | Operation framework (steps, logs, rollback, cancel, idempotency, panic containment, correlation) | DONE | `internal/ops`, 7 integration tests |
 | Approval gateway for dangerous operations | DONE | `ops.Submit` refuses `ToolKey` operations; 6 dangerous operations wired |
-| Provider interfaces + mock/local/docker/mariadb | DONE (mock/local) · NEEDS ENV (docker, mariadb) | argv-only adapters tested through runner seams |
+| Provider interfaces + mock/local/docker/mariadb/agent/sftp | DONE (mock/local) · LOCALLY TESTED with real Docker + MariaDB + SFTP · NEEDS HETZNER to be staging-validated | argv-only adapters; provider mode `agent` = API without the socket |
 | External adapters (Cloudflare, Let's Encrypt, Hetzner, GitHub) | PREPARED SKELETONS | always fail with `ErrUnavailable`; never registered |
 | Node Agent (protocol, enrolment, signing, allowlist, replay, revoke, CLI, UI) | DONE · NEEDS ENV for a real node | `docs/NODE-AGENT.md` |
 | Clients / projects / provisioning | DONE | `project.provision`, `project.delete` (approval) |
 | WordPress (install=provision, clone, update, health) | DONE on mock/local FS · NEEDS ENV for real containers + MariaDB | |
-| Backups / restore / policies / retention | DONE (local FS) · TODO s3/sftp targets | `docs/BACKUPS.md` |
+| Backups / restore / policies / retention | DONE · off-site SFTP DONE (Storage Box validation pending) · TODO s3 target | `docs/BACKUPS.md` |
 | Domains / DNS / SSL (issue, renew, revoke, expiry, auto-renew) | DONE (local DNS store + local CA) · NEEDS ENV for Cloudflare + Let's Encrypt | |
 | Deployments (upload + git, rollback, auto-revert, production approval) | DONE · PARTIAL: no GitHub adapter, no build step, no webhooks | `docs/DEPLOYMENTS.md` |
 | Site migration (zip sources, preflight, staging, rewrite, score, cutover, rollback) | DONE for archives · TODO ftp/sftp/ssh/cpanel/remote connectors | `docs/MIGRATION.md` |
@@ -2080,7 +2080,7 @@ providers, requires the real environment (Hetzner/Docker/credentials) to be prov
 | Realtime | DONE (SSE) | WebSocket not needed so far |
 | AI plans (propose → human approve → human runs steps) | DONE | autonomous execution deliberately absent |
 | Security regression suite | DONE | `api/cmd/server/security_test.go` |
-| Docker (dev + prod template + CI image builds) | DONE · NEEDS ENV for first real deploy | `docs/DEPLOYMENT.md` |
+| Docker (dev + hardened prod compose + CI image builds + release workflow) | DONE · NEEDS HETZNER for first real deploy | `docs/DEPLOYMENT.md` |
 | Demo mode + labelled seed | DONE | `docs/DEVELOPMENT.md` |
 | Client portal | TODO (flag exists, default off) | |
 | Persistent UI filters, server-side table pagination in the UI | TODO | tables paginate client-side over ≤200 rows fetched |
@@ -2089,16 +2089,19 @@ providers, requires the real environment (Hetzner/Docker/credentials) to be prov
 
 Full self-assessment: `docs/FINAL-IMPLEMENTATION-AUDIT.md`.
 
-## Next up
+## Hetzner readiness pass — state
 
-1. **First real deployment on `nodera-prod-01`**: verify Traefik labels, Docker socket/GID, MariaDB adapter, Postgres/Redis wiring, then enrol the node agent.
-2. **Adapters that need credentials**: GitHub (token/App), Cloudflare DNS, Let's Encrypt (ACME), Hetzner Cloud; S3/SFTP backup targets.
-3. **Migration connectors**: SFTP/SSH first (the common hosting case), then cPanel and remote WordPress.
-4. **Email transport** (SMTP) → email notification channel, invitations, password reset.
-5. **A build runner** for deployments (containerised builds, never ad-hoc shell) and GitHub webhooks.
-6. **Persistent filters + server-side pagination** in the UI tables.
-7. **Generate the OpenAPI spec from code** (the drift test already stops it from silently diverging).
-8. **Platform secrets wiring** for cloud-provider credentials (`docs/AI_ARCHITECTURE.md`).
+Code-side deployment readiness is done (`docs/FINAL-IMPLEMENTATION-AUDIT.md`): green CI matrix incl. the Web image, hardened production compose with the API **without** the Docker socket (provider mode `agent`),
+control-plane self-protection, streaming bounded-memory backups, an SFTP off-site backend with host-key pinning, control-plane backup/restore, key-custody procedure, database role model with append-only audit, migrations as a release step,
+readiness semantics, trusted-proxy client IP, versioned release workflow, runbook, smoke tests, disaster matrix and production gate. **Development stops here until the staging results are in.**
+
+## Next up (in this order)
+
+1. **Real Hetzner deployment + staging validation + disaster testing**: follow `docs/HETZNER-STAGING-RUNBOOK.md`, record `docs/SMOKE-TESTS.md` and `docs/DISASTER-TESTS.md`, satisfy `docs/PRODUCTION-GATE.md`. Fix what it finds. Push the first release tag (the Release workflow has never run).
+2. **First pilot workload**, then customer migration (only after the gate).
+3. *Later, not blockers for the first architecture:* Cloudflare DNS and a generic ACME client (replace the development DNS/CA providers); GitHub provider + build runner + webhooks; SFTP/SSH/cPanel migration connectors; SMTP (email channel, invitations, password reset); Hetzner Cloud provider; client portal.
+4. *Before any horizontal scaling:* move every rate limit whose invariant must hold deployment-wide to shared state (the in-process API/dangerous/agent limiters), make the job worker concurrent-safe under load, and decide how a second node's agent is addressed (`NODERA_LOCAL_AGENT_ID` is a single local agent today).
+5. *Hardening backlog:* automated/versioned rotation of `NODERA_SECRETS_ENCRYPTION_KEY`; Tailwind 4 migration (removes the accepted `braces` advisory); pin GitHub Actions to commit SHAs; browser E2E suite; persistent UI filters + server-side pagination; generate OpenAPI from code; external alerting integration for Nodera's own health.
 
 ## Explicitly not started (rule 38 — deferred by design)
 

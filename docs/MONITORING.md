@@ -15,3 +15,5 @@
 * **Retention:** defaults 30 d (job logs, metrics, log entries) and 365 d (resolved incidents). The **audit log is only pruned with an explicit policy**
   and never below 90 days.
 * **Realtime:** `GET /operations/{id}/stream` (SSE, resumable with `Last-Event-ID`) and `GET /events` (unread count + operation changes).
+
+**Status:** IMPLEMENTED + LOCALLY TESTED. The container and database monitors depend on the agent/Docker/MariaDB path, which is REAL VALIDATION PENDING on Hetzner. Email notifications: NOT IMPLEMENTED. Nodera does not page anyone about its own health (disk, `/ready` degraded, failed backup timer): wire external alerting before customer workloads (`docs/PRODUCTION-GATE.md` #19).

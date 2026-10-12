@@ -1,122 +1,137 @@
 # Final implementation audit
 
-Self-audit of the "Infrastructure Operating System / Control Plane" implementation. It states what is real, what only runs
-against mocks or local providers, and what is waiting for the real environment. Verified facts are marked **✔**; things that could
-not be verified here are marked **✘ unverified**. Nothing below is rounded up: this is **not** a "100%" claim — the critical
-production integrations (real Docker/MariaDB/Traefik on the Hetzner node, GitHub, Cloudflare, Let's Encrypt, Hetzner Cloud) have **not** run, only
-their abstractions, workflows and tests have.
+Self-audit of Nodera as an "Infrastructure Operating System / Control Plane", **reconciled against the code** at the Hetzner-readiness pass. It says what is real, what only runs against mocks or
+local providers, and what waits for the real environment. Nothing is rounded up. **This is not a "production ready" claim.**
 
-Measured at the audit commit: 31 migrations · 203 documented API operations (161 paths, drift-tested) · 89 Go source files (~25 k lines) ·
-270 Go test functions (all pass with `-race -p 1`) · 86 TypeScript files · 8 web unit tests · `govulncheck`: 0 reachable vulnerabilities (Go 1.27.2).
+**Verdict: READY FOR HETZNER STAGING DEPLOYMENT (code side).** Next phase: real deployment → staging validation → disaster testing → production gate (`docs/PRODUCTION-GATE.md`) → pilot → migration. No feature work in between.
+
+Measured: 32 migrations · 203 documented API operations (161 paths, drift-tested) · 96 Go source files (~27 k lines) · 323 Go test functions (`go test ./... -p 1`, and `-race`, against real Postgres and Redis) · 86 TypeScript files · 8 web unit tests ·
+`govulncheck`: 0 reachable vulnerabilities (Go 1.27.2) · web dependency policy green with one documented, expiring exception.
+
+## Status vocabulary
+
+| Term | Meaning |
+|---|---|
+| IMPLEMENTED | code exists |
+| LOCALLY TESTED | CI tests pass and/or it was exercised end to end on a developer machine (real Docker/MariaDB/Traefik/SFTP on a local Linux VM). **Not** the Hetzner host |
+| STAGING VALIDATED | ran successfully on the real Hetzner environment with non-customer test workloads — *nothing is at this level* |
+| PRODUCTION VALIDATED | the production gate and disaster tests passed — *nothing is at this level* |
+| NOT IMPLEMENTED | no code |
+
+## Per-component status
+
+| Component | Status | Notes |
+|---|---|---|
+| Identity, RBAC, tenancy, audit, secrets, API tokens | IMPLEMENTED + LOCALLY TESTED | pre-existing, extended; real Postgres suites |
+| Browser auth (HttpOnly/Secure cookie, CSRF), CORS | IMPLEMENTED + LOCALLY TESTED | also verified through Traefik with TLS termination (self-signed) |
+| Operations engine (steps, rollback, cancel, idempotency, SSE) | IMPLEMENTED + LOCALLY TESTED | SSE progressive through Traefik; start-up marks restart-interrupted jobs failed (retry safe) |
+| Approvals (dangerous operations) | IMPLEMENTED + LOCALLY TESTED | atomic single decision; 8-way race → 1×200, 7×409 |
+| Projects / provisioning (WordPress) | IMPLEMENTED + LOCALLY TESTED | real Docker + MariaDB through the agent on a local VM; **REAL HETZNER VALIDATION PENDING** |
+| Node Agent (protocol, allowlist, guard, DB ops) | IMPLEMENTED + LOCALLY TESTED | `docs/NODE-AGENT.md`; **REAL HETZNER VALIDATION PENDING** (Docker GID, socket, bind-mount ownership) |
+| Provider mode `agent` (API without Docker socket) | IMPLEMENTED + LOCALLY TESTED | the production default; `docker` mode refused in production |
+| Docker adapter | IMPLEMENTED + LOCALLY TESTED | real daemon on a local VM; Hetzner pending |
+| MariaDB adapter | IMPLEMENTED — REAL MARIADB/DOCKER VALIDATION PENDING | exercised against a real MariaDB 11 container locally (ensure/dump/load/drop via the agent); injection, redaction, legacy-client and timeout tests in CI; the Hetzner MariaDB version/container/credentials are unknown |
+| Backups: streaming create/verify/restore, safety snapshot, rollback | IMPLEMENTED + LOCALLY TESTED | bounded memory proven (384 MiB dump, ~1 MiB heap); temp files cleaned on failure/cancel/crash; ENOSPC → clean failure |
+| Off-site backup (SFTP / Storage Box) | IMPLEMENTED — REAL HETZNER STORAGE BOX VALIDATION PENDING | pinned host key mandatory; hash-verified remote copy; tested vs an in-process SSH server (CI) and a real OpenSSH SFTP server (local) |
+| Control-plane DR (`backup-nodera.sh`, `restore-nodera.sh`) | IMPLEMENTED + LOCALLY TESTED | age-encrypted, off-site, read-back verified, restore proven (marker row rolled back); full-server rebuild is disaster test 20, **not done** |
+| Production compose (`docker-compose.prod.yml`) | IMPLEMENTED + LOCALLY TESTED | ran unmodified on a local VM; invariants enforced in CI; **never on Hetzner** |
+| Database roles + audit immutability | IMPLEMENTED + LOCALLY TESTED | 10 checks as the runtime role; CI job; real-database verification pending |
+| Migrations as a release step (`nodera-migrate`) | IMPLEMENTED + LOCALLY TESTED | advisory lock, `-status`, API verifies instead of migrating in production |
+| Network: domains, DNS (local provider), SSL (local CA) | IMPLEMENTED + LOCALLY TESTED as **development** features | DNS is in-memory, certificates are a development CA; reported `local_dev`; **not production DNS/TLS** |
+| Deployments (upload / mock git) | IMPLEMENTED + LOCALLY TESTED | GitHub provider, build runner, webhooks NOT IMPLEMENTED |
+| Site migration (zip) | IMPLEMENTED + LOCALLY TESTED | FTP/SFTP/SSH/cPanel connectors NOT IMPLEMENTED |
+| Monitoring, alerts, incidents, notifications, logs | IMPLEMENTED + LOCALLY TESTED | email channel NOT IMPLEMENTED; no self-paging |
+| WordPress engine (clone/update/health) | IMPLEMENTED + LOCALLY TESTED (mock/local) | real update/clone on Hetzner pending |
+| Feature flags, dashboard, search, AI plans | IMPLEMENTED + LOCALLY TESTED | AI only proposes; humans approve and run |
+| Release pipeline (GHCR immutable images) | IMPLEMENTED — NOT YET EXECUTED | `release.yml` needs its first tag push |
+| Hetzner Cloud provider, Cloudflare DNS, generic ACME, GitHub provider, SMTP, remote migration connectors, client portal | NOT IMPLEMENTED | prepared skeletons or schema only; not required for the first architecture |
 
 ## 1. What genuinely works today
 
 Verified by tests against real PostgreSQL and the real HTTP router (and, for the UI, by driving the running app in a browser):
 
-* **Operation framework** — persisted steps/logs, reverse-order rollback, cancellation, idempotent submit under concurrency, panic containment, correlation id, SSE progress.
-* **Approvals for dangerous operations** — `project.delete`, `backup.restore`, `backup.delete`, `domain.remove`, `migration.cutover`, `deployment.production` cannot be submitted directly; nothing runs before a human decision (tested for each).
-* **Clients / projects / provisioning** (create → provision → active, failure rolls back, retry works).
-* **Backups** with the *real* tar.gz provider: SHA-256 verification, restore round trip, safety snapshot + rollback on failed restore, corruption detection, scheduled policies (idempotent per period), retention.
-* **Domains / DNS / SSL** with the real local CA: record validation, provider-failure-leaves-no-phantom-row, propagation, issue/renew/revoke, expiry sweep, auto-renew (idempotent), private keys only encrypted in the secrets store (scanned for leaks).
-* **Deployments** (upload and git-via-provider): stage tracking, automatic revert on failed health check, explicit rollback, production approval, path/ref/repository validation.
-* **Site migration** from zip archives: preflight (PASS/WARNING/BLOCKER), zip-slip/zip-bomb-safe extraction, `wp-config.php` never migrated, serialized-data-safe URL rewrite (unit-tested incl. nested/escaped/multibyte), staging, health score, approved cutover with automatic restore, rollback after completion.
-* **WordPress**: clone (files + DB + URL rewrite, full undo), in-place update (backup, image swap, restore old image on failure), health report.
-* **Monitoring / alerts / incidents / notifications / logs**: SSRF-guarded checks (verified against the real local provider), one deduplicated incident per breach with auto-resolve, lifecycle + timeline, per-user read state, redacted logs, retention (audit log protected).
-* **Node Agent**: enrolment (one-time hashed token, expiry, one agent per node), Ed25519 signed requests with replay table, signed agent-bound commands, allowlist enforced twice, revocation — exercised end to end with a real agent object against the real router.
-* **Platform**: feature flags (gate engines per org), dashboard + global search + command palette (permission-aware), notification bell (SSE), AI plans, structured errors with `details`, per-actor and dangerous-request rate limits, `/health` + `/ready` (honest provider states).
-* **Security regression suite** (SQLi, XSS, CSRF, IDOR/cross-tenant, privilege escalation, secret leakage, path traversal, command injection, replay/forged agents) and an OpenAPI drift test.
-* **Docker**: API, agent and web images build; dev compose and the production template validate; the API image was started and exercised (demo mode, login, dashboard, certificates, system info). Demo mode + labelled seed work.
-* **Frontend**: all pages read/write the real API (no mock data left), live operation panel over SSE, approvals feedback, DEVELOPMENT/mock banner driven by the server. `eslint --max-warnings 0`, `tsc`, `next build` and vitest pass.
+* **Operation framework** — persisted steps/logs, reverse-order rollback, cancellation, idempotent submit under concurrency, panic containment, correlation id, SSE progress, recovery of jobs interrupted by a restart.
+* **Approvals for dangerous operations** — `project.delete`, `backup.restore`, `backup.delete`, `domain.remove`, `migration.cutover`, `deployment.production` cannot be submitted directly; nothing runs before a human decision.
+* **Clients / projects / provisioning**, **backups** (real tar.gz provider, streaming, off-site SFTP), **domains/DNS/SSL** (local CA), **deployments**, **site migration** from zip archives, **WordPress** clone/update/health, **monitoring/alerts/incidents/logs** — as in the previous audit, unchanged in behaviour.
+* **Node Agent** — enrolment, Ed25519 signed requests with replay table, signed agent-bound commands, allowlist twice, revocation, protected control-plane resources, database operations with file hand-off, replayed-command refusal, execution time limits.
+* **Security regression suite** and OpenAPI drift test; production browser-security tests; configuration tests that make an unsafe production configuration impossible to start.
 
 ## 2. What only works with mocks (or local simulations)
 
 | Area | Reality |
 |---|---|
-| Containers, databases, git | In `mock` mode they are in-memory. In `local` mode they are **absent** and engines refuse to run (honest failure). Real: Docker CLI adapter, MariaDB-over-`docker exec` adapter — **✘ unverified against a real daemon/server** (tested through runner seams only). |
-| DNS | A local, in-process zone store (lost on restart; `Sync` repairs it). Not a registrar/Cloudflare. |
-| Certificates | Real X.509 from a *local* CA — valid structure, **not browser-trusted**. Mock certs are labelled `Nodera Mock CA` / `MOCK` in the UI. |
+| Containers, databases, git | In `mock` mode in-memory. In `local` mode absent (engines refuse to run). In `docker`/`agent` modes real but only locally tested. Git: mock only. |
+| DNS | A local in-process zone store (lost on restart). Not a registrar/Cloudflare. Reported `local_dev`. |
+| Certificates | Real X.509 from a *local* CA — **not browser-trusted**. Reported `local_dev`. Nodera's own TLS comes from Traefik + Let's Encrypt. |
 | Nodes | `NodeProvider` is mock-only. |
-| Demo mode | Everything simulated, labelled MODO DEMO in the UI and `/system/info`; refused when `NODERA_ENV=production`. |
-| Node Agent execution | Tested with the mock/in-memory providers inside the test process, not on a remote machine. |
+| Demo mode | Everything simulated, labelled in the UI and `/system/info`; refused when `NODERA_ENV=production`. |
 
-## 3. What depends on Hetzner (or the real node)
+## 3. What depends on Hetzner (cannot be proven until deployed)
 
-Running `nodera-prod-01` with Docker + Traefik: the Docker adapter against the real daemon/socket (`NODERA_DOCKER_GID`), Traefik labels for your Traefik version and
-resolver, the existing MariaDB container (adapter ready, `NODERA_MARIADB_*`), the Nodera PostgreSQL/Redis wiring, the production DB role without `UPDATE/DELETE` on `audit_log`,
-the agent running on the node with the Docker socket, Hetzner Cloud node actions (adapter skeleton), firewall/network (`proxy-public`). Checklist: `docs/DEPLOYMENT.md`.
-Nothing is hardcoded: node name, network, hosts, resolver and DB host are configuration.
+Docker daemon integration and the **Docker GID**; the agent on the real host; workload bind-mount ownership (uid 10001) on the host filesystem; **MariaDB via real Docker** (version, container name, credentials); Traefik version/labels/network/TLS/HTTP→HTTPS and Let's Encrypt;
+`NODERA_TRUSTED_PROXIES` correctness; production PostgreSQL roles on the real database; the **Storage Box** host key, port 23, key auth and throughput; `daemon.json` log defaults; firewall; **reboot recovery**; **disaster recovery of the whole server**; resource limits under real load; disk-pressure behaviour.
+Each has an explicit test in `docs/SMOKE-TESTS.md` / `docs/DISASTER-TESTS.md`. Nothing is hardcoded to the host: names, networks, hosts and resolvers are configuration.
 
-## 4. What depends on external services
+## 4. What depends on external services (NOT IMPLEMENTED — not blockers for the first architecture)
 
-* **GitHub** — token/App; webhooks. `GitProvider` interface + mock; adapter is a skeleton that fails with `ErrUnavailable`.
-* **Cloudflare DNS**, **Let's Encrypt/ACME** — credentials + clients (skeletons).
-* **S3 / SFTP backup targets** — schema only.
-* **SMTP** — email notification channel reports "SMTP is not configured"; no password-reset or invitations (no mail transport).
-* **Remote migration sources** (FTP/SFTP/SSH/cPanel/remote WordPress) — `sitemig.Connector` interface only; preflight says so.
-* **AI providers** — Ollama/Anthropic/OpenAI adapters pre-existing; plans need a configured profile.
+GitHub (provider, webhooks, build runner), Cloudflare DNS, generic ACME client, Hetzner Cloud API, SMTP/email/password reset/invitations, FTP/SFTP/SSH/cPanel migration sources, S3 backup target, client portal. AI providers (Ollama/Anthropic/OpenAI) exist and need credentials.
 
 ## 5. Destructive operations
 
-`project.delete`, `backup.restore` (overwrites live data), `backup.delete`, `domain.remove` (DNS + certificate), `migration.cutover` (replaces site + database),
-`deployment.production`, plus `wordpress.update` (replaces the container image), `migration.rollback` (restores a snapshot), `ssl.revoke`, agent `docker.remove`/`filesystem.remove`
-(allowlisted, signed), client soft delete, retention sweeps (delete old rows/artifacts) and `agent revoke`.
-The first six require **approval**; all require a permission and are audited.
+`project.delete`, `backup.restore` (overwrites live data), `backup.delete`, `domain.remove`, `migration.cutover`, `deployment.production` (all **approval-gated**), plus `wordpress.update`, `migration.rollback`, `ssl.revoke`, agent `docker.remove`/`filesystem.remove` (allowlisted, signed, **never on a protected control-plane resource**),
+client soft delete, retention sweeps and `agent revoke`. All require a permission and are audited.
 
 ## 6. Operations with rollback
 
 | Operation | Rollback |
 |---|---|
 | `project.provision` | every step has an idempotent Undo; a database or container is only removed if *this run* created it |
-| `backup.restore` | mandatory safety snapshot, restored automatically on failure |
-| `deployment.*` | previous live tree restored automatically on any failure after DEPLOY; `deployment.rollback` restores a release |
-| `migration.run` | staging files/db removed, live site untouched |
-| `migration.cutover` | safety backup restored automatically; `migration.rollback` after completion |
-| `wordpress.clone` | full undo (project, db, container, files) |
-| `wordpress.update` | old image recreated + safety backup restored |
+| `backup.create` | a failed or cancelled run leaves no archive (atomic rename), no remote object, no temp file |
+| `backup.restore` | mandatory safety snapshot, restored automatically on failure; `rollback_failed` names the snapshot |
+| `deployment.*` | previous live tree restored automatically on any failure after DEPLOY; `deployment.rollback` |
+| `migration.run` / `.cutover` | staging removed / safety backup restored; `migration.rollback` after completion |
+| `wordpress.clone` / `.update` | full undo / old image + safety backup restored |
 | `ssl.issue/renew` | order marked failed, secret removed |
-| **no rollback by design** | `project.delete`, `backup.delete`, `domain.remove` (forward-only; guarded by approval), retention sweeps |
+| interrupted by an API restart | marked `failed` at start-up; retry is safe (steps are idempotent) |
+| **no rollback by design** | `project.delete`, `backup.delete`, `domain.remove` (forward-only, approval-gated), retention sweeps |
 
 ## 7. Audited operations
 
-Every state-changing service call writes an audit row (action, actor, resource, correlation id, resulting state — never secret values): operation submit/start/succeed/fail/cancel,
-client/project/domain/record/certificate/backup/policy/deployment/migration changes, monitor/rule/channel/incident changes, feature-flag and retention changes, node-agent
-registration/enrolment/revocation/command queueing, AI plan proposal/decision/step run, approvals (pre-existing), plus the pre-existing identity/RBAC/secrets/platform audit.
-**Not audited by design:** high-volume reads, log ingestion, heartbeats (stored as metrics), notification read state.
+Every state-changing service call writes an audit row (never secret values). **Not audited by design:** high-volume reads, log ingestion, heartbeats, notification read state. In production the runtime role cannot modify or delete audit rows.
 
 ## 8. Areas without a (complete) backend
 
-Client portal (flag exists, off), S3/SFTP targets, SMTP/email, password reset, GitHub webhooks, build runner, remote migration connectors, persistent UI filters,
-server-side pagination in the UI tables (API is paginated; tables page client-side over ≤200 fetched rows), WebSocket (SSE only), OpenAPI generated from code (hand-maintained + drift test),
-`database.delete` / `credential.rotate` gateway tools (registered, no operation behind them yet).
+Client portal, S3 backup target, SMTP, password reset, GitHub webhooks, build runner, remote migration connectors, persistent UI filters, server-side pagination in UI tables, WebSocket (SSE only), OpenAPI generated from code (hand-maintained + drift test),
+`database.delete` / `credential.rotate` gateway tools (registered, no operation yet), automated rotation of the secrets key.
 
 ## 9. Tests
 
-* Go: 270 test functions — operations, provisioning, backups, network/SSL, deployments, migrations (+ rewrite unit tests), WordPress, monitoring/notifications/logs, AI plans, demo seed,
-  node-agent protocol + end-to-end agent tests, security suite, OpenAPI drift, rate limits, SSE, providers (mock/local/docker/mariadb/external), redaction, netpolicy, plus the pre-existing identity/RBAC/tenancy/audit/secrets/tools suites.
-  Run: `go test ./... -race -p 1` (needs `NODERA_TEST_DATABASE_URL`).
-* Web: vitest (formatting, status mapping, SSE parser), ESLint, `tsc`, `next build`. **No browser E2E suite**: the main flows (login, create project, provision with live progress, domains/SSL/backups/monitoring/migration/deployment pages) were driven manually in a browser against the demo stack.
-* CI: gofmt/vet/build/test -race/govulncheck, OpenAPI lint, web lint/typecheck/test/build/audit, Docker image builds, compose validation.
+* Go: 323 test functions across operations, provisioning, backups (streaming memory bound, failure/cancel cleanup), off-site SFTP (host-key pinning, corruption, credentials), network, deployments, migrations, WordPress, monitoring, AI plans, node agent (protocol, executor, guard, replay, agent-mode end to end),
+  production configuration, production browser security, trusted-proxy client IP, security suite, OpenAPI drift, rate limits (including Redis outage fallback), providers, redaction, netpolicy, plus the pre-existing identity/RBAC/tenancy/audit/secrets/tools suites.
+  Run: `go test ./... -p 1` and `-race` (needs `NODERA_TEST_DATABASE_URL`, optionally `NODERA_TEST_REDIS_URL`).
+* Web: Vitest, ESLint (zero warnings), `tsc`, `next build`; **no browser E2E suite**.
+* Operational: `scripts/staging-smoke.py` (security, provisioning, approval race), `nodera-agent selftest`, `scripts/check-compose-prod.py`, `scripts/db/03-verify-roles.sql`.
+* CI: see `docs/SECURITY.md` "CI". The Release workflow has not run yet.
+* **Not tested anywhere:** the Hetzner host, real Let's Encrypt, a real Storage Box, reboot recovery, whole-server loss.
 
 ## 10. Remaining risks
 
-1. **Unproven against production** — Docker/MariaDB/Traefik/Hetzner/GitHub/Cloudflare/ACME have never run. The first real deploy will find issues; the abstractions and failure paths are in place.
-2. **Memory use on big sites** — the local backup provider builds archives in memory; deployments/migrations copy files through the FS provider (caps: 200 MB release, 64 MB upload, 512 MB extraction).
-3. **Single-process background loops** (worker, sweepers, monitors) are idempotent and `SKIP LOCKED`-safe, but multi-instance behaviour has not been load-tested; the new rate limiters are per-instance.
-4. **Local DNS store is volatile**; the DB is the source of truth and `Sync` repairs it, but a real provider is needed before DNS matters.
-5. **Dev keys on disk** (`dev-secrets.key`, `dev-agent-signing.key`) are a development convenience; production refuses to start without explicit keys. Losing `NODERA_SECRETS_ENCRYPTION_KEY` makes stored secrets unrecoverable (documented).
-6. **Audit immutability** relies on the production DB role (revoke `UPDATE/DELETE`), which is a deployment step, not code.
-7. **AI plans** depend on model quality; safety does not (steps are vetted, humans approve and run), but a poor model yields empty plans.
-8. **Forward-only migrations** (no down scripts) — a bad migration is fixed forward.
-9. **UI**: no E2E regression suite; filters are not persisted; tables paginate client-side.
-10. **Security reviews**: the suite is thorough but is not a substitute for an external penetration test before exposing the platform to untrusted tenants.
+1. **Unproven on the target** — everything in §3. The first deployment will find issues; the abstractions, failure paths and tests are in place, and local end-to-end testing already found and fixed real defects (workload ownership vs. restore, client-IP behind a proxy, request-body bound, agent auth on database failure, host-key algorithm selection).
+2. **Workload file ownership.** Managed containers run as uid 10001 (`NODERA_WORKLOAD_USER`) so the control plane can back up/restore/delete their files; images that refuse to run as an arbitrary uid need a different strategy. WordPress (apache) was verified; others are not.
+3. **One API instance only.** The job worker is single-threaded; in-process rate limits (API/dangerous/agent) are per instance and must move to shared state before scaling out; a long backup delays other operations.
+4. **The agent is root-equivalent.** Allowlist + guard + no shell narrow what it can be asked to do, but a vulnerability in the agent, the Docker CLI or the signing key (agent-signing-key custody!) is a host compromise.
+5. **Key loss is permanent**: `secrets-encryption-key` cannot be rotated by any tool and cannot be recovered; custody is a manual, human control (`docs/KEY-CUSTODY.md`).
+6. **Nodera does not page anyone** about disk, failed backup timers, a degraded `/ready`, or an unreachable Storage Box. External alerting is a gate item.
+7. **Local DNS/certificates are development implementations** — fine for development, wrong for customers' real domains. Cloudflare and ACME are NOT IMPLEMENTED.
+8. **Forward-only migrations** — rolling back a release that migrated means restoring the pre-release control-plane backup.
+9. **Web build-time advisory** `GHSA-vfj7-8cjw-p6xm` (`braces`, no fix exists) is accepted until 2027-01-31 with a documented exposure analysis (`docs/SECURITY.md`).
+10. **Security review**: the suite is thorough but is not a substitute for an external penetration test before exposing the platform to untrusted tenants.
 
 ## Definition of done — honest checklist
 
-Done and verified: architecture audited (this document, `docs/ARCHITECTURE.md` §9) · existing functionality preserved (all pre-existing suites pass) · multi-tenancy · RBAC (29 new granular permissions) ·
-secrets · job engine · operation framework · node agent architecture + security · project model · WordPress/deployment/migration/backup/restore/monitoring/alerting/incident engines · DNS and SSL abstractions ·
-GitHub integration *foundation* (interface + mock + prepared skeleton) · approvals · AI safety architecture · realtime (SSE) · command palette · notifications · API versioning (`/api/v1`) · structured errors · rate limiting ·
-API tokens/service accounts (pre-existing hardening) · health endpoints · feature flags · Docker dev + prod template · local seed · demo mode · tests · lint · typecheck · build · security tests · documentation · roadmap · no critical TODO/FIXME ·
-no secrets committed (the repo's `.env` is git-ignored and was never read).
+Done and verified in code/CI/local runs: architecture audited · existing functionality preserved · multi-tenancy · RBAC · secrets · job engine · operation framework · node agent architecture + security (incl. protected resources) · project model ·
+WordPress/deployment/migration/backup/restore/monitoring/alerting/incident engines · DNS and SSL abstractions · approvals · AI safety architecture · realtime (SSE) · API versioning · structured errors · rate limiting · health/readiness semantics ·
+feature flags · dev + production compose · versioned release workflow · production DB role model · control-plane backup/restore · documentation · roadmap · tests · lint · typecheck · build · security tests · no secrets committed (the repo's `.env` is git-ignored and was never read).
 
-**Partially met / not claimed:** "Infrastructure providers implemented" — interfaces, mock, local, Docker and MariaDB adapters exist; Hetzner/Cloudflare/ACME/GitHub are prepared skeletons. "Production Docker configuration prepared" — prepared and validated, **not deployed**.
-"No fake production success states" — met: mock results are labelled `mock`/`MOCK`, absent providers fail loudly, email without SMTP reports failure.
+**Partially met / not claimed:** "Infrastructure providers implemented" — interfaces, mock, local, Docker, MariaDB and SFTP adapters exist and are LOCALLY TESTED; Hetzner/Cloudflare/ACME/GitHub are skeletons. "Production Docker configuration" — prepared, validated in CI and run locally, **not deployed**.
+"No fake production success states" — met: mock results are labelled, absent providers fail loudly, development DNS/TLS are labelled `local_dev`, email without SMTP reports failure.

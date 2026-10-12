@@ -15,7 +15,8 @@ Open http://localhost:3000, create an account, create an organisation.
 | Mode | What is real | Use it for |
 |---|---|---|
 | `local` (default) | filesystem, backups (tar.gz + SHA-256), certificates (real X.509 from a local CA), DNS zone store | everyday development; engines that need containers/databases/git **refuse to run** ("provider not configured") |
-| `docker` | `local` + real containers through the Docker CLI (socket mount required) | trying provisioning against a real runtime |
+| `docker` | `local` + real containers through the Docker CLI (socket mount required) | trying provisioning against a real runtime. **Refused in production** unless `NODERA_ALLOW_DIRECT_DOCKER=true` |
+| `agent` | `local` + containers and MariaDB through a Node Agent (`NODERA_LOCAL_AGENT_ID`); the API needs no socket | production architecture; try it with the production compose (`docs/HETZNER-STAGING-RUNBOOK.md`) |
 | `mock` | nothing: every provider is in-memory | demos and UI work. Refused when `NODERA_ENV=production`. The UI shows a MODO DEMO banner and `/system/info` reports every capability as `mock` |
 
 ### Demo mode

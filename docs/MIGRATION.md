@@ -36,6 +36,8 @@ SOURCE → PREFLIGHT → CONFIGURATION → TRANSFER → VALIDATION → CUTOVER �
 
 Files transferred (30) + database imported (25) + no remaining references to the old URL (20) + WordPress core (10) + plugins/themes (10) + new URL present (5); capped at 40 with any blocker. Cutover refuses a score below 50.
 
+**Status:** the `zip`/`updraftplus`/`manual` path is IMPLEMENTED + LOCALLY TESTED (mock/local providers). FTP/SFTP/SSH/cPanel connectors are NOT IMPLEMENTED. Nothing here has run against a real WordPress on the Hetzner host (REAL VALIDATION PENDING).
+
 ## Not verified here
 
 Remote connectors, very large archives (>64 MiB via the API), and DNS cutover at a real registrar.

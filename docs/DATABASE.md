@@ -43,6 +43,7 @@ applied automatically, in order, on every process start
 | `0029_deployment_constraints.sql` | one active deployment per project/environment; deployment stage/file count; one active migration per target domain |
 | `0030_migration_states.sql` | `planned`/`preflight_failed` states, staging db, safety backup, source URL |
 | `0031_ai_plans.sql` | `ai_plans` (AI proposes, humans approve and run) |
+| `0032_audit_retention_function.sql` | `audit_log_apply_retention(org, cutoff)` — `SECURITY DEFINER`, refuses cutoffs younger than 90 days; lets the production app role run audit retention without `DELETE` on `audit_log` |
 
 ## Conventions
 
@@ -67,3 +68,10 @@ cascades into `roles`) and the `echo-1` test AI model (truncating `nodes`
 cascades into `ai_models`, since `ai_models.node_id` references it) — see
 the comments in `internal/testhelpers/testhelpers.go` for why. If the env
 var isn't set, integration tests skip rather than fail.
+
+## Production: migrations and roles
+
+Production never migrates from the API. `nodera-migrate` (same image as the API, `cmd/migrate`) takes an advisory lock, applies pending
+forward-only migrations as `nodera_owner`, and exits; the API (`NODERA_AUTO_MIGRATE=false`) only verifies that none are pending. `nodera-migrate -status` lists them (exit 3 if any).
+Roles, the audit-log protections and their verification: `scripts/db/01-roles.sql`, `02-post-migrate.sql`, `03-verify-roles.sql`, `scripts/post-migrate.sh`;
+rationale and failure/rollback expectations in `docs/DEPLOYMENT.md`. In development and tests the API connects as the database owner and migrates itself.
