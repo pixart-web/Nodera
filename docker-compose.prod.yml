@@ -1,137 +1,280 @@
-# PRODUCTION template (Hetzner node "nodera-prod-01", Docker + Traefik).
-# Nothing here is hardcoded to a machine: every environment-specific value comes
-# from the environment (.env.production, never committed) and compose refuses to
-# start if a required secret is missing (`${VAR:?}`).
+# Nodera PRODUCTION / STAGING stack — single Hetzner node, Docker + Traefik.
 #
-#   docker compose -f docker-compose.prod.yml --env-file .env.production up -d
+#   docker compose -f docker-compose.prod.yml --env-file /etc/nodera/nodera.env up -d
 #
-# Assumes an existing Traefik instance and an external network (default
-# `proxy-public`) that Traefik is attached to, plus Let's Encrypt configured on
-# Traefik's side. See docs/DEPLOYMENT.md for the checklist and what is NOT
-# verified until it runs on the real node.
+# STATUS: IMPLEMENTED + config-validated in CI. NOT yet STAGING VALIDATED: it has
+# never run on the real host. Follow docs/HETZNER-STAGING-RUNBOOK.md.
+#
+# Architecture (docs/DEPLOYMENT.md has the full trust model):
+#
+#   Internet -> Traefik (TLS) -> web   (Next.js, no secrets)
+#                             -> api   (/api/, /agent/) -> postgres, redis   [internal network]
+#                                         \-> signed commands -> agent -> Docker daemon -> MariaDB / workloads
+#
+#   * The API does NOT mount the Docker socket. Only the agent does.
+#   * Traefik reaches api/web over a DEDICATED network (`nodera-edge`, created by you
+#     and attached to Traefik). Customer workloads live on the shared workload
+#     network (`proxy-public`) and have no route to the control plane.
+#   * One public hostname (NODERA_HOST): the proxy sends /api/ and /agent/ to the
+#     API, everything else to the web UI. Same origin => host-only session
+#     cookies and the CSRF cookie work, and one immutable web image fits any domain.
+#   * Postgres and Redis publish no ports and sit on an internal-only network.
+#   * Secrets are FILES mounted read-only into the single service that needs them
+#     (never environment values): see docs/KEY-CUSTODY.md.
+#   * Containers named nodera-cp-* are the control plane. The agent refuses to
+#     stop/remove/replace them, and refuses workloads that mount anything outside
+#     the data directory (internal/nodeagent/guard).
+#
+# Required variables (compose refuses to start without them): NODERA_HOST,
+# NODERA_API_IMAGE, NODERA_WEB_IMAGE, NODERA_AGENT_IMAGE (immutable tag or
+# @sha256 digest — never "latest"), NODERA_DOCKER_GID, NODERA_TRUSTED_PROXIES.
+
+x-logging: &logging
+  # Bounded container logs: 5 x 10 MB per service. (Workloads created by the agent
+  # follow the Docker daemon default: set it in /etc/docker/daemon.json, see runbook.)
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
+x-hardened: &hardened
+  restart: unless-stopped
+  security_opt: ["no-new-privileges:true"]
+  cap_drop: [ALL]
+  read_only: true
+  logging: *logging
+  labels: &cp-labels
+    nodera.role: control-plane
+
 services:
   postgres:
-    image: postgres:16-alpine
-    restart: unless-stopped
+    <<: *hardened
+    image: postgres:16.4-alpine
+    container_name: nodera-cp-postgres
+    user: postgres
     environment:
-      POSTGRES_USER: nodera
-      POSTGRES_PASSWORD: ${NODERA_POSTGRES_PASSWORD:?set NODERA_POSTGRES_PASSWORD}
+      POSTGRES_USER: postgres
       POSTGRES_DB: nodera
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres-superuser-password
+    command:
+      - postgres
+      - -c
+      - shared_buffers=256MB
+      - -c
+      - effective_cache_size=768MB
+      - -c
+      - max_connections=60
+      - -c
+      - work_mem=8MB
+      - -c
+      - log_min_duration_statement=1000
+      - -c
+      - password_encryption=scram-sha-256
     volumes:
       - nodera_postgres_data:/var/lib/postgresql/data
+      - ${NODERA_SECRETS_DIR:-/etc/nodera/secrets}/postgres-superuser-password:/run/secrets/postgres-superuser-password:ro
+    tmpfs: [/tmp, "/run/postgresql"]
+    group_add: ["${NODERA_SECRETS_GID:-10100}"]
     networks: [internal]
+    shm_size: 128mb
+    deploy:
+      resources:
+        limits: { memory: 1g }
+    stop_grace_period: 30s
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U nodera"]
+      test: ["CMD-SHELL", "pg_isready -U postgres -d nodera"]
       interval: 10s
       timeout: 5s
       retries: 10
+      start_period: 20s
 
   redis:
-    image: redis:7-alpine
-    restart: unless-stopped
-    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    <<: *hardened
+    image: redis:7.4-alpine
+    container_name: nodera-cp-redis
+    user: redis
+    # Rate-limit counters only (never a system of record). Persistence is off; a
+    # restart empties the counters, which the API tolerates (docs/DEPLOYMENT.md).
+    entrypoint: ["sh", "-c", 'exec redis-server --requirepass "$$(cat /run/secrets/redis-password)" --save "" --appendonly no --maxmemory 128mb --maxmemory-policy volatile-ttl']
+    volumes:
+      - ${NODERA_SECRETS_DIR:-/etc/nodera/secrets}/redis-password:/run/secrets/redis-password:ro
+    tmpfs: [/tmp]
+    group_add: ["${NODERA_SECRETS_GID:-10100}"]
     networks: [internal]
+    deploy:
+      resources:
+        limits: { memory: 192m }
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD-SHELL", 'redis-cli -a "$$(cat /run/secrets/redis-password)" --no-auth-warning ping | grep -q PONG']
       interval: 10s
       timeout: 5s
       retries: 10
 
-  api:
-    image: ${NODERA_API_IMAGE:-nodera-api:latest}
-    build:
-      context: ./api
-      target: server
-    restart: unless-stopped
+  # One-shot release step: apply schema migrations as the database OWNER role,
+  # then exit. The API starts only after this succeeds.
+  migrate:
+    image: ${NODERA_API_IMAGE:?set NODERA_API_IMAGE to an immutable tag or digest}
+    container_name: nodera-cp-migrate
+    entrypoint: ["/usr/local/bin/nodera-migrate"]
+    restart: "no"
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    read_only: true
+    logging: *logging
+    labels: *cp-labels
+    environment:
+      NODERA_MIGRATE_DATABASE_URL_FILE: /run/secrets/migrate-database-url
+    volumes:
+      - ${NODERA_SECRETS_DIR:-/etc/nodera/secrets}/migrate-database-url:/run/secrets/migrate-database-url:ro
+    group_add: ["${NODERA_SECRETS_GID:-10100}"]
     depends_on:
       postgres: { condition: service_healthy }
+    networks: [internal]
+    deploy:
+      resources:
+        limits: { memory: 256m }
+
+  api:
+    <<: *hardened
+    image: ${NODERA_API_IMAGE:?set NODERA_API_IMAGE to an immutable tag or digest}
+    container_name: nodera-cp-api
+    # Same uid as the agent: both read/write the shared data directory.
+    user: "10001:10001"
+    depends_on:
+      migrate: { condition: service_completed_successfully }
       redis: { condition: service_healthy }
     environment:
       NODERA_ENV: production
-      NODERA_DATABASE_URL: postgres://nodera:${NODERA_POSTGRES_PASSWORD}@postgres:5432/nodera?sslmode=disable
-      NODERA_REDIS_URL: redis://redis:6379
-      NODERA_CORS_ORIGINS: ${NODERA_CORS_ORIGINS:?set NODERA_CORS_ORIGINS to the web origin}
-      NODERA_SECRETS_ENCRYPTION_KEY: ${NODERA_SECRETS_ENCRYPTION_KEY:?set NODERA_SECRETS_ENCRYPTION_KEY}
-      NODERA_AGENT_SIGNING_KEY: ${NODERA_AGENT_SIGNING_KEY:?set NODERA_AGENT_SIGNING_KEY}
+      NODERA_AUTO_MIGRATE: "false"          # schema changes are the migrate job's business
+      NODERA_HTTP_ADDR: ":8080"
+      NODERA_CORS_ORIGINS: https://${NODERA_HOST:?set NODERA_HOST to the public hostname}
+      # The edge network's subnet: only Traefik can reach the API there, so its
+      # X-Forwarded-For is trusted for per-client rate limiting (see docs/DEPLOYMENT.md).
+      NODERA_TRUSTED_PROXIES: ${NODERA_TRUSTED_PROXIES:?set NODERA_TRUSTED_PROXIES to the nodera-edge subnet}
+      NODERA_DATABASE_URL_FILE: /run/secrets/database-url
+      NODERA_REDIS_URL_FILE: /run/secrets/redis-url
+      NODERA_SECRETS_ENCRYPTION_KEY_FILE: /run/secrets/secrets-encryption-key
+      NODERA_AGENT_SIGNING_KEY_FILE: /run/secrets/agent-signing-key
       NODERA_PLATFORM_BOOTSTRAP_ADMIN_EMAIL: ${NODERA_PLATFORM_BOOTSTRAP_ADMIN_EMAIL:-}
-      # `docker` needs the host Docker socket (see the volume) — only enable on the managed node.
-      NODERA_PROVIDER_MODE: ${NODERA_PROVIDER_MODE:-local}
-      NODERA_DOCKER_NETWORK: ${NODERA_DOCKER_NETWORK:-proxy-public}
-      # Existing MariaDB container for WordPress sites (docker mode): managed through `docker exec`.
-      NODERA_MARIADB_CONTAINER: ${NODERA_MARIADB_CONTAINER:-}
-      NODERA_MARIADB_ROOT_PASSWORD: ${NODERA_MARIADB_ROOT_PASSWORD:-}
-      NODERA_WORDPRESS_DB_HOST: ${NODERA_WORDPRESS_DB_HOST:-mariadb}
+      # No Docker socket in this container: containers and MariaDB go through the agent.
+      NODERA_PROVIDER_MODE: agent
+      NODERA_LOCAL_AGENT_ID: ${NODERA_LOCAL_AGENT_ID:-}   # set after the agent is enrolled
+      NODERA_DATA_DIR: ${NODERA_DATA_HOST_DIR:-/srv/nodera/data}
+      # The shared network WORKLOAD containers join (WordPress sites, MariaDB, Traefik).
+      NODERA_DOCKER_NETWORK: ${NODERA_PROXY_NETWORK:-proxy-public}
       NODERA_BASE_DOMAIN: ${NODERA_BASE_DOMAIN:-}
-      NODERA_ANTHROPIC_API_KEY: ${NODERA_ANTHROPIC_API_KEY:-}
-      NODERA_OPENAI_API_KEY: ${NODERA_OPENAI_API_KEY:-}
+      NODERA_WORDPRESS_DB_HOST: ${NODERA_WORDPRESS_DB_HOST:-mariadb}
+      # Off-site backups (SFTP / Hetzner Storage Box). Empty destination = local only.
+      NODERA_BACKUP_DESTINATION: ${NODERA_BACKUP_DESTINATION:-local}
+      NODERA_BACKUP_SFTP_ADDR: ${NODERA_BACKUP_SFTP_ADDR:-}
+      NODERA_BACKUP_SFTP_USER: ${NODERA_BACKUP_SFTP_USER:-}
+      NODERA_BACKUP_SFTP_DIR: ${NODERA_BACKUP_SFTP_DIR:-nodera-backups}
+      NODERA_BACKUP_SFTP_HOST_KEY_SHA256: ${NODERA_BACKUP_SFTP_HOST_KEY_SHA256:-}
+      NODERA_BACKUP_SFTP_KEY_FILE: ${NODERA_BACKUP_SFTP_KEY_FILE:-}
     volumes:
-      - nodera_api_data:/data
-      # - /var/run/docker.sock:/var/run/docker.sock   # NODERA_PROVIDER_MODE=docker only
-    read_only: true
+      # Host path == container path: workload bind mounts are resolved by the Docker
+      # daemon on the HOST, so the API must see the data directory at its real path.
+      - ${NODERA_DATA_HOST_DIR:-/srv/nodera/data}:${NODERA_DATA_HOST_DIR:-/srv/nodera/data}
+      - ${NODERA_SECRETS_DIR:-/etc/nodera/secrets}/database-url:/run/secrets/database-url:ro
+      - ${NODERA_SECRETS_DIR:-/etc/nodera/secrets}/redis-url:/run/secrets/redis-url:ro
+      - ${NODERA_SECRETS_DIR:-/etc/nodera/secrets}/secrets-encryption-key:/run/secrets/secrets-encryption-key:ro
+      - ${NODERA_SECRETS_DIR:-/etc/nodera/secrets}/agent-signing-key:/run/secrets/agent-signing-key:ro
+      - ${NODERA_SECRETS_DIR:-/etc/nodera/secrets}/backup-sftp-key:/run/secrets/backup-sftp-key:ro
     tmpfs: [/tmp]
-    security_opt: ["no-new-privileges:true"]
-    cap_drop: [ALL]
-    networks: [internal, proxy]
+    group_add: ["${NODERA_SECRETS_GID:-10100}"]
+    # internal: postgres/redis/agent.  edge: Traefik in, and egress to the Storage Box / AI APIs out.
+    networks: [internal, edge]
+    deploy:
+      resources:
+        limits: { memory: 768m }
+    stop_grace_period: 30s
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/health >/dev/null"]
+      interval: 15s
+      timeout: 3s
+      retries: 5
+      start_period: 20s
     labels:
+      nodera.role: control-plane
       traefik.enable: "true"
-      traefik.docker.network: ${NODERA_PROXY_NETWORK:-proxy-public}
-      traefik.http.routers.nodera-api.rule: Host(`${NODERA_API_HOST:?set NODERA_API_HOST}`)
+      traefik.docker.network: ${NODERA_EDGE_NETWORK:-nodera-edge}
+      # /api/ and /agent/ on the public host go to the API; higher priority than the web router.
+      traefik.http.routers.nodera-api.rule: Host(`${NODERA_HOST}`) && (PathPrefix(`/api/`) || PathPrefix(`/agent/`))
+      traefik.http.routers.nodera-api.priority: "100"
       traefik.http.routers.nodera-api.entrypoints: websecure
       traefik.http.routers.nodera-api.tls.certresolver: ${NODERA_CERT_RESOLVER:-letsencrypt}
       traefik.http.services.nodera-api.loadbalancer.server.port: "8080"
+      # Operation progress is Server-Sent Events: never buffer, flush every write.
+      traefik.http.services.nodera-api.loadbalancer.responseforwarding.flushinterval: 1ms
 
   web:
-    image: ${NODERA_WEB_IMAGE:-nodera-web:latest}
-    build:
-      context: ./web
-      args:
-        NEXT_PUBLIC_NODERA_API_URL: https://${NODERA_API_HOST}
-    restart: unless-stopped
+    <<: *hardened
+    image: ${NODERA_WEB_IMAGE:?set NODERA_WEB_IMAGE to an immutable tag or digest}
+    container_name: nodera-cp-web
     depends_on:
       api: { condition: service_healthy }
-    read_only: true
     tmpfs: [/tmp, /app/.next/cache]
-    security_opt: ["no-new-privileges:true"]
-    cap_drop: [ALL]
-    networks: [proxy]
+    networks: [edge]
+    deploy:
+      resources:
+        limits: { memory: 384m }
     labels:
+      nodera.role: control-plane
       traefik.enable: "true"
-      traefik.docker.network: ${NODERA_PROXY_NETWORK:-proxy-public}
-      traefik.http.routers.nodera-web.rule: Host(`${NODERA_WEB_HOST:?set NODERA_WEB_HOST}`)
+      traefik.docker.network: ${NODERA_EDGE_NETWORK:-nodera-edge}
+      traefik.http.routers.nodera-web.rule: Host(`${NODERA_HOST}`)
+      traefik.http.routers.nodera-web.priority: "1"
       traefik.http.routers.nodera-web.entrypoints: websecure
       traefik.http.routers.nodera-web.tls.certresolver: ${NODERA_CERT_RESOLVER:-letsencrypt}
       traefik.http.services.nodera-web.loadbalancer.server.port: "3000"
 
-  # The Node Agent runs ON each managed node, separately from the control plane
-  # (`--profile agent`). It dials out to the API; it opens no port.
+  # The ONLY component with the Docker socket. Equivalent to root on the host, so
+  # its defences are the signed-command allowlist (no shell exists), the
+  # protected-resource guard, and exposing no port. It dials out to the API over
+  # the internal network.
   agent:
-    profiles: ["agent"]
-    image: ${NODERA_AGENT_IMAGE:-nodera-agent:latest}
-    build:
-      context: ./api
-      target: agent
-    restart: unless-stopped
+    <<: *hardened
+    image: ${NODERA_AGENT_IMAGE:?set NODERA_AGENT_IMAGE to an immutable tag or digest}
+    container_name: nodera-cp-agent
+    user: "10001:10001"
     environment:
-      NODERA_API_URL: ${NODERA_AGENT_API_URL:-https://${NODERA_API_HOST:-localhost}}
       NODERA_AGENT_DRIVER: docker
+      NODERA_AGENT_DATA: ${NODERA_DATA_HOST_DIR:-/srv/nodera/data}
+      # Containers (besides nodera-cp-* and anything labelled nodera.role=control-plane)
+      # that managed operations must never touch: the reverse proxy and the shared MariaDB.
+      NODERA_PROTECTED_CONTAINERS: ${NODERA_PROTECTED_CONTAINERS:-traefik,mariadb}
+      NODERA_MARIADB_CONTAINER: ${NODERA_MARIADB_CONTAINER:-}
+      NODERA_MARIADB_ROOT_PASSWORD_FILE: /run/secrets/mariadb-root-password
     volumes:
       - nodera_agent_state:/var/lib/nodera-agent
+      - ${NODERA_DATA_HOST_DIR:-/srv/nodera/data}:${NODERA_DATA_HOST_DIR:-/srv/nodera/data}
       - /var/run/docker.sock:/var/run/docker.sock
-    group_add: ["${NODERA_DOCKER_GID:-999}"]
-    read_only: true
+      - ${NODERA_SECRETS_DIR:-/etc/nodera/secrets}/mariadb-root-password:/run/secrets/mariadb-root-password:ro
+    # Docker socket group of the HOST (`getent group docker | cut -d: -f3`), plus the secrets group.
+    group_add: ["${NODERA_DOCKER_GID:?set NODERA_DOCKER_GID (getent group docker)}", "${NODERA_SECRETS_GID:-10100}"]
     tmpfs: [/tmp]
-    security_opt: ["no-new-privileges:true"]
-    cap_drop: [ALL]
-    networks: [proxy]
+    networks: [internal]
+    deploy:
+      resources:
+        limits: { memory: 192m }
+    healthcheck:
+      test: ["CMD-SHELL", "pidof nodera-agent >/dev/null"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
 
 networks:
+  # No route to the outside: Postgres, Redis, the agent and the migration job live here.
   internal:
     internal: true
-  proxy:
-    name: ${NODERA_PROXY_NETWORK:-proxy-public}
+  # Dedicated network shared ONLY by Traefik, api and web. Create it once
+  # (`docker network create nodera-edge`) and attach Traefik to it.
+  edge:
+    name: ${NODERA_EDGE_NETWORK:-nodera-edge}
     external: true
 
 volumes:
   nodera_postgres_data:
-  nodera_api_data:
+    name: nodera_postgres_data
   nodera_agent_state:
+    name: nodera_agent_state

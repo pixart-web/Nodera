@@ -1,6 +1,12 @@
 .git
+.env
+.env.*
+*.pem
+*.key
 *.test
 coverage.out
 nodera-server
+nodera-migrate
+nodera-agent
 server
 data

@@ -5,9 +5,16 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   api:
-    name: API (build, vet, fmt, test)
+    name: API (fmt, vet, build, test, race, vuln, openapi)
     runs-on: ubuntu-latest
 
     services:
@@ -59,32 +66,75 @@ jobs:
         working-directory: api
         run: go build ./...
 
+      # -p 1: integration tests across every package share one real Postgres
+      # database and truncate it at the start of each test
+      # (internal/testhelpers.RequirePool). Running packages concurrently (Go's
+      # default) races two packages' truncations against each other's in-flight
+      # fixtures, producing flaky FK-violation failures unrelated to the code
+      # under test. See docs/DATABASE.md "Running tests".
       - name: go test
         working-directory: api
-        # -p 1: integration tests across every package share one real
-        # Postgres database and truncate it at the start of each test
-        # (internal/testhelpers.RequirePool) — running packages
-        # concurrently (Go's default) races two packages' truncations
-        # against each other's in-flight fixtures (a user created by one
-        # package's test can be truncated away mid-test by another
-        # package's setup), producing flaky FK-violation failures that
-        # have nothing to do with the code under test. See
-        # docs/DATABASE.md "Running tests".
+        run: go test ./... -p 1
+
+      - name: go test -race
+        working-directory: api
         run: go test ./... -race -p 1
 
+      # Pinned, not @latest: a CI job must not change behaviour because a tool
+      # released overnight. The database it checks against is always current.
       - name: govulncheck
         working-directory: api
-        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./...
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
 
+      # Route/OpenAPI coverage and drift are enforced by cmd/server/openapi_test.go
+      # (part of go test above); this validates the document itself.
       - name: validate OpenAPI spec
-        run: npx --yes @redocly/cli@latest lint api/openapi/openapi.json
+        run: npx --yes @redocly/cli@2.62.1 lint api/openapi/openapi.json
+
+  database-roles:
+    name: Production database roles (owner migrates, app role is restricted)
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: ci_superuser_pw
+          POSTGRES_DB: nodera
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: api/go.mod
+          cache-dependency-path: api/go.sum
+      - name: roles, migrate as owner, post-migrate, verify as app role
+        env:
+          PGHOST: 127.0.0.1
+        run: |
+          set -euo pipefail
+          PGPASSWORD=ci_superuser_pw psql -U postgres -v ON_ERROR_STOP=1 -v owner_pw=ci_owner_pw -v app_pw=ci_app_pw -f scripts/db/01-roles.sql
+          (cd api && NODERA_MIGRATE_DATABASE_URL='postgres://nodera_owner:ci_owner_pw@127.0.0.1:5432/nodera?sslmode=disable' go run ./cmd/migrate)
+          PGPASSWORD=ci_owner_pw psql -U nodera_owner -d nodera -v ON_ERROR_STOP=1 -f scripts/db/02-post-migrate.sql
+          PGPASSWORD=ci_app_pw psql -U nodera_app -d nodera -v ON_ERROR_STOP=1 -f scripts/db/03-verify-roles.sql
+          # Re-running every step must be harmless (idempotent release procedure).
+          PGPASSWORD=ci_superuser_pw psql -U postgres -v ON_ERROR_STOP=1 -v owner_pw=ci_owner_pw -v app_pw=ci_app_pw -f scripts/db/01-roles.sql >/dev/null
+          (cd api && NODERA_MIGRATE_DATABASE_URL='postgres://nodera_owner:ci_owner_pw@127.0.0.1:5432/nodera?sslmode=disable' go run ./cmd/migrate -status)
+          PGPASSWORD=ci_owner_pw psql -U nodera_owner -d nodera -v ON_ERROR_STOP=1 -f scripts/db/02-post-migrate.sql >/dev/null
 
   web:
-    name: Web (typecheck, build, audit)
+    name: Web (lint, typecheck, test, build, audit policy)
     runs-on: ubuntu-latest
 
     steps:
@@ -92,7 +142,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
           cache: npm
           cache-dependency-path: web/package-lock.json
 
@@ -100,13 +150,13 @@ jobs:
         working-directory: web
         run: npm ci
 
-      - name: typecheck
-        working-directory: web
-        run: npm run typecheck
-
       - name: lint
         working-directory: web
         run: npm run lint -- --max-warnings 0
+
+      - name: typecheck
+        working-directory: web
+        run: npm run typecheck
 
       - name: unit tests
         working-directory: web
@@ -116,12 +166,14 @@ jobs:
         working-directory: web
         run: npm run build
 
-      - name: npm audit (fails only on critical — see docs/SECURITY.md for the known, accepted high-severity PostCSS finding)
-        working-directory: web
-        run: npm audit --audit-level=critical
+      # Fails on any high/critical advisory unless it is listed by exact id in
+      # web/audit-exceptions.json with an owner-readable reason and an expiry.
+      # Expired or stale exceptions fail too. See docs/SECURITY.md.
+      - name: dependency vulnerability policy
+        run: node scripts/audit-policy.mjs
 
   images:
-    name: Docker images (api, agent, web) and compose files
+    name: Docker images (api, web, agent) and compose files
     runs-on: ubuntu-latest
 
     steps:
@@ -133,18 +185,52 @@ jobs:
       - name: build agent image
         run: docker build -f api/Dockerfile --target agent -t nodera-agent:ci api
 
+      # Release images are built with an EMPTY API URL (same-origin behind the proxy).
       - name: build web image
-        run: docker build -t nodera-web:ci web
+        run: docker build --build-arg NEXT_PUBLIC_NODERA_API_URL= -t nodera-web:ci web
+
+      - name: images run as non-root
+        run: |
+          for i in nodera-api:ci nodera-agent:ci nodera-web:ci; do
+            u="$(docker image inspect "$i" --format '{{.Config.User}}')"
+            echo "$i -> user '$u'"
+            [ -n "$u" ] && [ "$u" != "root" ] && [ "$u" != "0" ]
+          done
+
+      - name: web image serves under the production runtime constraints
+        run: |
+          docker run -d --name web-ci --read-only --tmpfs /tmp --tmpfs /app/.next/cache \
+            --cap-drop ALL --security-opt no-new-privileges:true -p 3000:3000 nodera-web:ci
+          for i in $(seq 1 30); do
+            code="$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3000/login || true)"
+            [ "$code" = 200 ] && break
+            sleep 1
+          done
+          docker logs web-ci
+          [ "$code" = 200 ]
+          # No package manager / compiler in the runtime image; no localhost API baked in.
+          ! docker exec web-ci sh -c 'command -v npm || command -v yarn'
+          ! docker exec web-ci sh -c 'grep -rl "localhost:8080" /app/.next 2>/dev/null | grep -q .'
 
       - name: validate dev compose
         run: docker compose config -q
 
-      - name: validate production compose (with dummy required values)
+      - name: validate production compose and its security invariants
         env:
-          NODERA_POSTGRES_PASSWORD: ci
-          NODERA_CORS_ORIGINS: https://app.example.com
-          NODERA_SECRETS_ENCRYPTION_KEY: ci
-          NODERA_AGENT_SIGNING_KEY: ci
-          NODERA_API_HOST: api.example.com
-          NODERA_WEB_HOST: app.example.com
-        run: docker compose -f docker-compose.prod.yml --profile agent config -q
+          NODERA_HOST: nodera.example.com
+          NODERA_API_IMAGE: ghcr.io/example/nodera-api:0.0.0
+          NODERA_WEB_IMAGE: ghcr.io/example/nodera-web:0.0.0
+          NODERA_AGENT_IMAGE: ghcr.io/example/nodera-agent:0.0.0
+          NODERA_DOCKER_GID: "999"
+          NODERA_TRUSTED_PROXIES: 172.30.0.0/16
+        run: |
+          docker compose -f docker-compose.prod.yml config -q
+          python3 scripts/check-compose-prod.py docker-compose.prod.yml
+
+      - name: production compose refuses to start without mandatory values
+        run: |
+          ! docker compose -f docker-compose.prod.yml config -q 2>/dev/null
+
+      - name: shell scripts parse
+        run: |
+          for f in scripts/*.sh; do bash -n "$f"; done

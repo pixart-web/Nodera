@@ -1,0 +1,92 @@
+name: Release images
+
+# Publishes IMMUTABLE, versioned images to GHCR when a version tag is pushed:
+#
+#   git tag v0.1.0 && git push origin v0.1.0
+#
+# Production/staging reference an image by tag (or, better, by the digest printed
+# in this run's summary) — never "latest" — so a rollback is "deploy the previous
+# tag", not "rebuild an old commit and hope it comes out the same".
+# The tagged commit must already have a green CI run.
+
+on:
+  push:
+    tags: ["v*.*.*"]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: tagged commit has a successful CI run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          conclusion="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml --commit "$GITHUB_SHA" --json conclusion,status --jq '[.[] | select(.status=="completed")] | map(.conclusion) | first // "none"')"
+          echo "CI conclusion for $GITHUB_SHA: $conclusion"
+          [ "$conclusion" = "success" ]
+
+  publish:
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - name: nodera-api
+            context: api
+            file: api/Dockerfile
+            target: server
+          - name: nodera-agent
+            context: api
+            file: api/Dockerfile
+            target: agent
+          - name: nodera-web
+            context: web
+            file: web/Dockerfile
+            target: ""
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/${{ matrix.name }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=sha,format=long
+      - id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.file }}
+          target: ${{ matrix.target }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          provenance: true
+          sbom: true
+          # Same-origin web image: the API lives on the same host behind the proxy.
+          build-args: |
+            NEXT_PUBLIC_NODERA_API_URL=
+            VERSION=${{ github.ref_name }}
+      - name: record digest
+        run: |
+          echo "### ${{ matrix.name }}" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo "ghcr.io/${{ github.repository_owner }}/${{ matrix.name }}@${{ steps.build.outputs.digest }}" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"

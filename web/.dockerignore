@@ -2,3 +2,9 @@ node_modules
 .next
 out
 *.tsbuildinfo
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+.git

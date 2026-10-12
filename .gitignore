@@ -25,3 +25,10 @@ npm-debug.log*
 
 # Logs
 *.log
+
+# Local build output / secrets
+api/nodera-*
+api/data/
+/secrets/
+*.pem
+*.key
