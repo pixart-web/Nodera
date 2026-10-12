@@ -5,6 +5,7 @@ package config
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -24,6 +25,39 @@ type Config struct {
 	Platform  PlatformConfig
 	Agent     AgentConfig
 	Runtime   RuntimeConfig
+	Backup    BackupConfig
+	Migrate   MigrateConfig
+}
+
+// MigrateConfig controls who applies schema migrations.
+type MigrateConfig struct {
+	// Auto applies pending migrations at API start. Default true outside
+	// production and false in production, where the dedicated `nodera-migrate`
+	// binary runs first (with the owner role) and the API only verifies that
+	// the schema is current.
+	Auto bool
+}
+
+// BackupConfig selects where backup archives are stored.
+type BackupConfig struct {
+	// Destination: "local" (archives stay on this host) or "sftp" (staged
+	// locally, then uploaded off-site and verified). See docs/BACKUPS.md.
+	Destination string
+	SFTP        SFTPConfig
+}
+
+// SFTPConfig describes an SFTP target such as a Hetzner Storage Box.
+// Credentials are never inline: the private key / password are read from files
+// (Docker/Compose secrets) so they do not appear in environment dumps.
+type SFTPConfig struct {
+	Addr           string // host:port (Hetzner Storage Box uses port 23)
+	User           string
+	Dir            string // remote directory; must already exist
+	PrivateKeyFile string
+	PasswordFile   string
+	HostKeySHA256  string // pinned host key fingerprint, "SHA256:..." (required)
+	KeepLocalCopy  bool
+	UploadTimeout  time.Duration
 }
 
 type HTTPConfig struct {
@@ -34,6 +68,10 @@ type HTTPConfig struct {
 	// and non-browser (curl, server-to-server) callers are unaffected, since
 	// CORS is a browser-enforced mechanism, not a server-side access check.
 	CORSOrigins []string
+	// TrustedProxies are the addresses/CIDRs whose X-Forwarded-For is believed
+	// (the reverse proxy). Empty = not behind a proxy. Required for correct
+	// per-client rate limiting behind Traefik; see docs/DEPLOYMENT.md.
+	TrustedProxies []string
 }
 
 type DBConfig struct {
@@ -106,6 +144,18 @@ type RuntimeConfig struct {
 	WordPressDBHost     string
 	// AllowInternalMonitoring lets monitors probe private addresses (dev only).
 	AllowInternalMonitoring bool
+	// LocalAgentID is the Node Agent (UUID) that executes container and
+	// database operations in ProviderMode "agent". Only the platform operator
+	// can set it, so a tenant cannot enrol an agent that receives platform work.
+	LocalAgentID string
+	// WorkloadUser is the "uid:gid" managed containers run as. Default: the API's
+	// own uid/gid when it is not root, so site files are owned by the control
+	// plane's user. Override with NODERA_WORKLOAD_USER; set "image" to keep each
+	// image's default user.
+	WorkloadUser string
+	// AllowDirectDocker is the explicit acknowledgement required to run
+	// ProviderMode "docker" (API holding the Docker socket) in production.
+	AllowDirectDocker bool
 }
 
 type AgentConfig struct {
@@ -134,7 +184,22 @@ type PlatformConfig struct {
 func Load() (Config, error) {
 	env := getEnvDefault("NODERA_ENV", "development")
 
-	dbURL := os.Getenv("NODERA_DATABASE_URL")
+	// Secrets may be supplied as NAME or as NAME_FILE (a path to a file holding
+	// the value — Docker/Compose secrets or a root-owned file mounted read-only).
+	// The file form keeps them out of `docker inspect` and /proc/<pid>/environ.
+	var secretErr error
+	secret := func(name string) string {
+		v, err := SecretFromEnv(name)
+		if err != nil && secretErr == nil {
+			secretErr = err
+		}
+		return v
+	}
+
+	dbURL := secret("NODERA_DATABASE_URL")
+	if secretErr != nil {
+		return Config{}, secretErr
+	}
 	if dbURL == "" {
 		return Config{}, fmt.Errorf("config: NODERA_DATABASE_URL is required")
 	}
@@ -147,8 +212,9 @@ func Load() (Config, error) {
 	cfg := Config{
 		Env: env,
 		HTTP: HTTPConfig{
-			Addr:        getEnvDefault("NODERA_HTTP_ADDR", ":8080"),
-			CORSOrigins: getEnvList("NODERA_CORS_ORIGINS", []string{"http://localhost:3000"}),
+			Addr:           getEnvDefault("NODERA_HTTP_ADDR", ":8080"),
+			CORSOrigins:    getEnvList("NODERA_CORS_ORIGINS", []string{"http://localhost:3000"}),
+			TrustedProxies: getEnvList("NODERA_TRUSTED_PROXIES", nil),
 		},
 		DB: DBConfig{
 			URL:             dbURL,
@@ -156,25 +222,25 @@ func Load() (Config, error) {
 			ConnMaxLifetime: time.Hour,
 		},
 		Redis: RedisConfig{
-			URL: os.Getenv("NODERA_REDIS_URL"),
+			URL: secret("NODERA_REDIS_URL"),
 		},
 		Auth: AuthConfig{
 			SessionTokenBytes: 32,
 			SessionTTL:        30 * 24 * time.Hour,
 		},
 		Secrets: SecretsConfig{
-			EncryptionKeyBase64: os.Getenv("NODERA_SECRETS_ENCRYPTION_KEY"),
+			EncryptionKeyBase64: secret("NODERA_SECRETS_ENCRYPTION_KEY"),
 		},
 		Ollama: OllamaConfig{
 			BaseURL: os.Getenv("NODERA_OLLAMA_BASE_URL"),
 		},
 		Anthropic: AnthropicConfig{
-			APIKey: os.Getenv("NODERA_ANTHROPIC_API_KEY"),
+			APIKey: secret("NODERA_ANTHROPIC_API_KEY"),
 		},
 		OpenAI: OpenAIConfig{
-			APIKey: os.Getenv("NODERA_OPENAI_API_KEY"),
+			APIKey: secret("NODERA_OPENAI_API_KEY"),
 		},
-		Agent: AgentConfig{SigningKeyBase64: os.Getenv("NODERA_AGENT_SIGNING_KEY")},
+		Agent: AgentConfig{SigningKeyBase64: secret("NODERA_AGENT_SIGNING_KEY")},
 		Runtime: RuntimeConfig{
 			ProviderMode:            getEnvDefault("NODERA_PROVIDER_MODE", "local"),
 			DataDir:                 getEnvDefault("NODERA_DATA_DIR", "./data"),
@@ -182,7 +248,7 @@ func Load() (Config, error) {
 			DockerNetwork:           os.Getenv("NODERA_DOCKER_NETWORK"),
 			BaseDomain:              os.Getenv("NODERA_BASE_DOMAIN"),
 			MariaDBContainer:        os.Getenv("NODERA_MARIADB_CONTAINER"),
-			MariaDBRootPassword:     os.Getenv("NODERA_MARIADB_ROOT_PASSWORD"),
+			MariaDBRootPassword:     secret("NODERA_MARIADB_ROOT_PASSWORD"),
 			WordPressDBHost:         getEnvDefault("NODERA_WORDPRESS_DB_HOST", "db"),
 			AllowInternalMonitoring: os.Getenv("NODERA_MONITOR_ALLOW_INTERNAL") == "true",
 		},
@@ -191,16 +257,135 @@ func Load() (Config, error) {
 		},
 	}
 
-	switch cfg.Runtime.ProviderMode {
-	case "local", "docker", "mock":
-	default:
-		return Config{}, fmt.Errorf("config: NODERA_PROVIDER_MODE must be local, docker or mock")
+	if secretErr != nil {
+		return Config{}, secretErr
 	}
-	if cfg.Runtime.ProviderMode == "mock" && env == "production" {
-		return Config{}, fmt.Errorf("config: NODERA_PROVIDER_MODE=mock is not allowed in production")
+	switch cfg.Runtime.ProviderMode {
+	case "local", "docker", "agent", "mock":
+	default:
+		return Config{}, fmt.Errorf("config: NODERA_PROVIDER_MODE must be local, docker, agent or mock")
 	}
 
+	cfg.Migrate.Auto = env != "production"
+	if v := os.Getenv("NODERA_AUTO_MIGRATE"); v != "" {
+		cfg.Migrate.Auto = v == "true"
+	}
+	cfg.Backup = BackupConfig{
+		Destination: getEnvDefault("NODERA_BACKUP_DESTINATION", "local"),
+		SFTP: SFTPConfig{
+			Addr:           os.Getenv("NODERA_BACKUP_SFTP_ADDR"),
+			User:           os.Getenv("NODERA_BACKUP_SFTP_USER"),
+			Dir:            getEnvDefault("NODERA_BACKUP_SFTP_DIR", "nodera-backups"),
+			PrivateKeyFile: os.Getenv("NODERA_BACKUP_SFTP_KEY_FILE"),
+			PasswordFile:   os.Getenv("NODERA_BACKUP_SFTP_PASSWORD_FILE"),
+			HostKeySHA256:  os.Getenv("NODERA_BACKUP_SFTP_HOST_KEY_SHA256"),
+			KeepLocalCopy:  os.Getenv("NODERA_BACKUP_KEEP_LOCAL") == "true",
+			UploadTimeout:  time.Hour,
+		},
+	}
+	cfg.Runtime.WorkloadUser = getEnvDefault("NODERA_WORKLOAD_USER", defaultWorkloadUser())
+	if cfg.Runtime.WorkloadUser == "image" {
+		cfg.Runtime.WorkloadUser = ""
+	}
+	cfg.Runtime.AllowDirectDocker = os.Getenv("NODERA_ALLOW_DIRECT_DOCKER") == "true"
+	cfg.Runtime.LocalAgentID = os.Getenv("NODERA_LOCAL_AGENT_ID")
+
+	if err := cfg.validate(os.Getenv("NODERA_CORS_ORIGINS") != ""); err != nil {
+		return Config{}, err
+	}
 	return cfg, nil
+}
+
+// validate rejects configurations that are unsafe or inconsistent. The
+// production checks exist so a development default can never silently reach a
+// real server: anything security-relevant must be set explicitly.
+func (c Config) validate(corsExplicit bool) error {
+	switch c.Backup.Destination {
+	case "local":
+	case "sftp":
+		s := c.Backup.SFTP
+		if s.Addr == "" || s.User == "" || s.HostKeySHA256 == "" {
+			return fmt.Errorf("config: NODERA_BACKUP_DESTINATION=sftp requires NODERA_BACKUP_SFTP_ADDR, _USER and _HOST_KEY_SHA256")
+		}
+		for _, f := range strings.Split(s.HostKeySHA256, ",") {
+			f = strings.TrimSpace(f)
+			if i := strings.LastIndex(f, " "); i >= 0 {
+				f = f[i+1:] // optional leading key type: "ssh-ed25519 SHA256:..."
+			}
+			if !strings.HasPrefix(f, "SHA256:") {
+				return fmt.Errorf("config: NODERA_BACKUP_SFTP_HOST_KEY_SHA256 must be comma-separated pins like \"SHA256:<base64>\" or \"ssh-ed25519 SHA256:<base64>\" (ssh-keygen -lf output)")
+			}
+		}
+		if (s.PrivateKeyFile == "") == (s.PasswordFile == "") {
+			return fmt.Errorf("config: set exactly one of NODERA_BACKUP_SFTP_KEY_FILE or NODERA_BACKUP_SFTP_PASSWORD_FILE")
+		}
+	default:
+		return fmt.Errorf("config: NODERA_BACKUP_DESTINATION must be local or sftp")
+	}
+	if c.Env != "production" {
+		return nil
+	}
+	if c.Runtime.ProviderMode == "mock" {
+		return fmt.Errorf("config: NODERA_PROVIDER_MODE=mock is not allowed in production")
+	}
+	if c.Runtime.ProviderMode == "docker" && !c.Runtime.AllowDirectDocker {
+		return fmt.Errorf("config: NODERA_PROVIDER_MODE=docker gives the API the host Docker socket; production uses NODERA_PROVIDER_MODE=agent (set NODERA_ALLOW_DIRECT_DOCKER=true only to override knowingly)")
+	}
+	if !corsExplicit {
+		return fmt.Errorf("config: NODERA_CORS_ORIGINS must be set explicitly in production")
+	}
+	for _, o := range c.HTTP.CORSOrigins {
+		u, err := url.Parse(o)
+		if o == "*" || err != nil || u.Scheme != "https" || u.Host == "" || u.Path != "" && u.Path != "/" {
+			return fmt.Errorf("config: production CORS origin %q must be an exact https:// origin", o)
+		}
+		h := u.Hostname()
+		if h == "localhost" || h == "127.0.0.1" || h == "::1" || strings.HasSuffix(h, ".localhost") {
+			return fmt.Errorf("config: production CORS origin %q must not be localhost", o)
+		}
+	}
+	if len(c.HTTP.TrustedProxies) == 0 {
+		return fmt.Errorf("config: NODERA_TRUSTED_PROXIES must be set in production (the reverse proxy's network): without it every client shares one IP-based rate-limit bucket behind the proxy")
+	}
+	if c.Secrets.EncryptionKeyBase64 == "" || c.Agent.SigningKeyBase64 == "" {
+		return fmt.Errorf("config: NODERA_SECRETS_ENCRYPTION_KEY and NODERA_AGENT_SIGNING_KEY are required in production")
+	}
+	if strings.Contains(c.DB.URL, "nodera_dev_password") {
+		return fmt.Errorf("config: the development database password must not be used in production")
+	}
+	if os.Getenv("NODERA_DEMO_SEED") == "true" {
+		return fmt.Errorf("config: NODERA_DEMO_SEED is not allowed in production")
+	}
+	if c.Runtime.AllowInternalMonitoring {
+		return fmt.Errorf("config: NODERA_MONITOR_ALLOW_INTERNAL is a development switch and is not allowed in production")
+	}
+	return nil
+}
+
+func defaultWorkloadUser() string {
+	if os.Getuid() <= 0 {
+		return "" // running as root (or on a platform without uids): keep the image default
+	}
+	return fmt.Sprintf("%d:%d", os.Getuid(), os.Getgid())
+}
+
+// SecretFromEnv returns the value of NAME_FILE's file (trailing newline
+// trimmed) when NAME_FILE is set, else NAME. Setting both is an error: it is
+// ambiguous which one is live. The returned value must never be logged.
+func SecretFromEnv(name string) (string, error) {
+	file := os.Getenv(name + "_FILE")
+	inline := os.Getenv(name)
+	if file == "" {
+		return inline, nil
+	}
+	if inline != "" {
+		return "", fmt.Errorf("config: set either %s or %s_FILE, not both", name, name)
+	}
+	b, err := os.ReadFile(file)
+	if err != nil {
+		return "", fmt.Errorf("config: cannot read %s_FILE (%s): %w", name, file, err)
+	}
+	return strings.TrimRight(string(b), "\r\n"), nil
 }
 
 func getEnvDefault(key, def string) string {

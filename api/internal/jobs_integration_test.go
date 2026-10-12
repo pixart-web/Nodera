@@ -237,3 +237,46 @@ func waitForStatus(t *testing.T, ctx context.Context, jobsSvc *jobs.Service, ac 
 		}
 	}
 }
+
+// A job that was running when the process died must not stay "running" forever.
+func TestJobsInterruptedByRestartAreMarkedFailedAndCanBeRetried(t *testing.T) {
+	pool := testhelpers.RequirePool(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	h := newHarness(pool)
+	ac, _ := h.newOwnerContext(t, ctx, "jobs-restart@nodera.dev")
+	jobsSvc := jobs.New(pool, h.audit)
+
+	j, err := jobsSvc.Enqueue(ctx, ac, jobs.EnqueueInput{Type: "test.slow", Payload: json.RawMessage(`{}`)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Simulate the crash: the row is 'running' and a step was mid-flight.
+	if _, err := pool.Exec(ctx, `UPDATE jobs SET status='running', started_at=now() WHERE id=$1`, j.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO job_steps (job_id, organization_id, seq, name, status) VALUES ($1,$2,0,'create-container','running')`, j.ID, ac.OrganizationID); err != nil {
+		t.Fatal(err)
+	}
+	other, _ := jobsSvc.Enqueue(ctx, ac, jobs.EnqueueInput{Type: "test.slow", Payload: json.RawMessage(`{}`)}) // still queued: must be untouched
+
+	n, err := jobs.NewWorker(pool).RecoverInterrupted(ctx)
+	if err != nil || n != 1 {
+		t.Fatalf("recovered %d err=%v, want exactly the running job", n, err)
+	}
+	got, _ := jobsSvc.Get(ctx, ac, j.ID)
+	if got.Status != jobs.StatusFailed || got.Error == "" || got.FinishedAt == nil {
+		t.Fatalf("interrupted job should be failed with an explanation, got %+v", got)
+	}
+	var stepStatus string
+	_ = pool.QueryRow(ctx, `SELECT status FROM job_steps WHERE job_id=$1`, j.ID).Scan(&stepStatus)
+	if stepStatus != "failed" {
+		t.Fatalf("the in-flight step should be failed, got %q", stepStatus)
+	}
+	if o, _ := jobsSvc.Get(ctx, ac, other.ID); o.Status != jobs.StatusQueued {
+		t.Fatalf("queued jobs must be left alone, got %q", o.Status)
+	}
+	if _, err := jobsSvc.Retry(ctx, ac, j.ID); err != nil {
+		t.Fatalf("an interrupted job can be retried: %v", err)
+	}
+}

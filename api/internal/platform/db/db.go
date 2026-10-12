@@ -48,6 +48,42 @@ type Migration struct {
 	SQL     string
 }
 
+// migrationLockKey is an arbitrary constant namespace for the advisory lock.
+const migrationLockKey int64 = 0x4e4f44455241 // "NODERA"
+
+// Pending returns the versions in migrations that are not yet applied. It is
+// read-only (it never creates schema_migrations), so a runtime role without
+// DDL rights can use it to refuse to start against an out-of-date schema.
+func Pending(ctx context.Context, pool *Pool, migrations []Migration) ([]int, error) {
+	var exists bool
+	if err := pool.QueryRow(ctx, `SELECT to_regclass('public.schema_migrations') IS NOT NULL`).Scan(&exists); err != nil {
+		return nil, fmt.Errorf("db: failed to inspect schema: %w", err)
+	}
+	applied := map[int]bool{}
+	if exists {
+		rows, err := pool.Query(ctx, `SELECT version FROM schema_migrations`)
+		if err != nil {
+			return nil, fmt.Errorf("db: failed to read schema_migrations: %w", err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var v int
+			if err := rows.Scan(&v); err != nil {
+				return nil, err
+			}
+			applied[v] = true
+		}
+	}
+	var out []int
+	for _, m := range migrations {
+		if !applied[m.Version] {
+			out = append(out, m.Version)
+		}
+	}
+	sort.Ints(out)
+	return out, nil
+}
+
 // Migrate applies every migration in migrations whose version is greater
 // than the highest version recorded in schema_migrations, in order, each
 // inside its own transaction. It is idempotent and safe to run on every
@@ -66,6 +102,21 @@ func Migrate(ctx context.Context, pool *Pool, migrations []Migration) error {
 	sorted := make([]Migration, len(migrations))
 	copy(sorted, migrations)
 	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Version < sorted[j].Version })
+
+	// Serialise concurrent runners (two replicas, or a release job racing a
+	// dev server). The lock is session-scoped, so it needs one dedicated
+	// connection for the whole run.
+	conn, err := pool.Acquire(ctx)
+	if err != nil {
+		return fmt.Errorf("db: failed to acquire migration connection: %w", err)
+	}
+	defer conn.Release()
+	if _, err := conn.Exec(ctx, `SELECT pg_advisory_lock($1)`, migrationLockKey); err != nil {
+		return fmt.Errorf("db: failed to take migration lock: %w", err)
+	}
+	defer func() {
+		_, _ = conn.Exec(context.WithoutCancel(ctx), `SELECT pg_advisory_unlock($1)`, migrationLockKey)
+	}()
 
 	var applied int
 	if err := pool.QueryRow(ctx, `SELECT COALESCE(MAX(version), 0) FROM schema_migrations`).Scan(&applied); err != nil {

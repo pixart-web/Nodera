@@ -85,7 +85,19 @@ export function ServicesStatus() {
   const { system } = usePlatform();
   const mons = useAsync(() => monitoringService.monitors());
   const caps = system ? Object.entries(system.capabilities) : [];
-  const capTone = (v: string) => (v === "not_configured" ? { status: "OFFLINE" as const, label: "não configurado" } : v === "mock" ? { status: "WARNING" as const, label: "MOCK" } : { status: "ONLINE" as const, label: v === "local" ? "local" : "real" });
+  // Honest labels: only "real"/"agent"/"offsite"/"local" count as working; dev-only
+  // implementations (in-memory DNS, self-signed certificates) and mocks are flagged.
+  const capTone = (v: string) => {
+    switch (v) {
+      case "not_configured": return { status: "OFFLINE" as const, label: "não configurado" };
+      case "mock": return { status: "WARNING" as const, label: "MOCK" };
+      case "local_dev": return { status: "WARNING" as const, label: "local (só dev/teste)" };
+      case "agent": return { status: "ONLINE" as const, label: "via agente" };
+      case "offsite": return { status: "ONLINE" as const, label: "off-site" };
+      case "local": return { status: "ONLINE" as const, label: "local" };
+      default: return { status: "ONLINE" as const, label: "real" };
+    }
+  };
   return (
     <Section title="Estado dos Serviços" href="/monitoring" linkLabel="Ver detalhes">
       <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-nd-faint">Providers</p>

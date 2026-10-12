@@ -45,7 +45,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Liveness + database reachability */
+        /**
+         * Readiness: database reachable and job queue draining
+         * @description 200 when the instance can take requests (status "ready", or "degraded" with a `degraded` list when an optional dependency such as Redis or the local agent is unhealthy). 503 when PostgreSQL is unreachable or queued work is stuck. `/health` is pure liveness.
+         */
         get: {
             parameters: {
                 query?: never;
@@ -62,7 +65,7 @@ export interface paths {
                     };
                     content?: never;
                 };
-                /** @description Database unreachable */
+                /** @description Database unreachable or job queue stalled */
                 503: {
                     headers: {
                         [name: string]: unknown;
@@ -9731,12 +9734,14 @@ export interface components {
         };
         SystemInfo: {
             /** @enum {string} */
-            provider_mode: "local" | "docker" | "mock";
+            provider_mode: "local" | "docker" | "agent" | "mock";
             capabilities: {
-                [key: string]: "real" | "local" | "mock" | "not_configured";
+                [key: string]: "real" | "agent" | "local" | "local_dev" | "offsite" | "mock" | "not_configured";
             };
             demo: boolean;
             environment: string;
+            /** @description Plain-language notes about capabilities that are not production-grade (in-memory DNS, development CA, same-host backups, mocks). */
+            warnings: string[];
         };
         WordPressHealth: {
             healthy: boolean;

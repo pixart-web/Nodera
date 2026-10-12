@@ -260,11 +260,20 @@ func (s *Service) Sweep(ctx context.Context, now time.Time) (map[string]int64, e
 			{"metric_samples", `DELETE FROM metric_samples WHERE organization_id=$1 AND sampled_at < $2`},
 			{"job_logs", `DELETE FROM job_logs WHERE organization_id=$1 AND ts < $2`},
 			{"incidents", `DELETE FROM incidents WHERE organization_id=$1 AND status IN ('resolved','closed') AND detected_at < $2`},
-			{"audit_log", `DELETE FROM audit_log WHERE organization_id=$1 AND created_at < $2`},
+			// Through the SECURITY DEFINER function so the production app role never needs DELETE on audit_log.
+			{"audit_log", `SELECT audit_log_apply_retention($1, $2)`},
 		}
 		for _, st := range stmts {
 			if _, ok := days[st.res]; !ok {
 				continue // no policy and no default: keep
+			}
+			if st.res == "audit_log" {
+				var n int64
+				if err := s.pool.QueryRow(ctx, st.sql, org, cut(st.res)).Scan(&n); err != nil {
+					return removed, err
+				}
+				removed[st.res] += n
+				continue
 			}
 			tag, err := s.pool.Exec(ctx, st.sql, org, cut(st.res))
 			if err != nil {

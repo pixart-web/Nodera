@@ -125,6 +125,9 @@ func Logging(next http.Handler) http.Handler {
 		start := time.Now()
 		sw := &statusWriter{ResponseWriter: w, status: http.StatusOK}
 		next.ServeHTTP(sw, r)
+		if r.URL.Path == "/health" && sw.status == http.StatusOK {
+			return // container healthchecks fire every few seconds; do not let them fill the logs
+		}
 		logger.FromContext(r.Context()).Info("request",
 			"method", r.Method,
 			"path", r.URL.Path,

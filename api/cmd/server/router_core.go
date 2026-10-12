@@ -99,9 +99,10 @@ func (d apiDeps) handleSystemInfo(w http.ResponseWriter, r *http.Request) {
 	mustAuthContext(r)
 	httpserver.WriteJSON(w, http.StatusOK, map[string]any{
 		"provider_mode": d.providerMode,
-		"capabilities":  capabilityReport(d.providerMode, d.prov),
+		"capabilities":  capabilityReport(d.providerMode, d.backupDest, d.prov),
 		"demo":          d.providerMode == "mock",
 		"environment":   d.environment,
+		"warnings":      productionWarnings(d.environment, d.providerMode, d.backupDest, d.prov),
 	})
 }
 

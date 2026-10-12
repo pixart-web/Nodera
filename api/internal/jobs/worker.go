@@ -220,3 +220,44 @@ func errPanic(v any) error { return panicError{v: v} }
 // was found. Exposed so tests (and one-shot CLI tooling) can drive the queue
 // deterministically instead of sleeping on the poll interval.
 func (w *Worker) RunOnce(ctx context.Context) bool { return w.claimAndRunOne(ctx) }
+
+// RecoverInterrupted marks jobs that were 'running' or 'rolling_back' when the
+// previous process died as failed, so they do not stay "running" forever
+// (blocking idempotent re-submission and showing a spinner that never ends).
+//
+// It assumes ONE API instance, which is the supported deployment: at start-up
+// nothing else can legitimately be running a job. Call it once, before Run. The
+// failed job keeps its steps; a retry is safe because operation steps are
+// idempotent (they detect and reuse what already exists), and any resources a
+// half-finished run left behind are listed in the job's steps and logs.
+func (w *Worker) RecoverInterrupted(ctx context.Context) (int64, error) {
+	const msg = "interrupted: the control plane restarted while this operation was running. Check its steps for what completed; retrying is safe."
+	rows, err := w.pool.Query(ctx, `
+		UPDATE jobs SET status = 'failed', error = $1, finished_at = now(), updated_at = now()
+		WHERE status IN ('running', 'rolling_back')
+		RETURNING id`, msg)
+	if err != nil {
+		return 0, err
+	}
+	var ids []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		ids = append(ids, id)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+	if len(ids) > 0 {
+		if _, err := w.pool.Exec(ctx, `
+			UPDATE job_steps SET status = 'failed', error = 'interrupted by a control-plane restart', finished_at = now()
+			WHERE job_id = ANY($1) AND status = 'running'`, ids); err != nil {
+			return 0, err
+		}
+	}
+	return int64(len(ids)), nil
+}

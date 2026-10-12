@@ -20,6 +20,17 @@ type RedisLimiter struct {
 	limit    int
 	interval time.Duration
 	log      *slog.Logger
+	fallback Allower
+}
+
+// WithFallback makes the limiter degrade to a per-instance limiter (instead of
+// failing fully open) while Redis is unreachable. Security-critical limits —
+// login, password change — must use this: a Redis outage then weakens
+// brute-force protection from deployment-wide to per-instance rather than
+// removing it.
+func (l *RedisLimiter) WithFallback(f Allower) *RedisLimiter {
+	l.fallback = f
+	return l
 }
 
 // NewRedis builds a RedisLimiter allowing up to limit calls per interval
@@ -48,6 +59,10 @@ func (l *RedisLimiter) Allow(key string) bool {
 	fullKey := l.prefix + ":" + key
 	count, err := l.client.Incr(ctx, fullKey).Result()
 	if err != nil {
+		if l.fallback != nil {
+			l.log.Error("rate limiter: redis unavailable, using the per-instance fallback", "error", err, "prefix", l.prefix)
+			return l.fallback.Allow(key)
+		}
 		l.log.Error("rate limiter: redis unavailable, failing open", "error", err, "prefix", l.prefix)
 		return true
 	}

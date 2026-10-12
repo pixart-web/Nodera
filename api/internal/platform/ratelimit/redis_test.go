@@ -129,3 +129,21 @@ func TestRedisLimiter_SharedAcrossClients(t *testing.T) {
 		t.Fatal("expected the 3rd call (via instance A) to be blocked — instance B's call already spent the shared budget")
 	}
 }
+
+// With a fallback, a dead Redis degrades to the per-instance limit rather than
+// letting every request through.
+func TestRedisLimiterFallbackWhenRedisDown(t *testing.T) {
+	dead := redis.NewClient(&redis.Options{Addr: "127.0.0.1:1", DialTimeout: 100 * time.Millisecond})
+	defer dead.Close()
+	open := ratelimit.NewRedis(dead, "x", 2, time.Minute, silentLogger())
+	if !open.Allow("k") || !open.Allow("k") || !open.Allow("k") {
+		t.Fatal("without a fallback the limiter fails open")
+	}
+	guarded := ratelimit.NewRedis(dead, "x", 2, time.Minute, silentLogger()).WithFallback(ratelimit.New(2, time.Minute))
+	if !guarded.Allow("k") || !guarded.Allow("k") {
+		t.Fatal("first calls within the budget must pass")
+	}
+	if guarded.Allow("k") {
+		t.Fatal("the per-instance fallback must throttle while Redis is down")
+	}
+}

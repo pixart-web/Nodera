@@ -1,9 +1,10 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
-	"net"
 	"net/http"
 	"time"
 
@@ -94,6 +95,12 @@ type apiDeps struct {
 	// a silently-degraded production default (this field is never true by
 	// accident: main.go sets it explicitly from cfg.Env).
 	secureCookies bool
+	// backupDest ("local" | "sftp") is reported through the capability map.
+	backupDest string
+	// localAgentID is the agent used in provider mode "agent" (zero otherwise).
+	localAgentID uuid.UUID
+	// redisPing is nil when Redis is not configured.
+	redisPing func(context.Context) error
 }
 
 func newRouter(d apiDeps) http.Handler {
@@ -254,25 +261,71 @@ func (d apiDeps) handleHealth(w http.ResponseWriter, r *http.Request) {
 	httpserver.WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
-// handleReady checks the database is actually reachable, distinct from
-// /health which only proves the process is alive (rule 27).
+// handleReady answers "can this instance safely take real requests?".
+//
+//	503 when PostgreSQL is unreachable, or queued work has been stuck >10 minutes
+//	(the worker is not draining it).
+//	200 otherwise, with per-dependency detail. Optional/soft dependencies never
+//	turn this into a 503, but are reported honestly:
+//	  - redis: rate limiters degrade to per-instance limits when it is down;
+//	  - agent: in provider mode "agent", an offline agent means container/database
+//	    operations will fail, while the UI/API keep serving.
+//
+// /health stays pure liveness (no dependencies), which is what container
+// healthchecks and the reverse proxy use.
 func (d apiDeps) handleReady(w http.ResponseWriter, r *http.Request) {
-	if err := d.pool.Ping(r.Context()); err != nil {
+	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
+	defer cancel()
+	if err := d.pool.Ping(ctx); err != nil {
 		httpserver.WriteJSON(w, http.StatusServiceUnavailable, map[string]any{"status": "unavailable", "reason": "database unreachable", "checks": map[string]string{"database": "down"}})
 		return
 	}
 	checks := map[string]string{"database": "ok"}
+	var degraded []string
 	var pending int
-	if err := d.pool.QueryRow(r.Context(), `SELECT count(*) FROM jobs WHERE status='queued' AND created_at < now() - interval '10 minutes'`).Scan(&pending); err == nil && pending > 0 {
+	if err := d.pool.QueryRow(ctx, `SELECT count(*) FROM jobs WHERE status='queued' AND created_at < now() - interval '10 minutes'`).Scan(&pending); err == nil && pending > 0 {
 		checks["job_queue"] = "stalled" // work has been queued for >10m: the worker may be down
 	} else if err == nil {
 		checks["job_queue"] = "ok"
 	}
-	for name, state := range capabilityReport(d.providerMode, d.prov) {
+	if d.redisPing == nil {
+		checks["redis"] = "not_configured"
+	} else if err := d.redisPing(ctx); err != nil {
+		checks["redis"] = "down"
+		degraded = append(degraded, "redis: rate limits are per-instance until it returns")
+	} else {
+		checks["redis"] = "ok"
+	}
+	if d.providerMode == "agent" {
+		switch {
+		case d.localAgentID == uuid.Nil:
+			checks["agent"] = "not_configured"
+			degraded = append(degraded, "agent: NODERA_LOCAL_AGENT_ID is not set; container and database operations are unavailable")
+		default:
+			a, err := d.nodeagent.AgentState(ctx, d.localAgentID)
+			switch {
+			case err != nil:
+				checks["agent"] = "unknown"
+				degraded = append(degraded, "agent: the configured local agent was not found")
+			case a.Status == "revoked":
+				checks["agent"] = "revoked"
+				degraded = append(degraded, "agent: revoked")
+			case a.LastSeenAt == nil || time.Since(*a.LastSeenAt) > nodeagent.OfflineAfter:
+				checks["agent"] = "offline"
+				degraded = append(degraded, "agent: not seen recently; container and database operations will fail")
+			default:
+				checks["agent"] = "ok"
+			}
+		}
+	}
+	for name, state := range capabilityReport(d.providerMode, d.backupDest, d.prov) {
 		checks["provider."+name] = state
 	}
 	status := http.StatusOK
 	body := map[string]any{"status": "ready", "checks": checks, "provider_mode": d.providerMode}
+	if len(degraded) > 0 {
+		body["status"], body["degraded"] = "degraded", degraded
+	}
 	if checks["job_queue"] == "stalled" {
 		status, body["status"] = http.StatusServiceUnavailable, "degraded"
 	}
@@ -1814,22 +1867,22 @@ func parseRFC3339Query(r *http.Request, key string) time.Time {
 
 // --- helpers ---
 
+// maxJSONBody bounds every JSON request body. Without it a single large POST to a
+// public endpoint (login, signup) would be buffered whole in memory. Uploads that
+// legitimately exceed this (site-migration archives) read their own bounded stream.
+const maxJSONBody = 2 << 20
+
 func decodeJSON(w http.ResponseWriter, r *http.Request, v any) bool {
 	defer r.Body.Close()
+	r.Body = http.MaxBytesReader(w, r.Body, maxJSONBody)
 	if err := json.NewDecoder(r.Body).Decode(v); err != nil {
+		var tooBig *http.MaxBytesError
+		if errors.As(err, &tooBig) {
+			httpserver.WriteError(w, r, apierr.New(apierr.CodeValidation, "request body is too large"))
+			return false
+		}
 		httpserver.WriteError(w, r, apierr.Validation("invalid request body"))
 		return false
 	}
 	return true
-}
-
-func clientIP(r *http.Request) string {
-	// A dedicated proxy-aware resolution (trusted X-Forwarded-For hop count)
-	// belongs to the eventual production reverse-proxy config; RemoteAddr is
-	// correct for direct connections and local development.
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		return r.RemoteAddr
-	}
-	return host
 }

@@ -126,16 +126,17 @@
         "tags": [
           "platform"
         ],
-        "summary": "Liveness + database reachability",
+        "summary": "Readiness: database reachable and job queue draining",
         "security": [],
         "responses": {
           "200": {
             "description": "Ready"
           },
           "503": {
-            "description": "Database unreachable"
+            "description": "Database unreachable or job queue stalled"
           }
-        }
+        },
+        "description": "200 when the instance can take requests (status \"ready\", or \"degraded\" with a `degraded` list when an optional dependency such as Redis or the local agent is unhealthy). 503 when PostgreSQL is unreachable or queued work is stuck. `/health` is pure liveness."
       }
     },
     "/api/v1/auth/signup": {
@@ -12252,6 +12253,7 @@
             "enum": [
               "local",
               "docker",
+              "agent",
               "mock"
             ]
           },
@@ -12261,7 +12263,10 @@
               "type": "string",
               "enum": [
                 "real",
+                "agent",
                 "local",
+                "local_dev",
+                "offsite",
                 "mock",
                 "not_configured"
               ]
@@ -12272,13 +12277,21 @@
           },
           "environment": {
             "type": "string"
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Plain-language notes about capabilities that are not production-grade (in-memory DNS, development CA, same-host backups, mocks)."
           }
         },
         "required": [
           "provider_mode",
           "capabilities",
           "demo",
-          "environment"
+          "environment",
+          "warnings"
         ]
       },
       "WordPressHealth": {

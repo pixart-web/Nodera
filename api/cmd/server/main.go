@@ -78,6 +78,9 @@ func run() error {
 
 	log := logger.New(cfg.Env)
 	slog.SetDefault(log)
+	if err := setTrustedProxies(cfg.HTTP.TrustedProxies); err != nil {
+		return fmt.Errorf("NODERA_TRUSTED_PROXIES: %w", err)
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -93,10 +96,24 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	if err := db.Migrate(ctx, pool, migs); err != nil {
-		return err
+	if cfg.Migrate.Auto {
+		if err := db.Migrate(ctx, pool, migs); err != nil {
+			return err
+		}
+		log.Info("migrations applied", "count", len(migs))
+	} else {
+		// Production: schema changes are a separate, owner-privileged release
+		// step (cmd/migrate). The API never alters the schema; it only refuses
+		// to serve against a schema that is behind its own code.
+		pending, err := db.Pending(ctx, pool, migs)
+		if err != nil {
+			return err
+		}
+		if len(pending) > 0 {
+			return fmt.Errorf("database schema is behind this release (pending migrations %v): run nodera-migrate first", pending)
+		}
+		log.Info("schema verified", "migrations", len(migs))
 	}
-	log.Info("migrations applied", "count", len(migs))
 
 	// auditSvc and platformSvc need each other (platformSvc writes its own
 	// grant/revoke audit entries; auditSvc.QueryPlatform checks a platform
@@ -204,13 +221,13 @@ func run() error {
 
 	agentsSvc := agents.New(pool, auditSvc, aiSvc, toolsSvc)
 
-	loginRate, signupRate, aiChatRate, createOrgRate, changePasswordRate, closeRateLimiting, err := newRateLimiters(ctx, cfg, log)
+	loginRate, signupRate, aiChatRate, createOrgRate, changePasswordRate, redisPing, closeRateLimiting, err := newRateLimiters(ctx, cfg, log)
 	if err != nil {
 		return err
 	}
 	defer closeRateLimiting()
 
-	prov, err := buildProviders(cfg)
+	prov, err := buildProviders(cfg, nodeAgentSvc)
 	if err != nil {
 		return fmt.Errorf("providers: %w", err)
 	}
@@ -221,7 +238,7 @@ func run() error {
 	opsEngine := ops.New(pool, auditSvc)
 	provisioning.Register(opsEngine, provisioning.Deps{
 		Pool: pool, Projects: projectsSvc, Secrets: secretsSvc, Providers: prov,
-		Network: cfg.Runtime.DockerNetwork, BaseDomain: cfg.Runtime.BaseDomain, DBHost: cfg.Runtime.WordPressDBHost,
+		Network: cfg.Runtime.DockerNetwork, BaseDomain: cfg.Runtime.BaseDomain, DBHost: cfg.Runtime.WordPressDBHost, WorkloadUser: cfg.Runtime.WorkloadUser,
 	})
 	backupsSvc := backups.New(pool, auditSvc, projectsSvc, prov)
 	backupsSvc.Register(opsEngine)
@@ -233,7 +250,7 @@ func run() error {
 	migrationsSvc.Register(opsEngine)
 	wordpressSvc := wordpress.New(pool, projectsSvc, backupsSvc, provisioning.Deps{
 		Pool: pool, Projects: projectsSvc, Secrets: secretsSvc, Providers: prov,
-		Network: cfg.Runtime.DockerNetwork, BaseDomain: cfg.Runtime.BaseDomain, DBHost: cfg.Runtime.WordPressDBHost,
+		Network: cfg.Runtime.DockerNetwork, BaseDomain: cfg.Runtime.BaseDomain, DBHost: cfg.Runtime.WordPressDBHost, WorkloadUser: cfg.Runtime.WorkloadUser,
 	})
 	wordpressSvc.Register(opsEngine)
 	notifPolicy := netpolicy.Policy{Level: netpolicy.PublicOnly}
@@ -267,6 +284,11 @@ func run() error {
 	go runMaintenance(ctx, log, backupsSvc, networkSvc)
 
 	worker := jobs.NewWorker(pool)
+	if n, err := worker.RecoverInterrupted(ctx); err != nil {
+		log.Error("could not recover interrupted jobs", "error", err)
+	} else if n > 0 {
+		log.Warn("jobs interrupted by the previous shutdown were marked failed (retry them if needed)", "count", n)
+	}
 	opsEngine.RegisterWorker(worker)
 	go worker.Run(ctx)
 	log.Info("job worker started")
@@ -315,6 +337,11 @@ func run() error {
 		corsOrigins:        cfg.HTTP.CORSOrigins,
 		sessionTTL:         cfg.Auth.SessionTTL,
 		secureCookies:      cfg.Env == "production",
+		backupDest:         cfg.Backup.Destination,
+		redisPing:          redisPing,
+	}
+	if id, err := uuid.Parse(cfg.Runtime.LocalAgentID); err == nil {
+		deps.localAgentID = id
 	}
 
 	handler := newRouter(deps)
@@ -324,6 +351,9 @@ func run() error {
 		Addr:              cfg.HTTP.Addr,
 		Handler:           handler,
 		ReadHeaderTimeout: 10 * time.Second,
+		// No WriteTimeout (SSE streams are long-lived) and no ReadTimeout (archive
+		// uploads); idle keep-alive connections are reaped.
+		IdleTimeout: 120 * time.Second,
 	}
 
 	errCh := make(chan error, 1)
@@ -370,7 +400,7 @@ func autoRegisterProvider(ctx context.Context, log *slog.Logger, aiSvc *ai.Servi
 // instance but not shared across one (docs/ROADMAP.md). The returned
 // close func closes the Redis client, if one was opened; it is always
 // safe to call.
-func newRateLimiters(ctx context.Context, cfg config.Config, log *slog.Logger) (login, signup, aiChat, createOrg, changePassword ratelimit.Allower, closeFn func(), err error) {
+func newRateLimiters(ctx context.Context, cfg config.Config, log *slog.Logger) (login, signup, aiChat, createOrg, changePassword ratelimit.Allower, ping func(context.Context) error, closeFn func(), err error) {
 	if cfg.Redis.URL == "" {
 		log.Warn("rate limiting is in-process only: NODERA_REDIS_URL is not set — limits are per-instance, not shared across a multi-instance deployment")
 		return ratelimit.New(5, 5*time.Minute),
@@ -378,27 +408,33 @@ func newRateLimiters(ctx context.Context, cfg config.Config, log *slog.Logger) (
 			ratelimit.New(60, time.Minute),
 			ratelimit.New(10, time.Hour),
 			ratelimit.New(5, 5*time.Minute),
-			func() {}, nil
+			nil, func() {}, nil
 	}
 
 	opts, err := redis.ParseURL(cfg.Redis.URL)
 	if err != nil {
-		return nil, nil, nil, nil, nil, nil, fmt.Errorf("config: NODERA_REDIS_URL is not a valid redis URL: %w", err)
+		return nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("config: NODERA_REDIS_URL is not a valid redis URL: %w", err)
 	}
 	client := redis.NewClient(opts)
 	pingCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	if err := client.Ping(pingCtx).Err(); err != nil {
 		_ = client.Close()
-		return nil, nil, nil, nil, nil, nil, fmt.Errorf("redis: could not connect using NODERA_REDIS_URL: %w", err)
+		return nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("redis: could not connect using NODERA_REDIS_URL: %w", err)
 	}
 	log.Info("rate limiting is Redis-backed, shared across instances")
 
-	return ratelimit.NewRedis(client, "ratelimit:login", 5, 5*time.Minute, log),
-		ratelimit.NewRedis(client, "ratelimit:signup", 3, time.Hour, log),
-		ratelimit.NewRedis(client, "ratelimit:ai_chat", 60, time.Minute, log),
-		ratelimit.NewRedis(client, "ratelimit:create_org", 10, time.Hour, log),
-		ratelimit.NewRedis(client, "ratelimit:change_password", 5, 5*time.Minute, log),
+	// Every limiter degrades to a per-instance limiter with the same budget while
+	// Redis is down, so an outage never removes login/signup brute-force protection.
+	mk := func(name string, limit int, every time.Duration) ratelimit.Allower {
+		return ratelimit.NewRedis(client, "ratelimit:"+name, limit, every, log).WithFallback(ratelimit.New(limit, every))
+	}
+	return mk("login", 5, 5*time.Minute),
+		mk("signup", 3, time.Hour),
+		mk("ai_chat", 60, time.Minute),
+		mk("create_org", 10, time.Hour),
+		mk("change_password", 5, 5*time.Minute),
+		func(c context.Context) error { return client.Ping(c).Err() },
 		func() { _ = client.Close() }, nil
 }
 
