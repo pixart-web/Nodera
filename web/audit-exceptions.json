@@ -1,0 +1,13 @@
+{
+  "_policy": "Exact-advisory exceptions only. Each needs reason, exposure, mitigation and an expiry; CI fails when one expires or goes stale. See docs/SECURITY.md 'Dependency policy'.",
+  "exceptions": [
+    {
+      "id": "GHSA-vfj7-8cjw-p6xm",
+      "package": "braces",
+      "reason": "Stack-exhaustion DoS on deeply nested brace patterns. Every published braces version (<=3.0.3) is affected; no fixed release exists. It is only reachable through tailwindcss@3 (micromatch/fast-glob) and eslint-config-next (glob), the only fix being the Tailwind 4 migration, which is a UI/styling change out of scope for the deployment-readiness pass.",
+      "exposure": "Build/lint time only. Not in the runtime image (Next standalone output) and not on any request path. The glob patterns come from tailwind.config.ts and ESLint config in this repo, never from user input.",
+      "mitigation": "CI/build run on trusted repo contents only; production image contains no braces.",
+      "expires": "2027-01-31"
+    }
+  ]
+}
