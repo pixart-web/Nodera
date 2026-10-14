@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { api, ApiError } from "@/lib/api";
 import { setCurrentOrgId, setStoredUser } from "@/lib/session";
@@ -27,6 +27,11 @@ export default function LoginPage() {
   const [displayName, setDisplayName] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  // The marketing site's "Start with Nodera" links here with ?mode=signup.
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get("mode") === "signup") setMode("signup");
+  }, []);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();

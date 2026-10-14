@@ -1,0 +1,28 @@
+/* NODERA brand tokens — graphite + steel + ice blue.
+   The marketing site (app/(marketing)) is built on these. The product UI
+   (app/(app)/globals.css) still runs on its own navy token set; these are
+   exposed to Tailwind as `nodera-*` so the platform can migrate screen by
+   screen without a big-bang restyle. Accent = live telemetry: use sparingly. */
+:root {
+  --nodera-black: #05070A;
+  --nodera-deep: #080C11;
+  --nodera-surface: #0D1218;
+  --nodera-surface-2: #121922;
+
+  --nodera-white: #F4F7FA;
+  --nodera-text: #D8E0E7;
+  --nodera-muted: #84919E;
+  --nodera-dim: #53606C;
+
+  --nodera-line: rgba(220, 235, 245, .10);
+  --nodera-line-strong: rgba(220, 235, 245, .18);
+
+  --nodera-accent: #6DD6FF;
+  --nodera-accent-bright: #9BE6FF;
+
+  --nodera-success: #70E1A1;
+  --nodera-warning: #F2C66D;
+  --nodera-danger: #FF7373;
+
+  --nodera-ease: cubic-bezier(.22, 1, .36, 1);
+}
