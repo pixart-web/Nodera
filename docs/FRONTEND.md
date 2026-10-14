@@ -18,10 +18,13 @@ Next.js API route layer; `web/` is a pure client of `api/`.
 ```
 web/
   app/
-    page.tsx              redirect router: → /login, /orgs, or /dashboard
-    login/page.tsx         sign in / sign up
-    orgs/page.tsx           organization picker + create
-    (org)/layout.tsx        sidebar shell — guards session + org, then renders:
+    (marketing)/           public marketing site at "/" — own root layout (lang="en"),
+                             see "Marketing site" below
+    (app)/layout.tsx       product root layout (lang="pt", Tailwind globals)
+    (app)/app/page.tsx      redirect router at /app: → /login, /orgs, or /dashboard
+    (app)/login/page.tsx     sign in / sign up (?mode=signup opens sign-up)
+    (app)/orgs/page.tsx       organization picker + create
+    (app)/(org)/layout.tsx    sidebar shell — guards session + org, then renders:
       dashboard/page.tsx     live counts + recent audit activity
       infrastructure/page.tsx  node list + register form + per-node status
                                   report/decommission controls
@@ -513,3 +516,30 @@ on a fresh tab afterward — zero errors.
   can be renamed or have their permissions replaced)
 
 Tracked in `docs/ROADMAP.md`.
+
+
+## Marketing site
+
+`app/(marketing)` is the public website served at `/`. It is a separate
+**root layout** from the product (`app/(app)`), so the two never share CSS,
+fonts or `<html lang>`: the product keeps Inter + Tailwind + its navy tokens,
+the site uses Manrope/JetBrains Mono and plain CSS (`app/(marketing)/site.css`).
+Moving between them is a full page load, which is intended.
+
+* `/` marketing site · `/app` the old root redirect (sign-in entry point) ·
+  `/login?mode=signup` is where "Start with Nodera" lands by default.
+* Brand: `components/brand/NoderaMark.tsx` (mark, wordmark, lockup — source of
+  truth) and exported SVGs in `public/brand/`; `app/icon.svg` is the favicon for
+  both site and product. Tokens: `styles/nodera-tokens.css` (also exposed to
+  Tailwind as `nodera-*` for gradual adoption in the product UI).
+* Sections live in `components/site/`. Every number, hostname and event on the
+  site is **demo data** (`components/site/data.ts`) and is labelled as such.
+* Production values are not final and are **not hardcoded**: set
+  `NEXT_PUBLIC_NODERA_SITE_DOMAIN`, `NEXT_PUBLIC_NODERA_CONTACT_EMAIL`,
+  `NEXT_PUBLIC_NODERA_DEMO_URL`, `NEXT_PUBLIC_NODERA_SIGNUP_URL` and optionally
+  `NEXT_PUBLIC_NODERA_HERO_VIDEO_URL` at build time (`lib/site-config.ts`).
+  Until the domain is set, no canonical URL or share image (`public/brand/nodera-og.png`) is emitted.
+* Motion: transforms/opacity only; scroll-driven sections write a single `--p`
+  custom property (`useStickyProgress`); offscreen animation is paused; with
+  `prefers-reduced-motion: reduce` every sequence resolves to its final state and
+  pinned sections become normal flow.

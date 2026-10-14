@@ -23,6 +23,24 @@ const config: Config = {
         danger: "rgb(var(--color-danger) / <alpha-value>)",
         warn: "rgb(var(--color-warning) / <alpha-value>)",
         ok: "rgb(var(--color-success) / <alpha-value>)",
+        // NODERA brand tokens (styles/nodera-tokens.css) — graphite, steel, ice blue
+        nodera: {
+          black: "var(--nodera-black)",
+          deep: "var(--nodera-deep)",
+          surface: "var(--nodera-surface)",
+          "surface-2": "var(--nodera-surface-2)",
+          white: "var(--nodera-white)",
+          text: "var(--nodera-text)",
+          muted: "var(--nodera-muted)",
+          dim: "var(--nodera-dim)",
+          line: "var(--nodera-line)",
+          "line-strong": "var(--nodera-line-strong)",
+          accent: "var(--nodera-accent)",
+          "accent-bright": "var(--nodera-accent-bright)",
+          success: "var(--nodera-success)",
+          warning: "var(--nodera-warning)",
+          danger: "var(--nodera-danger)",
+        },
         // Nodera design-system tokens
         nd: {
           bg: "rgb(var(--color-bg) / <alpha-value>)",
