@@ -116,7 +116,7 @@ function AddMemberModal({ open, onClose, onDone }: { open: boolean; onClose: () 
     if (await action.run(() => api.post("/api/v1/organization/members", { email }), "Membro adicionado.")) { setEmail(""); onDone(); onClose(); }
   }
   return (
-    <Modal open={open} onClose={onClose} title="Adicionar membro" description="Adiciona uma conta Nodera existente com a role member. Não cria contas nem envia convites por email."
+    <Modal open={open} onClose={onClose} title="Adicionar membro" description="Adiciona uma conta existente com a role member. Não cria contas nem envia convites por email."
       footer={<><Button onClick={onClose}>Cancelar</Button><Button variant="primary" type="submit" form="member-form" disabled={action.busy}>{action.busy ? "A adicionar…" : "Adicionar"}</Button></>}>
       <form id="member-form" onSubmit={submit} className="space-y-4">
         {action.error && <Alert tone="error">{action.error}</Alert>}

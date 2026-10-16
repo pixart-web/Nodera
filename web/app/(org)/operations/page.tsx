@@ -38,10 +38,10 @@ export default function OperationsPage() {
 
   return (
     <div>
-      <PageHeader title={org.data ? org.data.name : "Visão geral"} description={org.data ? `/${org.data.slug} · dados reais da API Nodera` : "Dados reais da API Nodera"} />
+      <PageHeader title={org.data ? org.data.name : "Visão geral"} description={org.data ? `/${org.data.slug} · dados reais da API` : "Dados reais da API"} />
 
       {(nodes.error || apps.error || jobs.error || audit.error) && (
-        <ErrorBanner message="Alguns dados não puderam ser carregados — verifica se a API da Nodera está a correr." />
+        <ErrorBanner message="Alguns dados não puderam ser carregados — verifica se a API está a correr." />
       )}
 
       <div className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-4">

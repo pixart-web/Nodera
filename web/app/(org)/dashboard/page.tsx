@@ -22,7 +22,7 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Bem-vindo à Nodera" description="Gestão centralizada da tua infraestrutura, sites e aplicações."
+      <PageHeader title="Bem-vindo ao Servon" description="Gestão centralizada da tua infraestrutura, sites e aplicações."
         actions={<div className="text-right" aria-live="off"><p className="text-sm capitalize text-nd-muted">{date ?? " "}</p><p className="text-3xl font-semibold tabular-nums text-nd-text">{time ?? "--:--"}</p></div>} />
       {dash.error && <ErrorState message={dash.error} onRetry={dash.reload} />}
       <MetricCards data={dash.data} />

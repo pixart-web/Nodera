@@ -1,3 +1,5 @@
+import { brand } from "@/lib/brand";
+
 export function Logo({ className }: { className?: string }) {
   return (
     <span className={`inline-flex items-center gap-2.5 ${className ?? ""}`}>
@@ -9,7 +11,7 @@ export function Logo({ className }: { className?: string }) {
         </defs>
         <path d="M5 27V5h5.2l11.6 14.6V5H27v22h-5.2L10.2 12.4V27z" fill="url(#nlogo)" />
       </svg>
-      <span className="text-[22px] font-semibold tracking-tight text-nd-text">Nodera</span>
+      <span className="text-[22px] font-semibold tracking-tight text-nd-text">{brand.name}</span>
     </span>
   );
 }
