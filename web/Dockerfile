@@ -13,7 +13,7 @@ COPY . .
 # release images are built with an EMPTY value (same-origin: the reverse proxy
 # routes /api/ and /agent/ to the API on the same host), which is what lets one
 # immutable image run on any domain.
-ARG NEXT_PUBLIC_NODERA_API_URL=http://localhost:8080
+ARG NEXT_PUBLIC_NODERA_API_URL=
 ENV NEXT_PUBLIC_NODERA_API_URL=$NEXT_PUBLIC_NODERA_API_URL NEXT_TELEMETRY_DISABLED=1
 RUN npm run build
 
