@@ -84,7 +84,7 @@ jobs:
       # released overnight. The database it checks against is always current.
       - name: govulncheck
         working-directory: api
-        run: go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./...
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
 
       - uses: actions/setup-node@v4
         with:
