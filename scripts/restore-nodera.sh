@@ -33,9 +33,9 @@ GOT="$($SHA "$WORK/nodera.dump" | cut -d' ' -f1)"
 echo "manifest: $(cat "$WORK/manifest.json")"
 echo "dump checksum OK"
 # Listing needs a pg_restore only; verify can run on a workstation that has no Nodera containers.
-if command -v pg_restore >/dev/null; then pg_restore --list "$WORK/nodera.dump" | head -5
-elif docker inspect "$PG" >/dev/null 2>&1; then docker exec -i "$PG" pg_restore --list < "$WORK/nodera.dump" | head -5
-else docker run --rm -i "${NODERA_DR_PG_IMAGE:-postgres:16-alpine}" pg_restore --list < "$WORK/nodera.dump" | head -5; fi
+if command -v pg_restore >/dev/null; then pg_restore --list "$WORK/nodera.dump" | sed -n "1,5p"
+elif docker inspect "$PG" >/dev/null 2>&1; then docker exec -i "$PG" pg_restore --list < "$WORK/nodera.dump" | sed -n "1,5p"
+else docker run --rm -i "${NODERA_DR_PG_IMAGE:-postgres:16-alpine}" pg_restore --list < "$WORK/nodera.dump" | sed -n "1,5p"; fi
 echo "..."
 [ "$MODE" = "verify" ] && { echo "verify OK (nothing was changed)"; exit 0; }
 [ "$MODE" = "apply" ] || { echo "unknown mode $MODE" >&2; exit 1; }
