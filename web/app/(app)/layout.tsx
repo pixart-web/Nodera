@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { brand } from "@/lib/brand";
 import { Inter } from "next/font/google";
 import "@/styles/nodera-tokens.css";
 import "./globals.css";
@@ -6,7 +7,7 @@ import "./globals.css";
 const inter = Inter({ subsets: ["latin"], variable: "--font-inter", display: "swap" });
 
 export const metadata: Metadata = {
-  title: "Nodera",
+  title: brand.name,
   description: "Infrastructure, AI, Agent, and Operations control plane",
 };
 

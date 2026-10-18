@@ -1,5 +1,6 @@
 "use client";
 
+import { brand } from "@/lib/brand";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { BookOpen } from "lucide-react";
@@ -11,7 +12,7 @@ export function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   const pathname = usePathname();
   return (
     <div className="flex h-full flex-col">
-      <div className="flex h-16 shrink-0 items-center px-5"><Link href="/dashboard" aria-label="Nodera — Dashboard" onClick={onNavigate}><Logo /></Link></div>
+      <div className="flex h-16 shrink-0 items-center px-5"><Link href="/dashboard" aria-label={`${brand.name} — Dashboard`} onClick={onNavigate}><Logo /></Link></div>
       <nav aria-label="Navegação principal" className="nd-scroll flex-1 space-y-5 overflow-y-auto px-3 pb-4 pt-2">
         {NAV.map((group, gi) => (
           <div key={gi}>
@@ -40,7 +41,7 @@ export function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
       <div className="m-3 shrink-0 rounded-nd-lg border border-nd-border bg-nd-surface p-3">
         <div className="flex items-center gap-2.5">
           <svg width="22" height="22" viewBox="0 0 32 32" aria-hidden><path d="M5 27V5h5.2l11.6 14.6V5H27v22h-5.2L10.2 12.4V27z" fill="#38BDF8" /></svg>
-          <div className="leading-tight"><p className="text-sm font-medium text-nd-text">Nodera v1.0</p><p className="text-xs text-nd-muted">Infra Manager</p></div>
+          <div className="leading-tight"><p className="text-sm font-medium text-nd-text">{brand.name} {brand.version}</p><p className="text-xs text-nd-muted">{brand.shortTagline}</p></div>
         </div>
         <Link href="/settings" className="mt-3 flex items-center gap-2 rounded-md bg-nd-primary/10 px-2.5 py-1.5 text-xs font-medium text-nd-primary-soft transition-colors hover:bg-nd-primary/20">
           <BookOpen className="h-3.5 w-3.5" aria-hidden />Ver documentação

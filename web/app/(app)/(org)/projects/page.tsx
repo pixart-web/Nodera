@@ -71,7 +71,7 @@ function ProjectsInner() {
   const statuses = ["active", "provisioning", "failed", "degraded", "maintenance"];
   return (
     <div>
-      <PageHeader title="Projetos" description="Todos os sites e aplicações geridos pela Nodera."
+      <PageHeader title="Projetos" description="Todos os sites e aplicações geridos pelo Servon."
         actions={can("projects.create") ? <Button variant="primary" icon={<Plus className="h-4 w-4" />} onClick={() => setCreating(true)}>Novo projeto</Button> : undefined} />
       <Card className="mt-5 p-5">
         <div className="mb-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-[1fr_repeat(3,170px)]">

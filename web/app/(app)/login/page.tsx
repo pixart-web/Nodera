@@ -65,7 +65,7 @@ export default function LoginPage() {
       if (err instanceof ApiError) {
         setError(err.message);
       } else {
-        setError("Something went wrong. Is the Nodera API running?");
+        setError("Something went wrong. Is the API running?");
       }
     } finally {
       setBusy(false);
