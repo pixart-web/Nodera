@@ -136,14 +136,14 @@ func capabilityReport(mode, backupDest string, set providers.Set) map[string]str
 		backups = "offsite"
 	}
 	return map[string]string{
-		"containers":   state(set.Containers != nil, ""),
+		"containers":   state(set.Containers != nil, func() string { if mode == "agent" { return "agent" }; return "" }()),
 		"filesystem":   state(set.FS != nil, "local"),
-		"database":     state(set.DB != nil, ""),
+		"database":     state(set.DB != nil, func() string { if mode == "agent" { return "agent" }; return "" }()),
 		"dns":          state(set.DNS != nil, "local_dev"),
 		"certificates": state(set.Certs != nil, "local_dev"),
 		"backups":      backups,
 		"monitoring":   state(set.Monitoring != nil, "local"),
-		"git":          state(set.Git != nil, ""),
+		"git":          state(set.Git != nil, "real"),
 		"nodes":        state(set.Nodes != nil, ""),
 	}
 }
