@@ -61,6 +61,7 @@ type apiDeps struct {
 	platform           *platformauth.Service
 	nodeagent          *nodeagent.Service
 	projects           *projects.Service
+	discovery          *projects.DiscoveryService
 	backups            *backups.Service
 	network            *network.Service
 	deployments        *deployments.Service

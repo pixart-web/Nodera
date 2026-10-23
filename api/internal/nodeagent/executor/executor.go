@@ -112,6 +112,12 @@ func (e *Executor) Execute(ctx context.Context, cmd protocol.Command) (json.RawM
 		}
 		info, found, err := e.P.Containers.Inspect(ctx, p.Name)
 		return marshal(map[string]any{"container": info, "found": found}, err)
+	case "docker.list":
+		if err := need(e.P.Containers != nil, "container"); err != nil {
+			return nil, err
+		}
+		items, err := e.P.Containers.List(ctx, map[string]string{})
+		return marshal(map[string]any{"containers": items}, err)
 	case "docker.logs":
 		if err := need(e.P.Containers != nil, "container"); err != nil {
 			return nil, err

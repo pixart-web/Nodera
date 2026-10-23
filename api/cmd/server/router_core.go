@@ -77,6 +77,8 @@ func (d apiDeps) mountCore(r chi.Router) {
 	r.Delete("/clients/{id}", d.handleDeleteClient)
 
 	r.Get("/projects", d.handleListProjects)
+	r.Get("/projects/discovery", d.handleDiscoverProjects)
+	r.Post("/projects/adopt", d.handleAdoptProject)
 	r.Post("/projects", d.handleCreateProject)
 	r.Get("/projects/{id}", d.handleGetProject)
 	r.Put("/projects/{id}", d.handleUpdateProject)
@@ -154,6 +156,28 @@ func (d apiDeps) handleDeleteClient(w http.ResponseWriter, r *http.Request) {
 }
 
 // ---- projects ----
+
+func (d apiDeps) handleDiscoverProjects(w http.ResponseWriter, r *http.Request) {
+	if d.discovery == nil || d.prov.Containers == nil {
+		httpserver.WriteError(w, r, apierr.Validation("container discovery is not configured"))
+		return
+	}
+	items, err := d.discovery.Discover(r.Context(), mustAuthContext(r), d.prov.Containers)
+	reply(w, r, http.StatusOK, map[string]any{"items": items}, err)
+}
+
+func (d apiDeps) handleAdoptProject(w http.ResponseWriter, r *http.Request) {
+	if d.discovery == nil || d.prov.Containers == nil {
+		httpserver.WriteError(w, r, apierr.Validation("container adoption is not configured"))
+		return
+	}
+	var in projects.AdoptInput
+	if !decodeJSON(w, r, &in) {
+		return
+	}
+	p, err := d.discovery.Adopt(r.Context(), mustAuthContext(r), in, d.prov.Containers)
+	reply(w, r, http.StatusCreated, p, err)
+}
 
 func (d apiDeps) handleListProjects(w http.ResponseWriter, r *http.Request) {
 	p := httpserver.ParsePagination(r)

@@ -235,6 +235,7 @@ func run() error {
 		log.Warn("NODERA_PROVIDER_MODE=mock: infrastructure is SIMULATED; nothing here touches real containers, databases or DNS")
 	}
 	projectsSvc := projects.New(pool, auditSvc)
+	discoverySvc := projects.NewDiscovery(pool, auditSvc)
 	opsEngine := ops.New(pool, auditSvc)
 	provisioning.Register(opsEngine, provisioning.Deps{
 		Pool: pool, Projects: projectsSvc, Secrets: secretsSvc, Providers: prov,
@@ -312,6 +313,7 @@ func run() error {
 		platform:           platformSvc,
 		nodeagent:          nodeAgentSvc,
 		projects:           projectsSvc,
+		discovery:          discoverySvc,
 		ops:                opsEngine,
 		backups:            backupsSvc,
 		network:            networkSvc,

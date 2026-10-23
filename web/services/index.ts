@@ -48,6 +48,8 @@ export const projectsService = {
   wpHealth: (id: string) => api.get<ApiWordPressHealth>(`${V1}/projects/${id}/wordpress/health`),
   wpClone: (id: string, b: { name: string; domain?: string }) => api.post<{ job_id: string; created: boolean }>(`${V1}/projects/${id}/wordpress/clone`, b),
   wpUpdate: (id: string, image_tag: string) => api.post<{ job_id: string; created: boolean }>(`${V1}/projects/${id}/wordpress/update`, { image_tag }),
+  discover: () => api.get<{ items: Array<{ container_name: string; image: string; state: string; kind: string; name: string; domains?: string[]; compose_project?: string; adopted: boolean; project_id?: string }> }>(`${V1}/projects/discovery`).then((r) => r.items),
+  adopt: (container_name: string, node_id?: string) => api.post<ApiProject>(`${V1}/projects/adopt`, { container_name, node_id: node_id || null }),
 };
 
 export const clientsService = {

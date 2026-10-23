@@ -86,8 +86,19 @@ func (c *containers) Inspect(ctx context.Context, n string) (providers.Container
 	err := c.cl().call(ctx, "docker.inspect", map[string]string{"name": n}, &out)
 	return out.Container, out.Found, err
 }
-func (c *containers) List(context.Context, map[string]string) ([]providers.ContainerInfo, error) {
-	return nil, errors.New("listing containers is not part of the agent allowlist")
+func (c *containers) List(ctx context.Context, labels map[string]string) ([]providers.ContainerInfo, error) {
+	var out struct {
+		Containers []providers.ContainerInfo `json:"containers"`
+	}
+	if labels == nil {
+		labels = map[string]string{}
+	}
+	returnOut := make(map[string]string, len(labels))
+	for k, v := range labels {
+		returnOut[k] = v
+	}
+	err := c.cl().call(ctx, "docker.list", map[string]any{"labels": returnOut}, &out)
+	return out.Containers, err
 }
 func (c *containers) Logs(ctx context.Context, n string, tail int) ([]string, error) {
 	var out struct {
@@ -244,8 +255,15 @@ func (c *localContainers) Inspect(ctx context.Context, n string) (providers.Cont
 	err := c.nc().call(ctx, "docker.inspect", map[string]string{"name": n}, &out)
 	return out.Container, out.Found, err
 }
-func (c *localContainers) List(context.Context, map[string]string) ([]providers.ContainerInfo, error) {
-	return nil, errors.New("listing containers is not part of the agent allowlist")
+func (c *localContainers) List(ctx context.Context, labels map[string]string) ([]providers.ContainerInfo, error) {
+	var out struct {
+		Containers []providers.ContainerInfo `json:"containers"`
+	}
+	if labels == nil {
+		labels = map[string]string{}
+	}
+	err := c.nc().call(ctx, "docker.list", map[string]any{"labels": labels}, &out)
+	return out.Containers, err
 }
 func (c *localContainers) Logs(ctx context.Context, n string, tail int) ([]string, error) {
 	var out struct {

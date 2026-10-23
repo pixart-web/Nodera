@@ -3,7 +3,7 @@
 import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Box, Plus } from "lucide-react";
+import { Box, Plus, Radar } from "lucide-react";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
@@ -34,6 +34,8 @@ function ProjectsInner() {
   const [creating, setCreating] = useState(false);
   const [form, setForm] = useState({ name: "", kind: "wordpress", client_id: "", image: "", domain: "" });
   const [del, setDel] = useState<Project | null>(null);
+  const [discovered, setDiscovered] = useState<Array<{ container_name: string; image: string; state: string; kind: string; name: string; domains?: string[]; adopted: boolean }>>([]);
+  const [discovering, setDiscovering] = useState(false);
 
   useEffect(() => {
     const n = params.get("new");
@@ -68,11 +70,35 @@ function ProjectsInner() {
     reload();
   }
 
+  async function discover() {
+    setDiscovering(true);
+    try { setDiscovered(await projectsService.discover()); }
+    catch (e) { toast.push("error", e instanceof Error ? e.message : "Falha ao descobrir infraestrutura."); }
+    finally { setDiscovering(false); }
+  }
+
+  async function adopt(container: string) {
+    try { await projectsService.adopt(container); toast.push("success", "Recurso adotado pelo NODERA."); setDiscovered((items) => items.map((x) => x.container_name === container ? { ...x, adopted: true } : x)); reload(); }
+    catch (e) { toast.push("error", e instanceof Error ? e.message : "Falha ao adotar recurso."); }
+  }
+
   const statuses = ["active", "provisioning", "failed", "degraded", "maintenance"];
   return (
     <div>
       <PageHeader title="Projetos" description="Todos os sites e aplicações geridos pelo Servon."
         actions={can("projects.create") ? <Button variant="primary" icon={<Plus className="h-4 w-4" />} onClick={() => setCreating(true)}>Novo projeto</Button> : undefined} />
+      <Card className="mt-5 p-5">
+        <div className="mb-4 flex items-center justify-between gap-3">
+          <div><h2 className="font-semibold">Descobrir infraestrutura</h2><p className="text-sm text-nd-muted">Encontra containers e sites existentes neste node sem os recriar.</p></div>
+          <Button variant="secondary" icon={<Radar className="h-4 w-4" />} onClick={() => void discover()} disabled={discovering}>{discovering ? "A descobrir…" : "Descobrir agora"}</Button>
+        </div>
+        {discovered.length > 0 && <div className="space-y-2 border-t border-nd-border pt-4">
+          {discovered.map((x) => <div key={x.container_name} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-nd-border p-3">
+            <div><div className="font-medium">{x.name}</div><div className="text-xs text-nd-muted">{x.kind === "wordpress" ? "WordPress" : "Aplicação"} · {x.container_name} · {x.state}{x.domains?.length ? " · " + x.domains.join(", ") : ""}</div></div>
+            {x.adopted ? <span className="text-sm text-nd-muted">Já adotado</span> : <Button size="sm" variant="primary" onClick={() => void adopt(x.container_name)}>Adotar</Button>}
+          </div>)}
+        </div>}
+      </Card>
       <Card className="mt-5 p-5">
         <div className="mb-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-[1fr_repeat(3,170px)]">
           <SearchInput aria-label="Pesquisar projetos" placeholder="Pesquisar por nome ou slug…" value={q} onChange={(e) => setQ(e.target.value)} />

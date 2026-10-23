@@ -164,6 +164,7 @@ var Allowed = map[string]func(p map[string]any) error{
 	"docker.restart":    needMutableName,
 	"docker.remove":     needMutableName,
 	"docker.inspect":    needName,
+	"docker.list":       func(map[string]any) error { return nil },
 	"docker.logs":       needName,
 	"database.ensure":   validDBEnsure,
 	"database.drop":     validDBDrop,
