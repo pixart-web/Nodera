@@ -155,6 +155,7 @@ services:
       NODERA_REDIS_URL_FILE: /run/secrets/redis-url
       NODERA_SECRETS_ENCRYPTION_KEY_FILE: /run/secrets/secrets-encryption-key
       NODERA_AGENT_SIGNING_KEY_FILE: /run/secrets/agent-signing-key
+      NODERA_GITHUB_TOKEN_FILE: /run/secrets/github-token
       NODERA_PLATFORM_BOOTSTRAP_ADMIN_EMAIL: ${NODERA_PLATFORM_BOOTSTRAP_ADMIN_EMAIL:-}
       # No Docker socket in this container: containers and MariaDB go through the agent.
       NODERA_PROVIDER_MODE: agent
@@ -179,6 +180,7 @@ services:
       - ${NODERA_SECRETS_DIR:-/etc/nodera/secrets}/redis-url:/run/secrets/redis-url:ro
       - ${NODERA_SECRETS_DIR:-/etc/nodera/secrets}/secrets-encryption-key:/run/secrets/secrets-encryption-key:ro
       - ${NODERA_SECRETS_DIR:-/etc/nodera/secrets}/agent-signing-key:/run/secrets/agent-signing-key:ro
+      - ${NODERA_SECRETS_DIR:-/etc/nodera/secrets}/github-token:/run/secrets/github-token:ro
       - ${NODERA_SECRETS_DIR:-/etc/nodera/secrets}/backup-sftp-key:/run/secrets/backup-sftp-key:ro
     tmpfs: [/tmp]
     group_add: ["${NODERA_SECRETS_GID:-10100}"]

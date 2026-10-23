@@ -14,6 +14,7 @@ import (
 	"github.com/nodera/nodera/internal/platform/netpolicy"
 	"github.com/nodera/nodera/internal/providers"
 	"github.com/nodera/nodera/internal/providers/docker"
+	"github.com/nodera/nodera/internal/providers/github"
 	"github.com/nodera/nodera/internal/providers/local"
 	"github.com/nodera/nodera/internal/providers/mariadb"
 	"github.com/nodera/nodera/internal/providers/mock"
@@ -51,6 +52,8 @@ func buildProviders(cfg config.Config, agents *nodeagent.Service) (providers.Set
 				set.DB = db
 			}
 		}
+		// GitHub's REST API supports public repositories without credentials; a token is optional for public access and enables private repositories when configured.
+		set.Git = github.New(cfg.Runtime.GitHubToken)
 		if cfg.Backup.Destination == "sftp" {
 			store, err := sftpStore(cfg.Backup.SFTP)
 			if err != nil {

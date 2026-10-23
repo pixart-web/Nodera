@@ -247,6 +247,9 @@ func run() error {
 	deploymentsSvc := deployments.New(pool, auditSvc, projectsSvc, prov)
 	deploymentsSvc.Register(opsEngine)
 	migrationsSvc := sitemig.New(pool, auditSvc, projectsSvc, backupsSvc, secretsSvc, prov)
+	migrationsSvc.RegisterConnector("sftp", sitemig.SFTPConnector{})
+	migrationsSvc.RegisterConnector("ssh", sitemig.SSHConnector{})
+	migrationsSvc.RegisterConnector("cpanel", sitemig.CPanelConnector{})
 	migrationsSvc.Register(opsEngine)
 	wordpressSvc := wordpress.New(pool, projectsSvc, backupsSvc, provisioning.Deps{
 		Pool: pool, Projects: projectsSvc, Secrets: secretsSvc, Providers: prov,

@@ -125,6 +125,8 @@ type OpenAIConfig struct {
 
 // RuntimeConfig selects how infrastructure providers are backed.
 type RuntimeConfig struct {
+	// GitHubToken authenticates GitHub repository operations. Prefer *_FILE in production via SecretFromEnv.
+	GitHubToken string
 	// ProviderMode: "local" (default; real local filesystem/backups/certs/DNS
 	// simulation, no container/database/git runtime), "docker" (local + Docker
 	// CLI containers) or "mock" (everything in-memory, development/demo only —
@@ -245,6 +247,7 @@ func Load() (Config, error) {
 			ProviderMode:            getEnvDefault("NODERA_PROVIDER_MODE", "local"),
 			DataDir:                 getEnvDefault("NODERA_DATA_DIR", "./data"),
 			DockerBin:               getEnvDefault("NODERA_DOCKER_BIN", "docker"),
+			GitHubToken:             secret("NODERA_GITHUB_TOKEN"),
 			DockerNetwork:           os.Getenv("NODERA_DOCKER_NETWORK"),
 			BaseDomain:              os.Getenv("NODERA_BASE_DOMAIN"),
 			MariaDBContainer:        os.Getenv("NODERA_MARIADB_CONTAINER"),
