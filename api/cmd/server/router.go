@@ -144,6 +144,7 @@ func newRouter(d apiDeps) http.Handler {
 			r.Get("/platform/permissions", d.handlePlatformListCatalog)
 			r.Get("/platform/my-permissions", d.handlePlatformListMine)
 			r.Get("/platform/admins", d.handlePlatformListGrants)
+			r.Delete("/platform/organizations/{id}", d.handlePlatformDeleteOrganization)
 			r.Get("/platform/audit", d.handlePlatformListAudit)
 			r.Get("/platform/secrets", d.handlePlatformListSecrets)
 			r.Put("/platform/secrets/{key}", d.handlePlatformSetSecret)
@@ -862,6 +863,24 @@ func (d apiDeps) handlePlatformListMine(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	httpserver.WriteJSON(w, http.StatusOK, list)
+}
+
+func (d apiDeps) handlePlatformDeleteOrganization(w http.ResponseWriter, r *http.Request) {
+	ac := platformAuthContext(r)
+	if err := d.platform.Require(r.Context(), ac, platformauth.PermManagePlatformAdmins); err != nil {
+		httpserver.WriteError(w, r, err)
+		return
+	}
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		httpserver.WriteError(w, r, apierr.Validation("invalid organization id"))
+		return
+	}
+	if err := d.tenancy.DeleteOrganization(r.Context(), ac, id); err != nil {
+		httpserver.WriteError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (d apiDeps) handlePlatformListAudit(w http.ResponseWriter, r *http.Request) {

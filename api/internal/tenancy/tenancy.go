@@ -335,6 +335,42 @@ func (s *Service) removeMember(ctx context.Context, ac authctx.AuthContext, user
 	return nil
 }
 
+// DeleteOrganization permanently removes an organization and every resource
+// owned by it through the schema's ON DELETE CASCADE relationships. It is
+// intentionally platform-admin-only; the HTTP layer enforces the platform
+// permission before calling this method. The operation is atomic.
+func (s *Service) DeleteOrganization(ctx context.Context, ac authctx.AuthContext, orgID uuid.UUID) error {
+	if orgID == uuid.Nil {
+		return apierr.Validation("organization id is required")
+	}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return apierr.Wrap(apierr.CodeInternal, "failed to start organization deletion", err)
+	}
+	defer tx.Rollback(ctx)
+
+	var name string
+	if err := tx.QueryRow(ctx, "SELECT name FROM organizations WHERE id=$1 FOR UPDATE", orgID).Scan(&name); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return apierr.NotFound("organization")
+		}
+		return apierr.Wrap(apierr.CodeInternal, "failed to load organization", err)
+	}
+	if _, err := tx.Exec(ctx, "DELETE FROM organizations WHERE id=$1", orgID); err != nil {
+		return apierr.Wrap(apierr.CodeInternal, "failed to delete organization", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return apierr.Wrap(apierr.CodeInternal, "failed to commit organization deletion", err)
+	}
+	if err := s.audit.Record(ctx, ac, audit.Entry{
+		Action: "tenancy.organization.deleted", ResourceType: "organization", ResourceID: orgID.String(),
+		Success: true, ResultingState: map[string]any{"name": name},
+	}); err != nil {
+		logger.FromContext(ctx).Error("failed to write audit entry", "error", err)
+	}
+	return nil
+}
+
 // AddedMember is the minimal shape AddMember returns — deliberately not
 // identity.User verbatim (this package doesn't own user records, ADR-002;
 // it only reports who was just added, not the full user record).
