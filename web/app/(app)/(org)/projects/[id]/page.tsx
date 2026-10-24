@@ -2,7 +2,8 @@
 
 import { use, useState } from "react";
 import Link from "next/link";
-import { Activity, AppWindow, ArrowLeft, Database, ExternalLink, Globe, Layers, LayoutGrid, LockKeyhole, KeyRound, Rocket, ScrollText, Settings, Cloud, Siren, Play } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { Activity, AppWindow, ArrowLeft, Database, ExternalLink, Globe, Layers, LayoutGrid, LockKeyhole, KeyRound, Rocket, ScrollText, Settings, Cloud, Siren, Play, Trash2 } from "lucide-react";
 import { Breadcrumb } from "@/components/ui/Breadcrumb";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Button } from "@/components/ui/Button";
@@ -52,6 +53,7 @@ const Row = ({ children }: { children: React.ReactNode }) => <li className="flex
 export default function ProjectDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const { can } = usePlatform();
+  const router = useRouter();
   const ops = useOperations();
   const toast = useToast();
   const [tab, setTab] = useState("overview");
@@ -59,6 +61,8 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
   const overview = useAsync(() => projectsService.overview(id), [id]);
   const [edit, setEdit] = useState<{ name: string; description: string } | null>(null);
   const [policy, setPolicy] = useState({ schedule: "daily", type: "full", days: "30" });
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleteConfirm, setDeleteConfirm] = useState("");
 
   if (project.loading) return <LoadingState rows={3} />;
   if (project.error) return <ErrorState message={project.error} onRetry={project.reload} />;
@@ -111,10 +115,14 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
         <Section title="Definições do projeto">
           <dl className="grid gap-3 text-sm sm:grid-cols-2"><div><dt className="text-nd-muted">Slug</dt><dd className="font-mono">{raw.slug}</dd></div><div><dt className="text-nd-muted">Tipo</dt><dd>{raw.kind}</dd></div><div><dt className="text-nd-muted">Criado</dt><dd>{dateTime(raw.created_at)}</dd></div><div><dt className="text-nd-muted">Descrição</dt><dd>{raw.description || "—"}</dd></div></dl>
           {can("projects.update") && <Button className="mt-4" onClick={() => setEdit({ name: raw.name, description: raw.description })}>Editar</Button>}
-          {can("projects.delete") && <p className="mt-4 text-xs text-nd-faint">Para eliminar o projeto usa a lista de projetos: a eliminação exige aprovação.</p>}
+          {can("projects.delete") && <div className="mt-8 rounded-nd border border-red-500/30 bg-red-500/5 p-4"><div className="flex items-start gap-3"><Trash2 className="mt-0.5 h-5 w-5 text-red-400" /><div className="flex-1"><h3 className="font-semibold text-red-300">Zona perigosa</h3><p className="mt-1 text-sm text-nd-muted">Elimina definitivamente este projeto e os recursos geridos pelo NODERA: containers, bases de dados, ficheiros persistentes, secrets e registos do projeto. A operação requer aprovação.</p><Button className="mt-4" variant="danger" onClick={() => { setDeleteConfirm(""); setDeleteOpen(true); }}>Eliminar definitivamente</Button></div></div></div>}
         </Section>
       </TabPanel>
 
+      <FormModal open={deleteOpen} onClose={() => setDeleteOpen(false)} title="Eliminar definitivamente o projeto" submitLabel="Eliminar definitivamente" disabled={deleteConfirm !== raw.name} onSubmit={async () => { await ops.submit(`Eliminar definitivamente ${raw.name}`, async () => (await projectsService.remove(id)) as never, () => { toast.push("success", "A eliminação foi submetida para aprovação."); setDeleteOpen(false); router.push("/projects"); }); }}>
+        <Alert tone="error" title="Esta operação é irreversível">Todos os recursos que o NODERA conseguir identificar para este projeto serão removidos. Para continuar, escreve exatamente <strong>{raw.name}</strong>.</Alert>
+        <Field label={`Escreve ${raw.name}`}>{(i) => <Input id={i} value={deleteConfirm} onChange={(e) => setDeleteConfirm(e.target.value)} placeholder={raw.name} autoComplete="off" />}</Field>
+      </FormModal>
       <FormModal open={!!edit} onClose={() => setEdit(null)} title="Editar projeto" submitLabel="Guardar" disabled={!edit?.name.trim()}
         onSubmit={async () => { await projectsService.update(id, { name: edit!.name, description: edit!.description }); toast.push("success", "Projeto atualizado."); refreshAll(); }}>
         <Field label="Nome">{(i) => <Input id={i} value={edit?.name ?? ""} onChange={(e) => setEdit({ ...edit!, name: e.target.value })} required />}</Field>

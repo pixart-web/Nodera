@@ -1,11 +1,8 @@
 import type { Metadata, Viewport } from "next";
-import { JetBrains_Mono, Manrope } from "next/font/google";
 import { siteConfig, siteMeta } from "@/lib/site-config";
 import "@/styles/nodera-tokens.css";
 import "./site.css";
 
-const manrope = Manrope({ subsets: ["latin"], variable: "--font-manrope", display: "swap" });
-const mono = JetBrains_Mono({ subsets: ["latin"], weight: ["400", "500"], variable: "--font-mono", display: "swap" });
 
 export const metadata: Metadata = {
   // No final domain yet (lib/site-config.ts): canonical and absolute OG URLs
@@ -35,7 +32,7 @@ export const viewport: Viewport = { themeColor: "#05070A", colorScheme: "dark" }
 
 export default function MarketingLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={`${manrope.variable} ${mono.variable}`} suppressHydrationWarning>
+    <html lang="en" suppressHydrationWarning>
       <head>
         {/* Lets CSS hide pre-reveal states only when JS will reveal them. */}
         <script dangerouslySetInnerHTML={{ __html: "document.documentElement.classList.add('js')" }} />

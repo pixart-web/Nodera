@@ -403,9 +403,24 @@ func (o *deleteProject) Steps() []ops.Step {
 				r.Log("warn", "no container provider configured; skipping", nil)
 				return nil
 			}
-			_, c, _, _, _ := pr.names()
-			if err := o.d.Providers.Containers.Remove(ctx, c); err != nil && !errors.Is(err, providers.ErrNotFound) {
-				return err
+			// Adopted projects may not use Nodera's deterministic container name.
+			// Prefer the actual container names recorded during discovery/adoption,
+			// then fall back to the deterministic name used by newly provisioned projects.
+			var names []string
+			var configured *string
+			var cfg map[string]any
+			_ = o.d.Pool.QueryRow(ctx, "SELECT config FROM projects WHERE organization_id=$1 AND id=$2", o.org, o.project).Scan(&cfg)
+			if v, ok := cfg["container_name"].(string); ok && v != "" { configured = &v }
+			if configured != nil { names = append(names, *configured) }
+			rows, err := o.d.Pool.Query(ctx, "SELECT name FROM applications WHERE organization_id=$1 AND project_id=$2", o.org, o.project)
+			if err != nil { return err }
+			for rows.Next() { var n string; if err := rows.Scan(&n); err != nil { rows.Close(); return err }; if n != "" { names = append(names, n) } }
+			rows.Close()
+			_, fallback, _, _, _ := pr.names(); names = append(names, fallback)
+			seen := map[string]bool{}
+			for _, c := range names {
+				if seen[c] { continue }; seen[c] = true
+				if err := o.d.Providers.Containers.Remove(ctx, c); err != nil && !errors.Is(err, providers.ErrNotFound) { return err }
 			}
 			return nil
 		}},
