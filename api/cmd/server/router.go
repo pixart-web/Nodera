@@ -123,6 +123,8 @@ func newRouter(d apiDeps) http.Handler {
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Post("/auth/signup", d.handleSignUp)
 		r.Post("/auth/login", d.handleLogin)
+		r.Post("/auth/forgot-password", d.handleForgotPassword)
+		r.Post("/auth/reset-password", d.handleResetPassword)
 
 		r.Group(func(r chi.Router) {
 			r.Use(d.requireSession)
@@ -411,6 +413,20 @@ func (d apiDeps) handleLogin(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (d apiDeps) handleForgotPassword(w http.ResponseWriter, r *http.Request) {
+  var body struct { Email string `json:"email"` }
+  if !decodeJSON(w, r, &body) { return }
+  if d.loginRate != nil && !d.loginRate.Allow(clientIP(r)) { httpserver.WriteError(w, r, apierr.New(apierr.CodeRateLimited, "too many requests, try again shortly")); return }
+  if _, err := d.identity.CreatePasswordResetToken(r.Context(), body.Email); err != nil { httpserver.WriteError(w, r, err); return }
+  httpserver.WriteJSON(w, http.StatusAccepted, map[string]any{"message":"If an account exists for that email, a password reset message will be sent."})
+}
+
+func (d apiDeps) handleResetPassword(w http.ResponseWriter, r *http.Request) {
+  var body struct { Token string `json:"token"`; Password string `json:"password"` }
+  if !decodeJSON(w, r, &body) { return }
+  if err := d.identity.ResetPassword(r.Context(), body.Token, body.Password); err != nil { httpserver.WriteError(w, r, err); return }
+  httpserver.WriteJSON(w, http.StatusOK, map[string]any{"message":"Password reset successfully."})
+}
 func (d apiDeps) handleLogout(w http.ResponseWriter, r *http.Request) {
 	token := sessionTokenFromRequest(r)
 	if err := d.identity.Logout(r.Context(), token); err != nil {

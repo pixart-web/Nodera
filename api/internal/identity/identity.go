@@ -95,6 +95,39 @@ var ErrEmailTaken = apierr.Conflict("an account with this email already exists")
 var ErrInvalidCredentials = apierr.Unauthenticated("invalid email or password")
 var ErrSessionInvalid = apierr.Unauthenticated("session is invalid or expired")
 
+func (s *Service) CreatePasswordResetToken(ctx context.Context, email string) (string, error) {
+	var userID uuid.UUID
+	if err := s.pool.QueryRow(ctx, "SELECT id FROM users WHERE email=LOWER($1) AND status='active'", email).Scan(&userID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) { return "", nil }
+		return "", apierr.Wrap(apierr.CodeInternal, "failed to find account", err)
+	}
+	raw := make([]byte, 32)
+	if _, err := rand.Read(raw); err != nil { return "", apierr.Wrap(apierr.CodeInternal, "failed to generate reset token", err) }
+	token := hex.EncodeToString(raw)
+	d := sha256.Sum256([]byte(token))
+	if _, err := s.pool.Exec(ctx, "UPDATE password_reset_tokens SET used_at=now() WHERE user_id=$1 AND used_at IS NULL", userID); err != nil { return "", err }
+	if _, err := s.pool.Exec(ctx, "INSERT INTO password_reset_tokens(user_id,token_hash,expires_at) VALUES($1,$2,now()+interval '30 minutes')", userID, hex.EncodeToString(d[:])); err != nil { return "", err }
+	return token, nil
+}
+
+func (s *Service) ResetPassword(ctx context.Context, token, newPassword string) error {
+	if err := validatePassword(newPassword); err != nil { return err }
+	d := sha256.Sum256([]byte(token))
+	tx, err := s.pool.Begin(ctx); if err != nil { return err }; defer tx.Rollback(ctx)
+	var userID uuid.UUID
+	if err := tx.QueryRow(ctx, "SELECT user_id FROM password_reset_tokens WHERE token_hash=$1 AND used_at IS NULL AND expires_at>now() FOR UPDATE", hex.EncodeToString(d[:])).Scan(&userID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) { return apierr.Unauthenticated("reset link is invalid or expired") }
+		return err
+	}
+	h, err := hashPassword(newPassword); if err != nil { return err }
+	if _, err = tx.Exec(ctx, "UPDATE user_password_credentials SET password_hash=$2, updated_at=now() WHERE user_id=$1", userID, h); err != nil { return err }
+	if _, err = tx.Exec(ctx, "UPDATE sessions SET revoked_at=now() WHERE user_id=$1 AND revoked_at IS NULL", userID); err != nil { return err }
+	if _, err = tx.Exec(ctx, "UPDATE password_reset_tokens SET used_at=now() WHERE token_hash=$1", hex.EncodeToString(d[:])); err != nil { return err }
+	if err = tx.Commit(ctx); err != nil { return err }
+	s.recordIdentityAudit(ctx,userID,"identity.user.password_reset",true,nil)
+	return nil
+}
+
 // FindByEmail looks up an existing user by email. It never creates an
 // account — that's SignUp's job — so it's safe to expose to other domains
 // (internal/tenancy.AddMember uses it to resolve who's being added to an

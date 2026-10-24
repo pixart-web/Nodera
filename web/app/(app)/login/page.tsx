@@ -27,11 +27,21 @@ export default function LoginPage() {
   const [displayName, setDisplayName] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [forgot, setForgot] = useState(false);
+  const [forgotEmail, setForgotEmail] = useState("");
+  const [forgotSent, setForgotSent] = useState(false);
 
   // The marketing site's "Start with Nodera" links here with ?mode=signup.
   useEffect(() => {
     if (new URLSearchParams(window.location.search).get("mode") === "signup") setMode("signup");
   }, []);
+
+  async function handleForgot(e: React.FormEvent) {
+    e.preventDefault(); setError(null); setBusy(true);
+    try { await api.postPublic("/api/v1/auth/forgot-password", { email: forgotEmail }); setForgotSent(true); }
+    catch (err) { setError(err instanceof ApiError ? err.message : "Não foi possível processar o pedido."); }
+    finally { setBusy(false); }
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -102,7 +112,17 @@ export default function LoginPage() {
             </button>
           </div>
 
-          <form onSubmit={handleSubmit} className="space-y-4">
+          {forgot ? (
+            <form onSubmit={handleForgot} className="space-y-4">
+              <div><h2 className="text-lg font-semibold">Recuperar password</h2><p className="mt-1 text-sm text-nd-muted">Indica o teu email. Se existir uma conta, receberás instruções para redefinir a password.</p></div>
+              {forgotSent ? <div className="rounded-md border border-nd-border bg-nd-elevated px-3 py-3 text-sm text-nd-muted">Pedido recebido. Verifica o teu email.</div> : <>
+                <div><label className="label" htmlFor="forgotEmail">Email</label><input id="forgotEmail" type="email" className="input" value={forgotEmail} onChange={(e) => setForgotEmail(e.target.value)} required /></div>
+                {error && <div className="rounded-md border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger">{error}</div>}
+                <button type="submit" className="btn-primary w-full" disabled={busy}>{busy ? "A enviar…" : "Enviar instruções"}</button>
+              </>}
+              <button type="button" className="w-full text-sm text-nd-muted hover:text-nd-text" onClick={() => { setForgot(false); setForgotSent(false); setError(null); }}>Voltar ao login</button>
+            </form>
+          ) : <form onSubmit={handleSubmit} className="space-y-4">
             {mode === "signup" && (
               <div>
                 <label className="label" htmlFor="displayName">
@@ -159,7 +179,8 @@ export default function LoginPage() {
             <button type="submit" className="btn-primary w-full" disabled={busy}>
               {busy ? "Working…" : mode === "login" ? "Sign in" : "Create account"}
             </button>
-          </form>
+          </form>}
+          {!forgot && mode === "login" && <button type="button" className="mt-4 w-full text-sm text-nd-muted hover:text-nd-text" onClick={() => setForgot(true)}>Esqueci-me da password</button>}
         </div>
       </div>
     </div>
