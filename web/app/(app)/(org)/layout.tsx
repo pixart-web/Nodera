@@ -3,7 +3,9 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { AppShell } from "@/components/shell/AppShell";
-import { getCurrentOrgId, getStoredUser } from "@/lib/session";
+import { getCurrentOrgId, getStoredUser, setCurrentOrgId } from "@/lib/session";
+import { api } from "@/lib/api";
+import type { Organization } from "@/lib/types";
 
 export default function OrgLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
@@ -11,7 +13,14 @@ export default function OrgLayout({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (!getStoredUser()) { router.replace("/login"); return; }
-    if (!getCurrentOrgId()) { router.replace("/orgs"); return; }
+    const current = getCurrentOrgId();
+    if (!current) {
+      api.get<Organization[]>("/api/v1/organizations", false).then((orgs) => {
+        const preferred = orgs.find((o) => o.slug === "pixart" || o.name.toLowerCase() === "pixart") ?? (orgs.length === 1 ? orgs[0] : null);
+        if (preferred) { setCurrentOrgId(preferred.id); setReady(true); } else router.replace("/orgs");
+      }).catch(() => router.replace("/orgs"));
+      return;
+    }
     setReady(true);
   }, [router]);
 
